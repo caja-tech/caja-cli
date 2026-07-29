@@ -1,0 +1,59 @@
+[tools]
+go = "1.25.5"
+
+[env]
+BINARY_NAME = "cajac"
+BIN_DIR = "bin"
+CMD_PATH = "./cmd/cli"
+
+# Go tools
+[tasks.fmt]
+description = "Format Go source files"
+run = """
+echo "Formatting code..."
+go fmt ./...
+"""
+
+[tasks.build]
+description = "Build the binary to bin/cajac"
+run = """
+echo "Building {{env.BINARY_NAME}}..."
+mkdir -p {{env.BIN_DIR}}
+go build -o {{env.BIN_DIR}}/{{env.BINARY_NAME}} {{env.CMD_PATH}}
+"""
+
+[tasks.test]
+description = "Run tests"
+run = """
+echo "Running tests..."
+go test ./...
+"""
+
+[tasks.test-cover]
+description = "Run tests with coverage output"
+run = """
+echo "Running tests with coverage..."
+go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
+"""
+
+[tasks.clean]
+description = "Remove binary and coverage artifacts"
+run = """
+echo "Cleaning up..."
+rm -rf {{env.BIN_DIR}}
+rm -f coverage.out
+"""
+
+[tasks.lint]
+description = "Run go vet"
+run = """
+echo "Running lint (go vet)..."
+go vet ./...
+"""
+
+[tasks.tidy]
+description = "Tidy go modules"
+run = """
+echo "Tidying go modules..."
+go mod tidy
+"""
