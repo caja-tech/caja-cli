@@ -9,6 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// NewRootCmd constructs and returns the root Cobra command for the cajac CLI.
+// It registers the --file / -f flag that callers use to supply a .caja script
+// path. When executed, the command validates the flag and file extension, reads
+// the script, runs the lexer over it, and either prints any syntax errors or
+// dumps the resulting token stream as a tab-separated table to stdout.
 func NewRootCmd() *cobra.Command {
 	var filePath string
 

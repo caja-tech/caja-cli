@@ -1,3 +1,7 @@
+// Package lexer implements a handwritten lexer (tokenizer) for the Caja
+// financial DSL. It converts raw source-code text into a flat sequence of
+// tokens that can be consumed by a parser. Each token carries its type,
+// literal text, and the source position (line and column) where it was found.
 package lexer
 
 import "fmt"
@@ -5,12 +9,12 @@ import "fmt"
 type TokenType string
 
 const (
-	ILLEGAL TokenType = "ILLEGAL" // Unknown character
-	EOF     TokenType = "EOF"     // End of File
+	ILLEGAL TokenType = "ILLEGAL"
+	EOF     TokenType = "EOF"
 
 	// Identifiers and Literals
-	IDENT  TokenType = "IDENT"  // Variables like: x, y, rate
-	NUMBER TokenType = "NUMBER" // Numbers like: 5, 10, 3.14
+	IDENT  TokenType = "IDENT"
+	NUMBER TokenType = "NUMBER"
 
 	// Operators
 	ASSIGN   TokenType = "ASSIGN"
@@ -31,9 +35,13 @@ type Token struct {
 	Column  int
 }
 
+// Lex tokenizes the entire input string and returns two slices: the ordered
+// sequence of tokens (always terminated by an EOF token) and a list of
+// formatted syntax-error messages for any unrecognized characters encountered
+// during scanning. The caller should check the error slice before using the
+// token slice.
 func Lex(input string) ([]Token, []string) {
-	t := &tokenizer{input: input, line: 1, column: 0}
-	t.readChar()
+	t := newTokenizer(input)
 
 	var tokens []Token
 	for {
@@ -58,6 +66,20 @@ type tokenizer struct {
 	errors       []string // the list of formatted error messages
 }
 
+// newTokenizer creates a tokenizer for the given input string, priming it by
+// reading the first character so that the first call to nextToken is ready to
+// produce a token without any extra setup.
+func newTokenizer(input string) *tokenizer {
+	t := &tokenizer{input: input, line: 1, column: 0}
+	t.readChar()
+
+	return t
+}
+
+// readChar advances the tokenizer by one byte. If the character that was just
+// consumed was a newline, the line counter is incremented and the column counter
+// is reset so that the next character begins at column 1. When the end of the
+// input is reached, ch is set to 0 (NUL) to signal EOF.
 func (t *tokenizer) readChar() {
 	if t.ch == '\n' {
 		t.line++
@@ -74,12 +96,18 @@ func (t *tokenizer) readChar() {
 	t.column++
 }
 
+// skipWhitespace advances past any combination of spaces, tabs, newlines, and
+// carriage-returns, updating line and column tracking along the way.
 func (t *tokenizer) skipWhitespace() {
 	for t.ch == ' ' || t.ch == '\t' || t.ch == '\n' || t.ch == '\r' {
 		t.readChar()
 	}
 }
 
+// readIdentifier consumes the longest sequence of letter or underscore
+// characters starting at the current position and returns it as a string. The
+// tokenizer is left positioned at the first character that does not belong to
+// the identifier.
 func (t *tokenizer) readIdentifier() string {
 	position := t.position
 	for t.isCurrentCharALetter() {
@@ -88,6 +116,9 @@ func (t *tokenizer) readIdentifier() string {
 	return t.input[position:t.position]
 }
 
+// readNumber consumes a sequence of digit characters, optionally containing a
+// single decimal point, and returns it as a string. The tokenizer is left
+// positioned at the first character that does not belong to the number literal.
 func (t *tokenizer) readNumber() string {
 	position := t.position
 	for t.isCurrentCharADigit() || t.ch == '.' {
@@ -96,14 +127,24 @@ func (t *tokenizer) readNumber() string {
 	return t.input[position:t.position]
 }
 
+// isCurrentCharALetter reports whether the current character is an ASCII letter
+// (a–z, A–Z) or an underscore, both of which are valid identifier constituents.
 func (t *tokenizer) isCurrentCharALetter() bool {
 	return 'a' <= t.ch && t.ch <= 'z' || 'A' <= t.ch && t.ch <= 'Z' || t.ch == '_'
 }
 
+// isCurrentCharADigit reports whether the current character is an ASCII decimal
+// digit (0–9).
 func (t *tokenizer) isCurrentCharADigit() bool {
 	return '0' <= t.ch && t.ch <= '9'
 }
 
+// nextToken skips any leading whitespace and then reads the next token from the
+// input. Single-character operators and delimiters are matched via a switch
+// statement; identifiers and numbers are handled by their respective read
+// helpers, which consume the full lexeme before returning. Unrecognized
+// characters produce an ILLEGAL token and append a formatted syntax-error
+// message to the tokenizer's error list.
 func (t *tokenizer) nextToken() Token {
 	var token Token
 	t.skipWhitespace()
