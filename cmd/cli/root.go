@@ -1,6 +1,7 @@
 package main
 
 import (
+	"caja-cli/internal/lexer"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cajac",
 		Short: "A command line tool for a custom financial DSL evaluator",
-		Long:  "cajac parses and evaluates custom financial algorithms from a .caja script file",
+		Long:  "cajac compile, parse and evaluate custom financial algorithms from a .caja script file",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filePath == "" {
 				fmt.Println("Error: You must provide a file path using --file or -f")
@@ -33,7 +34,20 @@ func NewRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to read file '%s': %w", filePath, err)
 			}
 
-			fmt.Println(string(sourceCode))
+			tokens, lexErrors := lexer.Lex(string(sourceCode))
+			if len(lexErrors) > 0 {
+				fmt.Println("Failed to parse script due to syntax errors:")
+				for _, msg := range lexErrors {
+					fmt.Printf(" - %s\n", msg)
+				}
+				return nil
+			}
+
+			fmt.Print("Type\tLiteral\n")
+			for _, token := range tokens {
+				fmt.Printf("%s\t%s\n", token.Type, token.Literal)
+			}
+
 			return nil
 		},
 	}
