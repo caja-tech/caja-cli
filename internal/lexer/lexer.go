@@ -56,21 +56,25 @@ func Lex(input string) ([]Token, []string) {
 	return tokens, t.errors
 }
 
+type errorTracker struct {
+	line   int      // current line number
+	column int      // current column number
+	errors []string // the list of formatted error messages
+}
+
 type tokenizer struct {
-	input        string   // source code input
-	position     int      // current position in input (points to current char)
-	readPosition int      // current reading position in input (after current char)
-	ch           byte     // current char under examination
-	line         int      // current line number
-	column       int      // current column number
-	errors       []string // the list of formatted error messages
+	input        string // source code input
+	position     int    // current position in input (points to current char)
+	readPosition int    // current reading position in input (after current char)
+	ch           byte   // current char under examination
+	errorTracker
 }
 
 // newTokenizer creates a tokenizer for the given input string, priming it by
 // reading the first character so that the first call to nextToken is ready to
 // produce a token without any extra setup.
 func newTokenizer(input string) *tokenizer {
-	t := &tokenizer{input: input, line: 1, column: 0}
+	t := &tokenizer{input: input, errorTracker: errorTracker{line: 1, column: 0}}
 	t.readChar()
 
 	return t
