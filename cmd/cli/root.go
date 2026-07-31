@@ -39,8 +39,8 @@ func NewRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to read file '%s': %w", filePath, err)
 			}
 
-			tknzr := lexer.NewTokenizer(string(sourceCode))
-			tokens, lexErrors := lexer.Lex(tknzr)
+			//tknzr := tokenizer.New()
+			tokens, lexErrors := lexer.Lex(string(sourceCode))
 			if len(lexErrors) > 0 {
 				fmt.Println("Failed to parse script due to syntax errors:")
 				for _, msg := range lexErrors {

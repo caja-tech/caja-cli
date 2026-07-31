@@ -1,11 +1,11 @@
-package lexer
+package tokenizer
 
 import "fmt"
 
-type errorTracker struct {
-	line   int      // current line number
-	column int      // current column number
-	errors []string // the list of formatted error messages
+type ErrorTracker struct {
+	Line   int      // current line number
+	Column int      // current column number
+	Errors []string // the list of formatted error messages
 }
 
 type Tokenizer struct {
@@ -13,14 +13,14 @@ type Tokenizer struct {
 	position     int    // current position in input (points to current char)
 	readPosition int    // current reading position in input (after current char)
 	ch           byte   // current char under examination
-	errorTracker
+	ErrorTracker
 }
 
 // newTokenizer creates a Tokenizer for the given input string, priming it by
 // reading the first character so that the first call to nextToken is ready to
 // produce a token without any extra setup.
-func NewTokenizer(input string) *Tokenizer {
-	t := &Tokenizer{input: input, errorTracker: errorTracker{line: 1, column: 0}}
+func New(input string) *Tokenizer {
+	t := &Tokenizer{input: input, ErrorTracker: ErrorTracker{Line: 1, Column: 0}}
 	t.readChar()
 
 	return t
@@ -36,8 +36,8 @@ func (t *Tokenizer) NextToken() Token {
 	var token Token
 	t.skipWhitespace()
 
-	startLine := t.line
-	startCol := t.column
+	startLine := t.Line
+	startCol := t.Column
 
 	hasReadChar := false
 	foundDecider := false
@@ -55,7 +55,7 @@ func (t *Tokenizer) NextToken() Token {
 
 	if !foundDecider {
 		msg := fmt.Sprintf("Syntax Error at line %d, column %d: unrecognized character '%c'", startLine, startCol, t.ch)
-		t.errors = append(t.errors, msg)
+		t.Errors = append(t.Errors, msg)
 		token = Token{Type: ILLEGAL, Literal: string(t.ch), Line: startLine, Column: startCol}
 	}
 
@@ -71,8 +71,8 @@ func (t *Tokenizer) NextToken() Token {
 // input is reached, ch is set to 0 (NUL) to signal EOF.
 func (t *Tokenizer) readChar() {
 	if t.isCurrentCharANewLine() {
-		t.line++
-		t.column = 0
+		t.Line++
+		t.Column = 0
 	}
 
 	t.ch = 0 // ASCII code for "NUL", representing EOF
@@ -82,7 +82,7 @@ func (t *Tokenizer) readChar() {
 
 	t.position = t.readPosition
 	t.readPosition++
-	t.column++
+	t.Column++
 }
 
 // skipWhitespace advances past any combination of spaces, tabs, newlines, and

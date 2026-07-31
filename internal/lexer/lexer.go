@@ -4,21 +4,25 @@
 // literal text, and the source position (line and column) where it was found.
 package lexer
 
+import "caja-cli/internal/tokenizer"
+
 // Lex tokenizes the entire input string and returns two slices: the ordered
 // sequence of tokens (always terminated by an EOF token) and a list of
 // formatted syntax-error messages for any unrecognized characters encountered
 // during scanning. The caller should check the error slice before using the
 // token slice.
-func Lex(t *Tokenizer) ([]Token, []string) {
-	var tokens []Token
+func Lex(input string) ([]tokenizer.Token, []string) {
+	t := tokenizer.New(input)
+	var tokens []tokenizer.Token
+
 	for {
 		token := t.NextToken()
 		tokens = append(tokens, token)
 
-		if token.Type == EOF {
+		if token.Type == tokenizer.EOF {
 			break
 		}
 	}
 
-	return tokens, t.errors
+	return tokens, t.Errors
 }

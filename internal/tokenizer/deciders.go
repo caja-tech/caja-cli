@@ -1,4 +1,4 @@
-package lexer
+package tokenizer
 
 // tokenDeciderFunc is the signature shared by all token-decision functions.
 // Each function inspects the Tokenizer's current character and returns true

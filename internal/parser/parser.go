@@ -33,3 +33,5 @@ type Parser struct {
 	prefixParseFuncs map[lexer.TokenType]prefixParseFunc
 	infixParseFuncs  map[lexer.TokenType]infixParseFunc
 }
+
+func NewParser() *Parser {}
