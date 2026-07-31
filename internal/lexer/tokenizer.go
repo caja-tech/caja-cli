@@ -39,22 +39,27 @@ func (t *Tokenizer) NextToken() Token {
 	startLine := t.line
 	startCol := t.column
 
-	var i int
-	for index, decider := range tokenDeciders {
-		i = index
-		if isRightDecider, tk := decider(t, startLine, startCol); isRightDecider {
-			token = tk
+	hasReadChar := false
+	foundDecider := false
+	for _, decider := range tokenDeciders {
+		result := decider(t, startLine, startCol)
+		if result.matched {
+			token = result.token
+			hasReadChar = result.hasReadChar
+			foundDecider = true
 			break
 		}
 	}
 
-	if i == len(tokenDeciders) {
+	if !foundDecider {
 		msg := fmt.Sprintf("Syntax Error at line %d, column %d: unrecognized character '%c'", startLine, startCol, t.ch)
 		t.errors = append(t.errors, msg)
 		token = Token{Type: ILLEGAL, Literal: string(t.ch), Line: startLine, Column: startCol}
 	}
 
-	t.readChar()
+	if !hasReadChar {
+		t.readChar()
+	}
 	return token
 }
 
