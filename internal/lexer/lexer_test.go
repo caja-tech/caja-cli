@@ -7,13 +7,10 @@ type testScenario struct {
 	Token
 }
 
-// runTestsOnTokens iterates over a slice of testScenario entries, advancing the
-// tokenizer one step per entry and asserting that the produced token matches the
-// expected Type, Literal, Line, and Column values.
-func runTestsOnTokens(tknzr *tokenizer, tests []testScenario, t *testing.T) {
+func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			token := tknzr.nextToken()
+			token := tknzr.NextToken()
 
 			if token.Type != test.Type {
 				t.Errorf("token type wrong. expected=%q, got=%q", test.Type, token.Type)
@@ -34,11 +31,17 @@ func runTestsOnTokens(tknzr *tokenizer, tests []testScenario, t *testing.T) {
 	}
 }
 
+func lexByInput(input string) ([]Token, []string) {
+	tknzr := NewTokenizer(input)
+	return Lex(tknzr)
+}
+
 // TestBaseScenario verifies that the tokenizer correctly sequences through a basic
 // two-line expression ("rate = 15.5\nrate + 5"), producing the right token types,
 // literals, and accurate line/column positions for each token.
 func TestBaseScenario(t *testing.T) {
 	input := "rate = 15.5\nrate + 5"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
@@ -50,7 +53,6 @@ func TestBaseScenario(t *testing.T) {
 		{"End of file", Token{EOF, "", 2, 9}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -59,6 +61,7 @@ func TestBaseScenario(t *testing.T) {
 // rather than the raw character index from position 0.
 func TestLeadingWhitespace(t *testing.T) {
 	input := "     rate = 15.5"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 6}},
@@ -67,7 +70,6 @@ func TestLeadingWhitespace(t *testing.T) {
 		{"End of file", Token{EOF, "", 1, 17}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -76,6 +78,7 @@ func TestLeadingWhitespace(t *testing.T) {
 // accounts for the whitespace characters that follow.
 func TestTrailingWhitespace(t *testing.T) {
 	input := "rate = 15.5     "
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
@@ -84,7 +87,6 @@ func TestTrailingWhitespace(t *testing.T) {
 		{"End of file", Token{EOF, "", 1, 17}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -93,6 +95,7 @@ func TestTrailingWhitespace(t *testing.T) {
 // the right line number (4 in this case) and column 1.
 func TestLeadingNewLine(t *testing.T) {
 	input := "\n\n\nrate = 15.5"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 4, 1}},
@@ -101,7 +104,6 @@ func TestLeadingNewLine(t *testing.T) {
 		{"End of file", Token{EOF, "", 4, 12}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -110,6 +112,7 @@ func TestLeadingNewLine(t *testing.T) {
 // retain their original positions on line 1.
 func TestTrailingNewLine(t *testing.T) {
 	input := "rate = 15.5\n\n\n"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
@@ -118,7 +121,6 @@ func TestTrailingNewLine(t *testing.T) {
 		{"End of file", Token{EOF, "", 4, 1}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -127,6 +129,7 @@ func TestTrailingNewLine(t *testing.T) {
 // tokens report the correct column offset.
 func TestLeadingTab(t *testing.T) {
 	input := "\t\t\trate = 15.5"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 4}},
@@ -135,7 +138,6 @@ func TestLeadingTab(t *testing.T) {
 		{"End of file", Token{EOF, "", 1, 15}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -144,6 +146,7 @@ func TestLeadingTab(t *testing.T) {
 // position accounts for each trailing tab character.
 func TestTrailingTab(t *testing.T) {
 	input := "rate = 15.5\t\t\t"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
@@ -152,7 +155,6 @@ func TestTrailingTab(t *testing.T) {
 		{"End of file", Token{EOF, "", 1, 15}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -162,6 +164,7 @@ func TestTrailingTab(t *testing.T) {
 // with the correct type, literal value, and column position.
 func TestFullArithmeticExpression(t *testing.T) {
 	input := "(a + b) * (c - d) / 2"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"Left paren 1", Token{LPAREN, "(", 1, 1}},
@@ -180,7 +183,6 @@ func TestFullArithmeticExpression(t *testing.T) {
 		{"End of file", Token{EOF, "", 1, 22}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
@@ -189,8 +191,7 @@ func TestFullArithmeticExpression(t *testing.T) {
 // position, followed by an EOF token at the expected column.
 func TestIntegerNumber(t *testing.T) {
 	input := "42"
-
-	tokens, errors := Lex(input)
+	tokens, errors := lexByInput(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -225,8 +226,7 @@ func TestIntegerNumber(t *testing.T) {
 // separate NUMBER token.
 func TestLeadingDecimalNumber(t *testing.T) {
 	input := ".5"
-
-	tokens, errors := Lex(input)
+	tokens, errors := lexByInput(input)
 
 	if len(errors) != 1 {
 		t.Fatalf("expected 1 error for leading dot, got %d", len(errors))
@@ -257,8 +257,7 @@ func TestLeadingDecimalNumber(t *testing.T) {
 // preserved, and that the EOF position immediately follows the last character.
 func TestUnderscoreIdentifier(t *testing.T) {
 	input := "my_rate"
-
-	tokens, errors := Lex(input)
+	tokens, errors := lexByInput(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -292,8 +291,7 @@ func TestUnderscoreIdentifier(t *testing.T) {
 // preserved with its original casing intact.
 func TestUppercaseIdentifier(t *testing.T) {
 	input := "Rate"
-
-	tokens, errors := Lex(input)
+	tokens, errors := lexByInput(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -327,6 +325,7 @@ func TestUppercaseIdentifier(t *testing.T) {
 // increments as expected, and subsequent tokens appear on the right line.
 func TestWindowsLineEndings(t *testing.T) {
 	input := "rate\r\nresult"
+	tknzr := NewTokenizer(input)
 
 	tests := []testScenario{
 		{"First identifier", Token{IDENT, "rate", 1, 1}},
@@ -334,14 +333,14 @@ func TestWindowsLineEndings(t *testing.T) {
 		{"End of file", Token{EOF, "", 2, 7}},
 	}
 
-	tknzr := newTokenizer(input)
 	runTestsOnTokens(tknzr, tests, t)
 }
 
 // TestEmptyInput verifies that an empty string produces exactly one EOF token
 // with no errors, positioned at line 1, column 1.
 func TestEmptyInput(t *testing.T) {
-	tokens, errors := Lex("")
+	input := ""
+	tokens, errors := lexByInput(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -364,7 +363,8 @@ func TestEmptyInput(t *testing.T) {
 // the total number of whitespace characters consumed.
 func TestWhitespaceOnlyInput(t *testing.T) {
 	t.Run("Spaces only", func(t *testing.T) {
-		tokens, errors := Lex("   ")
+		input := "   "
+		tokens, errors := lexByInput(input)
 
 		if len(errors) != 0 {
 			t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -389,7 +389,8 @@ func TestWhitespaceOnlyInput(t *testing.T) {
 // incremented for each newline consumed.
 func TestNewLinesOnlyInput(t *testing.T) {
 	t.Run("Newlines only", func(t *testing.T) {
-		tokens, errors := Lex("\n\n")
+		input := "\n\r"
+		tokens, errors := lexByInput(input)
 
 		if len(errors) != 0 {
 			t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -414,8 +415,7 @@ func TestNewLinesOnlyInput(t *testing.T) {
 // error message with the correct column, followed by an EOF token.
 func TestConsecutiveIllegalCharacters(t *testing.T) {
 	input := "@@"
-
-	tokens, errors := Lex(input)
+	tokens, errors := lexByInput(input)
 
 	if len(errors) != 2 {
 		t.Fatalf("expected 2 errors, got %d", len(errors))
@@ -450,8 +450,7 @@ func TestConsecutiveIllegalCharacters(t *testing.T) {
 // message referencing the correct line and column of the offending character.
 func TestInvalidCharacters(t *testing.T) {
 	input := `10 @ 5 #`
-
-	_, errors := Lex(input)
+	_, errors := lexByInput(input)
 
 	if len(errors) != 2 {
 		t.Fatalf("expected 2 lexer errors, got %d", len(errors))
