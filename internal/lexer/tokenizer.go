@@ -42,10 +42,12 @@ func (t *Tokenizer) NextToken() Token {
 	hasReadChar := false
 	foundDecider := false
 	for _, decider := range tokenDeciders {
+		lastReadPosition := t.readPosition
 		result := decider(t, startLine, startCol)
+		hasReadChar = lastReadPosition != t.readPosition
+
 		if result.matched {
 			token = result.token
-			hasReadChar = result.hasReadChar
 			foundDecider = true
 			break
 		}
