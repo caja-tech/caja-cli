@@ -7,30 +7,6 @@ type testScenario struct {
 	Token
 }
 
-func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			token := tknzr.NextToken()
-
-			if token.Type != test.Type {
-				t.Errorf("token type wrong. expected=%q, got=%q", test.Type, token.Type)
-			}
-
-			if token.Literal != test.Literal {
-				t.Errorf("literal wrong. expected=%q, got=%q", test.Literal, token.Literal)
-			}
-
-			if token.Line != test.Line {
-				t.Errorf("line wrong for %q. expected=%d, got=%d", token.Literal, test.Line, token.Line)
-			}
-
-			if token.Column != test.Column {
-				t.Errorf("column wrong for %q. expected=%d, got=%d", token.Literal, test.Column, token.Column)
-			}
-		})
-	}
-}
-
 // TestBaseScenario verifies that the tokenizer correctly sequences through a basic
 // two-line expression ("rate = 15.5\nrate + 5"), producing the right token types,
 // literals, and accurate line/column positions for each token.
@@ -195,4 +171,28 @@ func TestWindowsLineEndings(t *testing.T) {
 	}
 
 	runTestsOnTokens(tknzr, tests, t)
+}
+
+func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			token := tknzr.NextToken()
+
+			if token.Type != test.Type {
+				t.Errorf("token type wrong. expected=%q, got=%q", test.Type, token.Type)
+			}
+
+			if token.Literal != test.Literal {
+				t.Errorf("literal wrong. expected=%q, got=%q", test.Literal, token.Literal)
+			}
+
+			if token.Line != test.Line {
+				t.Errorf("line wrong for %q. expected=%d, got=%d", token.Literal, test.Line, token.Line)
+			}
+
+			if token.Column != test.Column {
+				t.Errorf("column wrong for %q. expected=%d, got=%d", token.Literal, test.Column, token.Column)
+			}
+		})
+	}
 }

@@ -5,17 +5,12 @@ import (
 	"testing"
 )
 
-func lexByInput(input string) ([]tokenizer.Token, []string) {
-	tknzr := tokenizer.New(input)
-	return Lex(tknzr)
-}
-
 // TestIntegerNumber uses the public Lex API to verify that a plain integer
 // literal ("42") is tokenized as a NUMBER token with the correct literal and
 // position, followed by an EOF token at the expected column.
 func TestIntegerNumber(t *testing.T) {
 	input := "42"
-	tokens, errors := lexByInput(input)
+	tokens, errors := Lex(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -50,7 +45,7 @@ func TestIntegerNumber(t *testing.T) {
 // separate NUMBER token.
 func TestLeadingDecimalNumber(t *testing.T) {
 	input := ".5"
-	tokens, errors := lexByInput(input)
+	tokens, errors := Lex(input)
 
 	if len(errors) != 1 {
 		t.Fatalf("expected 1 error for leading dot, got %d", len(errors))
@@ -81,7 +76,7 @@ func TestLeadingDecimalNumber(t *testing.T) {
 // preserved, and that the EOF position immediately follows the last character.
 func TestUnderscoreIdentifier(t *testing.T) {
 	input := "my_rate"
-	tokens, errors := lexByInput(input)
+	tokens, errors := Lex(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -115,7 +110,7 @@ func TestUnderscoreIdentifier(t *testing.T) {
 // preserved with its original casing intact.
 func TestUppercaseIdentifier(t *testing.T) {
 	input := "Rate"
-	tokens, errors := lexByInput(input)
+	tokens, errors := Lex(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -148,7 +143,7 @@ func TestUppercaseIdentifier(t *testing.T) {
 // with no errors, positioned at line 1, column 1.
 func TestEmptyInput(t *testing.T) {
 	input := ""
-	tokens, errors := lexByInput(input)
+	tokens, errors := Lex(input)
 
 	if len(errors) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -172,7 +167,7 @@ func TestEmptyInput(t *testing.T) {
 func TestWhitespaceOnlyInput(t *testing.T) {
 	t.Run("Spaces only", func(t *testing.T) {
 		input := "   "
-		tokens, errors := lexByInput(input)
+		tokens, errors := Lex(input)
 
 		if len(errors) != 0 {
 			t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -198,7 +193,7 @@ func TestWhitespaceOnlyInput(t *testing.T) {
 func TestNewLinesOnlyInput(t *testing.T) {
 	t.Run("Newlines only", func(t *testing.T) {
 		input := "\n\r"
-		tokens, errors := lexByInput(input)
+		tokens, errors := Lex(input)
 
 		if len(errors) != 0 {
 			t.Fatalf("expected no errors, got %d: %v", len(errors), errors)
@@ -223,7 +218,7 @@ func TestNewLinesOnlyInput(t *testing.T) {
 // error message with the correct column, followed by an EOF token.
 func TestConsecutiveIllegalCharacters(t *testing.T) {
 	input := "@@"
-	tokens, errors := lexByInput(input)
+	tokens, errors := Lex(input)
 
 	if len(errors) != 2 {
 		t.Fatalf("expected 2 errors, got %d", len(errors))
@@ -258,7 +253,7 @@ func TestConsecutiveIllegalCharacters(t *testing.T) {
 // message referencing the correct line and column of the offending character.
 func TestInvalidCharacters(t *testing.T) {
 	input := `10 @ 5 #`
-	_, errors := lexByInput(input)
+	_, errors := Lex(input)
 
 	if len(errors) != 2 {
 		t.Fatalf("expected 2 lexer errors, got %d", len(errors))
