@@ -153,6 +153,24 @@ func TestFullArithmeticExpression(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestExponentialExpression tokenizes an arithmetic expression involving
+// the power operator, asserting that the caret token is correctly parsed.
+func TestExponentialExpression(t *testing.T) {
+	input := "rate = 10 ^ 2"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Identifier rate", Token{IDENT, "rate", 1, 1}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 6}},
+		{"Number 10", Token{NUMBER, "10", 1, 8}},
+		{"Power operator", Token{POWER, "^", 1, 11}},
+		{"Number 2", Token{NUMBER, "2", 1, 13}},
+		{"End of file", Token{EOF, "", 1, 14}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestWindowsLineEndings checks that Windows-style CRLF line endings (\r\n)
 // are handled correctly: the carriage-return is discarded, the line counter
 // increments as expected, and subsequent tokens appear on the right line.

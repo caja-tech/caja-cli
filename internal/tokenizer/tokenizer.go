@@ -12,7 +12,7 @@ type Tokenizer struct {
 	input        string // source code input
 	position     int    // current position in input (points to current char)
 	readPosition int    // current reading position in input (after current char)
-	ch           byte   // current char under examination
+	ch           rune   // current char under examination
 	ErrorTracker
 }
 
@@ -77,7 +77,7 @@ func (t *Tokenizer) readChar() {
 
 	t.ch = 0 // ASCII code for "NUL", representing EOF
 	if !t.hasFinalizedReading() {
-		t.ch = t.input[t.readPosition]
+		t.ch = rune(t.input[t.readPosition])
 	}
 
 	t.position = t.readPosition

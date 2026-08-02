@@ -4,6 +4,7 @@ import (
 	"caja-cli/internal/environment"
 	"caja-cli/internal/parser"
 	"fmt"
+	"math"
 )
 
 type Evaluator struct {
@@ -99,6 +100,8 @@ func (e *Evaluator) evalInfixExpression(operator string, left, right float64) (f
 			return 0, fmt.Errorf("division by zero")
 		}
 		return left / right, nil
+	case "^":
+		return math.Pow(left, right), nil
 	default:
 		return 0, fmt.Errorf("unknown operator: %s", operator)
 	}

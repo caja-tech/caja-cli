@@ -83,7 +83,9 @@ func TestEvaluateMath(t *testing.T) {
 		{"Subtraction", "return 10 - 2", 8.0},
 		{"Multiplication", "return 5 * 2", 10.0},
 		{"Division", "return 10 / 2", 5.0},
+		{"Exponentiation", "return 2 ^ 3", 8.0},
 		{"Order of Operations", "return 5 + 5 * 2", 15.0},
+		{"Order of Operations with Exponent", "return 2 * 3 ^ 2", 18.0},
 		{"Parentheses", "return (5 + 5) * 2", 20.0},
 		{"Complex Math", "return 100 / (10 + 10) * 5", 25.0},
 	}

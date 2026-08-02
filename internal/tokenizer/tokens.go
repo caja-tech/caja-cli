@@ -17,6 +17,7 @@ const (
 	MINUS    TokenType = "MINUS"
 	ASTERISK TokenType = "ASTERISK"
 	SLASH    TokenType = "SLASH"
+	POWER    TokenType = "POWER"
 
 	// Delimiters
 	LPAREN TokenType = "LPAREN"

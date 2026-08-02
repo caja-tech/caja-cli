@@ -17,6 +17,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideMinusToken,
 	decideAsteriskToken,
 	decideSlashToken,
+	decidePowerToken,
 	decideLeftParenToken,
 	decideRightParenToken,
 	decideEOFToken,
@@ -64,6 +65,15 @@ func decideAsteriskToken(t *Tokenizer, line int, column int) deciderResult {
 func decideSlashToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '/' {
 		return deciderResult{true, Token{Type: SLASH, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decidePowerToken matches the '^' character and produces a POWER token.
+func decidePowerToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '^' {
+		return deciderResult{true, Token{Type: POWER, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
