@@ -21,6 +21,9 @@ const (
 	// Delimiters
 	LPAREN TokenType = "LPAREN"
 	RPAREN TokenType = "RPAREN"
+
+	// Keywords
+	RETURN TokenType = "RETURN"
 )
 
 type Token struct {
@@ -28,4 +31,21 @@ type Token struct {
 	Literal string
 	Line    int
 	Column  int
+}
+
+// keywords maps reserved word literals to their corresponding TokenType.
+// Any identifier matching a keyword is emitted as that keyword token instead
+// of a generic IDENT token.
+var keywords = map[string]TokenType{
+	"return": RETURN,
+}
+
+// LookupIdent checks whether ident is a reserved keyword and returns the
+// matching TokenType. If it is not a keyword, IDENT is returned.
+func LookupIdent(ident string) TokenType {
+	if tok, ok := keywords[ident]; ok {
+		return tok
+	}
+
+	return IDENT
 }

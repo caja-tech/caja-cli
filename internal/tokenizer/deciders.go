@@ -98,11 +98,12 @@ func decideEOFToken(t *Tokenizer, line int, column int) deciderResult {
 }
 
 // decideLetterToken matches any letter or underscore, reads the full
-// identifier via readIdentifier, and produces an IDENT token.
+// identifier via readIdentifier, and produces an IDENT token or a KEYWORD token.
 func decideLetterToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.isCurrentCharALetter() {
 		identifier := t.readIdentifier()
-		token := Token{Type: IDENT, Literal: identifier, Line: line, Column: column}
+		tokenType := LookupIdent(identifier)
+		token := Token{Type: tokenType, Literal: identifier, Line: line, Column: column}
 		return deciderResult{true, token}
 	}
 
