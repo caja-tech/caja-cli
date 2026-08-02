@@ -77,15 +77,15 @@ func runTestErrorScenarios(t *testing.T, tests []testErrorScenario) {
 // expressions with parentheses, and a complex combined expression.
 func TestEvaluateMath(t *testing.T) {
 	var tests = []testScenario{
-		{"Single Number", "5", 5.0},
-		{"Decimal Number", "15.5", 15.5},
-		{"Addition", "5 + 5", 10.0},
-		{"Subtraction", "10 - 2", 8.0},
-		{"Multiplication", "5 * 2", 10.0},
-		{"Division", "10 / 2", 5.0},
-		{"Order of Operations", "5 + 5 * 2", 15.0},
-		{"Parentheses", "(5 + 5) * 2", 20.0},
-		{"Complex Math", "100 / (10 + 10) * 5", 25.0},
+		{"Single Number", "return 5", 5.0},
+		{"Decimal Number", "return 15.5", 15.5},
+		{"Addition", "return 5 + 5", 10.0},
+		{"Subtraction", "return 10 - 2", 8.0},
+		{"Multiplication", "return 5 * 2", 10.0},
+		{"Division", "return 10 / 2", 5.0},
+		{"Order of Operations", "return 5 + 5 * 2", 15.0},
+		{"Parentheses", "return (5 + 5) * 2", 20.0},
+		{"Complex Math", "return 100 / (10 + 10) * 5", 25.0},
 	}
 
 	runTestScenarios(t, tests)
@@ -97,10 +97,10 @@ func TestEvaluateMath(t *testing.T) {
 // earlier ones.
 func TestEvaluateVariables(t *testing.T) {
 	var tests = []testScenario{
-		{"Assign and return", "rate = 15.5\nrate", 15.5},
-		{"Math with variables", "rate = 10\ntax = 5\nrate * tax", 50.0},
-		{"Reassignment", "x = 5\nx = x + 5\nx", 10.0},
-		{"Cascading variables", "a = 5\nb = a\nc = a + b + 5\nc", 15.0},
+		{"Assign and return", "rate = 15.5\nreturn rate", 15.5},
+		{"Math with variables", "rate = 10\ntax = 5\nreturn rate * tax", 50.0},
+		{"Reassignment", "x = 5\nx = x + 5\nreturn x", 10.0},
+		{"Cascading variables", "a = 5\nb = a\nc = a + b + 5\nreturn c", 15.0},
 	}
 
 	runTestScenarios(t, tests)
@@ -174,7 +174,7 @@ func TestErrorUnknownNodeType(t *testing.T) {
 // TestErrorInLeftOperand verifies that an error in the left-hand side of an
 // infix expression (an undefined variable) propagates correctly.
 func TestErrorInLeftOperand(t *testing.T) {
-	_, err := testEval("unknown_var + 5")
+	_, err := testEval("return unknown_var + 5")
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -188,7 +188,7 @@ func TestErrorInLeftOperand(t *testing.T) {
 // TestErrorInRightOperand verifies that an error in the right-hand side of an
 // infix expression (an undefined variable) propagates correctly.
 func TestErrorInRightOperand(t *testing.T) {
-	_, err := testEval("5 + missing_var")
+	_, err := testEval("return 5 + missing_var")
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -233,7 +233,7 @@ func TestErrorMidProgramHaltsExecution(t *testing.T) {
 // whose value is zero produces a "division by zero" error, testing the runtime
 // check rather than a static literal check.
 func TestErrorDivisionByZeroWithVariable(t *testing.T) {
-	_, err := testEval("x = 0\n10 / x")
+	_, err := testEval("x = 0\nreturn 10 / x")
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -251,7 +251,7 @@ func TestErrorDivisionByZeroWithVariable(t *testing.T) {
 // TestNegativeResult verifies that subtraction producing a negative value
 // returns the correct result.
 func TestNegativeResult(t *testing.T) {
-	evaluated, err := testEval("3 - 10")
+	evaluated, err := testEval("return 3 - 10")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestNegativeResult(t *testing.T) {
 // TestZeroResult verifies that subtracting a number from itself correctly
 // evaluates to zero.
 func TestZeroResult(t *testing.T) {
-	evaluated, err := testEval("5 - 5")
+	evaluated, err := testEval("return 5 - 5")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestZeroResult(t *testing.T) {
 // TestFloatingPointArithmetic verifies that addition of two decimal numbers
 // produces the correct float64 result.
 func TestFloatingPointArithmetic(t *testing.T) {
-	evaluated, err := testEval("0.5 + 0.25")
+	evaluated, err := testEval("return 0.5 + 0.25")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestFloatingPointArithmetic(t *testing.T) {
 // TestLargeNumbers verifies that the evaluator handles multiplication of large
 // numeric values without overflow or precision loss within float64 range.
 func TestLargeNumbers(t *testing.T) {
-	evaluated, err := testEval("1000000 * 1000000")
+	evaluated, err := testEval("return 1000000 * 1000000")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestLargeNumbers(t *testing.T) {
 // TestDivisionProducingDecimal verifies that dividing two integers that do not
 // divide evenly produces the correct decimal result.
 func TestDivisionProducingDecimal(t *testing.T) {
-	evaluated, err := testEval("1 / 4")
+	evaluated, err := testEval("return 1 / 4")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestDivisionProducingDecimal(t *testing.T) {
 // TestChainedOperations verifies that a long chain of same-precedence
 // additions is evaluated correctly via left-to-right associativity.
 func TestChainedOperations(t *testing.T) {
-	evaluated, err := testEval("1 + 2 + 3 + 4 + 5")
+	evaluated, err := testEval("return 1 + 2 + 3 + 4 + 5")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestChainedOperations(t *testing.T) {
 // TestNestedParentheses verifies that parenthesized sub-expressions on both
 // sides of an operator are evaluated before the outer operation.
 func TestNestedParentheses(t *testing.T) {
-	evaluated, err := testEval("((2 + 3) * (4 - 1))")
+	evaluated, err := testEval("return ((2 + 3) * (4 - 1))")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestNestedParentheses(t *testing.T) {
 // TestDeeplyNestedParentheses verifies that multiple levels of redundant
 // parentheses around a single number are handled correctly.
 func TestDeeplyNestedParentheses(t *testing.T) {
-	evaluated, err := testEval("(((5)))")
+	evaluated, err := testEval("return (((5)))")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestDeeplyNestedParentheses(t *testing.T) {
 // combines addition, subtraction, multiplication, and division, requiring
 // proper operator precedence handling (2 + 3*4 - 6/2 = 11).
 func TestMixedPrecedenceChain(t *testing.T) {
-	evaluated, err := testEval("2 + 3 * 4 - 6 / 2")
+	evaluated, err := testEval("return 2 + 3 * 4 - 6 / 2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestMixedPrecedenceChain(t *testing.T) {
 // TestVariableInComplexExpression verifies that a stored variable can be used
 // inside a grouped arithmetic expression.
 func TestVariableInComplexExpression(t *testing.T) {
-	evaluated, err := testEval("x = 10\n(x + 5) * 2")
+	evaluated, err := testEval("x = 10\nreturn (x + 5) * 2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestVariableInComplexExpression(t *testing.T) {
 // TestMultipleReassignments verifies that a variable can be overwritten
 // multiple times and that reading it returns the most recent value.
 func TestMultipleReassignments(t *testing.T) {
-	evaluated, err := testEval("x = 1\nx = 2\nx = 3\nx")
+	evaluated, err := testEval("x = 1\nx = 2\nx = 3\nreturn x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestMultipleReassignments(t *testing.T) {
 // reassigned using its own current value in the right-hand expression
 // (x = x * x).
 func TestVariableOverwriteWithExpression(t *testing.T) {
-	evaluated, err := testEval("x = 10\nx = x * x\nx")
+	evaluated, err := testEval("x = 10\nx = x * x\nreturn x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestVariableOverwriteWithExpression(t *testing.T) {
 // TestManyVariablesInOneExpression verifies that multiple distinct variables
 // can be referenced together in a single arithmetic expression.
 func TestManyVariablesInOneExpression(t *testing.T) {
-	evaluated, err := testEval("a = 1\nb = 2\nc = 3\na + b + c")
+	evaluated, err := testEval("a = 1\nb = 2\nc = 3\nreturn a + b + c")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -410,16 +410,16 @@ func TestManyVariablesInOneExpression(t *testing.T) {
 	}
 }
 
-// TestAssignmentReturnsValue verifies that an assignment statement produces
-// the assigned value as the program result when it is the last (or only)
-// statement.
-func TestAssignmentReturnsValue(t *testing.T) {
-	evaluated, err := testEval("x = 42")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+// TestAssignmentRequiresReturn verifies that an assignment statement alone
+// does not produce a valid program without a return statement.
+func TestAssignmentRequiresReturn(t *testing.T) {
+	_, err := testEval("x = 42")
+	if err == nil {
+		t.Fatal("expected an error but got none")
 	}
-	if evaluated != 42.0 {
-		t.Errorf("expected 42, got %f", evaluated)
+	expected := "execution error: script finished without a return statement"
+	if err.Error() != expected {
+		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
 }
 
@@ -427,7 +427,7 @@ func TestAssignmentReturnsValue(t *testing.T) {
 // each variable depends on previously assigned ones (a=2, b=a*3, c=b+a),
 // ensuring correct evaluation order and environment state.
 func TestChainOfDependentAssignments(t *testing.T) {
-	evaluated, err := testEval("a = 2\nb = a * 3\nc = b + a\nc")
+	evaluated, err := testEval("a = 2\nb = a * 3\nc = b + a\nreturn c")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -440,23 +440,23 @@ func TestChainOfDependentAssignments(t *testing.T) {
 // Program Structure
 // ---------------------------------------------------------------------------
 
-// TestEmptyProgram verifies that evaluating an empty input returns the zero
-// value (0.0) without errors, exercising the zero-iteration path of
-// evalProgram.
+// TestEmptyProgram verifies that evaluating an empty input returns an error
+// because there is no return statement.
 func TestEmptyProgram(t *testing.T) {
-	evaluated, err := testEval("")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := testEval("")
+	if err == nil {
+		t.Fatal("expected an error but got none")
 	}
-	if evaluated != 0.0 {
-		t.Errorf("expected 0, got %f", evaluated)
+	expected := "execution error: script finished without a return statement"
+	if err.Error() != expected {
+		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
 }
 
-// TestProgramReturnsLastStatement verifies that a multi-statement program
-// returns the result of the last evaluated statement.
-func TestProgramReturnsLastStatement(t *testing.T) {
-	evaluated, err := testEval("1\n2\n3")
+// TestProgramReturnsReturnStatement verifies that a multi-statement program
+// returns the result of the return statement.
+func TestProgramReturnsReturnStatement(t *testing.T) {
+	evaluated, err := testEval("1\n2\nreturn 3")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -466,9 +466,9 @@ func TestProgramReturnsLastStatement(t *testing.T) {
 }
 
 // TestSingleAssignmentProgram verifies that a program consisting of a single
-// assignment statement returns the assigned value as its result.
+// assignment statement and a return returns the assigned value as its result.
 func TestSingleAssignmentProgram(t *testing.T) {
-	evaluated, err := testEval("x = 99")
+	evaluated, err := testEval("x = 99\nreturn x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

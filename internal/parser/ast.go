@@ -64,6 +64,23 @@ func (i *Identifier) TokenLiteral() string {
 }
 func (i *Identifier) ToString() string { return i.Value }
 
+// ReturnStatement is a statement node that represents an explicit return from
+// the script (e.g. "return rate * 2"). Token holds the "return" keyword token
+// and ReturnValue is the expression whose result becomes the script's output.
+type ReturnStatement struct {
+	Token       tokenizer.Token
+	ReturnValue Expression
+}
+
+func (r *ReturnStatement) statementNode()       {}
+func (r *ReturnStatement) TokenLiteral() string { return r.Token.Literal }
+func (r *ReturnStatement) ToString() string {
+	if r.ReturnValue != nil {
+		return r.TokenLiteral() + " " + r.ReturnValue.ToString()
+	}
+	return r.TokenLiteral()
+}
+
 // NumberLiteral is an expression node that represents a numeric constant.
 // Token carries the original tokenizer.Token, and Value holds the parsed
 // float64 representation of the literal.

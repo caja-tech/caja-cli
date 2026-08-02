@@ -7,21 +7,22 @@ type testScenario struct {
 	Token
 }
 
-// TestBaseScenario verifies that the tokenizer correctly sequences through a basic
-// two-line expression ("rate = 15.5\nrate + 5"), producing the right token types,
-// literals, and accurate line/column positions for each token.
+// TestBaseScenario verifies that the tokenizer correctly sequences through a
+// script with an assignment and a return statement ("rate = 15.5\nreturn rate + 5"),
+// producing the right token types, literals, and accurate line/column positions.
 func TestBaseScenario(t *testing.T) {
-	input := "rate = 15.5\nrate + 5"
+	input := "rate = 15.5\nreturn rate + 5"
 	tknzr := New(input)
 
 	tests := []testScenario{
 		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
 		{"Assign operator", Token{ASSIGN, "=", 1, 6}},
 		{"Number value", Token{NUMBER, "15.5", 1, 8}},
-		{"Identifier", Token{IDENT, "rate", 2, 1}},
-		{"Plus operator", Token{PLUS, "+", 2, 6}},
-		{"Number value", Token{NUMBER, "5", 2, 8}},
-		{"End of file", Token{EOF, "", 2, 9}},
+		{"Return keyword", Token{RETURN, "return", 2, 1}},
+		{"Identifier", Token{IDENT, "rate", 2, 8}},
+		{"Plus operator", Token{PLUS, "+", 2, 13}},
+		{"Number value", Token{NUMBER, "5", 2, 15}},
+		{"End of file", Token{EOF, "", 2, 16}},
 	}
 
 	runTestsOnTokens(tknzr, tests, t)
@@ -31,12 +32,11 @@ func TestBaseScenario(t *testing.T) {
 // skipped transparently and that column positions reflect the indented offset
 // rather than the raw character index from position 0.
 func TestLeadingWhitespace(t *testing.T) {
-	input := "     rate = 15.5"
+	input := "     return 15.5"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 6}},
-		{"Assign operator", Token{ASSIGN, "=", 1, 11}},
+		{"Return keyword", Token{RETURN, "return", 1, 6}},
 		{"Number value", Token{NUMBER, "15.5", 1, 13}},
 		{"End of file", Token{EOF, "", 1, 17}},
 	}
@@ -48,12 +48,11 @@ func TestLeadingWhitespace(t *testing.T) {
 // token are consumed without producing extra tokens, and that the EOF position
 // accounts for the whitespace characters that follow.
 func TestTrailingWhitespace(t *testing.T) {
-	input := "rate = 15.5     "
+	input := "return 15.5     "
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
-		{"Assign operator", Token{ASSIGN, "=", 1, 6}},
+		{"Return keyword", Token{RETURN, "return", 1, 1}},
 		{"Number value", Token{NUMBER, "15.5", 1, 8}},
 		{"End of file", Token{EOF, "", 1, 17}},
 	}
@@ -65,12 +64,11 @@ func TestTrailingWhitespace(t *testing.T) {
 // counter correctly so that tokens on the first non-blank line are reported with
 // the right line number (4 in this case) and column 1.
 func TestLeadingNewLine(t *testing.T) {
-	input := "\n\n\nrate = 15.5"
+	input := "\n\n\nreturn 15.5"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Assign variable 'rate'", Token{IDENT, "rate", 4, 1}},
-		{"Assign operator", Token{ASSIGN, "=", 4, 6}},
+		{"Return keyword", Token{RETURN, "return", 4, 1}},
 		{"Number value", Token{NUMBER, "15.5", 4, 8}},
 		{"End of file", Token{EOF, "", 4, 12}},
 	}
@@ -82,12 +80,11 @@ func TestLeadingNewLine(t *testing.T) {
 // consumed and reflected in the EOF token's line number, while earlier tokens
 // retain their original positions on line 1.
 func TestTrailingNewLine(t *testing.T) {
-	input := "rate = 15.5\n\n\n"
+	input := "return 15.5\n\n\n"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
-		{"Assign operator", Token{ASSIGN, "=", 1, 6}},
+		{"Return keyword", Token{RETURN, "return", 1, 1}},
 		{"Number value", Token{NUMBER, "15.5", 1, 8}},
 		{"End of file", Token{EOF, "", 4, 1}},
 	}
@@ -99,12 +96,11 @@ func TestTrailingNewLine(t *testing.T) {
 // the column counter (each tab counts as one column unit) so that subsequent
 // tokens report the correct column offset.
 func TestLeadingTab(t *testing.T) {
-	input := "\t\t\trate = 15.5"
+	input := "\t\t\treturn 15.5"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 4}},
-		{"Assign operator", Token{ASSIGN, "=", 1, 9}},
+		{"Return keyword", Token{RETURN, "return", 1, 4}},
 		{"Number value", Token{NUMBER, "15.5", 1, 11}},
 		{"End of file", Token{EOF, "", 1, 15}},
 	}
@@ -116,12 +112,11 @@ func TestLeadingTab(t *testing.T) {
 // are consumed without emitting additional tokens, and that the EOF column
 // position accounts for each trailing tab character.
 func TestTrailingTab(t *testing.T) {
-	input := "rate = 15.5\t\t\t"
+	input := "return 15.5\t\t\t"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Assign variable 'rate'", Token{IDENT, "rate", 1, 1}},
-		{"Assign operator", Token{ASSIGN, "=", 1, 6}},
+		{"Return keyword", Token{RETURN, "return", 1, 1}},
 		{"Number value", Token{NUMBER, "15.5", 1, 8}},
 		{"End of file", Token{EOF, "", 1, 15}},
 	}
@@ -131,27 +126,28 @@ func TestTrailingTab(t *testing.T) {
 
 // TestFullArithmeticExpression tokenizes a complete arithmetic expression
 // involving nested parentheses and all four operators, asserting that every
-// token — including two sets of parentheses and a numeric literal — is emitted
-// with the correct type, literal value, and column position.
+// token — including the return keyword, two sets of parentheses, and a numeric
+// literal — is emitted with the correct type, literal value, and column position.
 func TestFullArithmeticExpression(t *testing.T) {
-	input := "(a + b) * (c - d) / 2"
+	input := "return (a + b) * (c - d) / 2"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"Left paren 1", Token{LPAREN, "(", 1, 1}},
-		{"Identifier a", Token{IDENT, "a", 1, 2}},
-		{"Plus", Token{PLUS, "+", 1, 4}},
-		{"Identifier b", Token{IDENT, "b", 1, 6}},
-		{"Right paren 1", Token{RPAREN, ")", 1, 7}},
-		{"Asterisk", Token{ASTERISK, "*", 1, 9}},
-		{"Left paren 2", Token{LPAREN, "(", 1, 11}},
-		{"Identifier c", Token{IDENT, "c", 1, 12}},
-		{"Minus", Token{MINUS, "-", 1, 14}},
-		{"Identifier d", Token{IDENT, "d", 1, 16}},
-		{"Right paren 2", Token{RPAREN, ")", 1, 17}},
-		{"Slash", Token{SLASH, "/", 1, 19}},
-		{"Number 2", Token{NUMBER, "2", 1, 21}},
-		{"End of file", Token{EOF, "", 1, 22}},
+		{"Return keyword", Token{RETURN, "return", 1, 1}},
+		{"Left paren 1", Token{LPAREN, "(", 1, 8}},
+		{"Identifier a", Token{IDENT, "a", 1, 9}},
+		{"Plus", Token{PLUS, "+", 1, 11}},
+		{"Identifier b", Token{IDENT, "b", 1, 13}},
+		{"Right paren 1", Token{RPAREN, ")", 1, 14}},
+		{"Asterisk", Token{ASTERISK, "*", 1, 16}},
+		{"Left paren 2", Token{LPAREN, "(", 1, 18}},
+		{"Identifier c", Token{IDENT, "c", 1, 19}},
+		{"Minus", Token{MINUS, "-", 1, 21}},
+		{"Identifier d", Token{IDENT, "d", 1, 23}},
+		{"Right paren 2", Token{RPAREN, ")", 1, 24}},
+		{"Slash", Token{SLASH, "/", 1, 26}},
+		{"Number 2", Token{NUMBER, "2", 1, 28}},
+		{"End of file", Token{EOF, "", 1, 29}},
 	}
 
 	runTestsOnTokens(tknzr, tests, t)
@@ -161,13 +157,16 @@ func TestFullArithmeticExpression(t *testing.T) {
 // are handled correctly: the carriage-return is discarded, the line counter
 // increments as expected, and subsequent tokens appear on the right line.
 func TestWindowsLineEndings(t *testing.T) {
-	input := "rate\r\nresult"
+	input := "rate = 10\r\nreturn rate"
 	tknzr := New(input)
 
 	tests := []testScenario{
-		{"First identifier", Token{IDENT, "rate", 1, 1}},
-		{"Second identifier", Token{IDENT, "result", 2, 1}},
-		{"End of file", Token{EOF, "", 2, 7}},
+		{"Identifier rate", Token{IDENT, "rate", 1, 1}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 6}},
+		{"Number value", Token{NUMBER, "10", 1, 8}},
+		{"Return keyword", Token{RETURN, "return", 2, 1}},
+		{"Identifier rate", Token{IDENT, "rate", 2, 8}},
+		{"End of file", Token{EOF, "", 2, 12}},
 	}
 
 	runTestsOnTokens(tknzr, tests, t)

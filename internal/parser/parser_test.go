@@ -12,23 +12,6 @@ type testScenario struct {
 	expected string
 }
 
-func runTestScenarios(t *testing.T, tests []testScenario) {
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			tknzr := tokenizer.New(test.input)
-			p := New(tknzr)
-			program := p.Parse()
-
-			checkParseErrors(t, p)
-
-			testResult := program.ToString()
-			if testResult != test.expected {
-				t.Errorf("expected: %s, got: %s", test.expected, testResult)
-			}
-		})
-	}
-}
-
 // TestOperatorPrecedenceParsing verifies that the parser respects arithmetic
 // operator precedence, left-to-right associativity, parenthesized grouping, and
 // assignment combined with complex math.
@@ -473,4 +456,21 @@ func checkParseErrors(t *testing.T, p *Parser) {
 		t.Errorf("parser error: %s", msg)
 	}
 	t.FailNow()
+}
+
+func runTestScenarios(t *testing.T, tests []testScenario) {
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tknzr := tokenizer.New(test.input)
+			p := New(tknzr)
+			program := p.Parse()
+
+			checkParseErrors(t, p)
+
+			testResult := program.ToString()
+			if testResult != test.expected {
+				t.Errorf("expected: %s, got: %s", test.expected, testResult)
+			}
+		})
+	}
 }

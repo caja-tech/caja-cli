@@ -116,11 +116,26 @@ func (p *Parser) Errors() []string {
 // next token. If the next token is an ASSIGN operator, an AssignStatement is
 // parsed; otherwise the current tokens are treated as an ExpressionStatement.
 func (p *Parser) parseStatement() Statement {
+	if p.currToken.Type == tokenizer.RETURN {
+		return p.parseReturnStatement()
+	}
+
 	if p.peekToken.Type == tokenizer.ASSIGN {
 		return p.parseAssignStatement()
 	}
 
 	return p.parseExpressionStatement()
+}
+
+// parseReturnStatement parses a return statement of the form "return expr".
+// It captures the "return" keyword token, advances past it, and parses the
+// return value expression with the lowest precedence.
+func (p *Parser) parseReturnStatement() *ReturnStatement {
+	statement := &ReturnStatement{Token: p.currToken}
+	p.nextToken()
+	statement.ReturnValue = p.parseExpression(LOWEST)
+
+	return statement
 }
 
 // parseAssignStatement parses an assignment of the form "identifier = expr".
