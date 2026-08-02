@@ -12,6 +12,7 @@ const (
 	ASSIGN
 	SUM
 	PRODUCT
+	EXPONENT
 )
 
 var precedences = map[tokenizer.TokenType]int{
@@ -20,6 +21,7 @@ var precedences = map[tokenizer.TokenType]int{
 	tokenizer.MINUS:    SUM,
 	tokenizer.ASTERISK: PRODUCT,
 	tokenizer.SLASH:    PRODUCT,
+	tokenizer.POWER:    EXPONENT,
 }
 
 // verifyPrecedenceLevel returns the precedence level associated with the given
@@ -76,6 +78,7 @@ func New(t *tokenizer.Tokenizer) *Parser {
 	p.infixParseFuncs[tokenizer.MINUS] = p.parseInfixExpression
 	p.infixParseFuncs[tokenizer.ASTERISK] = p.parseInfixExpression
 	p.infixParseFuncs[tokenizer.SLASH] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.POWER] = p.parseInfixExpression
 
 	p.nextToken()
 	p.nextToken()
