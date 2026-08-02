@@ -6,11 +6,16 @@ import (
 )
 
 func main() {
-	root := NewRootCmd()
+	root, err := NewRootCmd()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	run, err := NewRunCmd()
 	if err != nil {
-		panic(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	root.AddCommand(run)
