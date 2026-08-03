@@ -96,6 +96,11 @@ func TestAllOperatorsInIsolation(t *testing.T) {
 			input:    "10 ^ 5",
 			expected: "(10 ^ 5)",
 		},
+		{
+			name:     "Modulo",
+			input:    "10 % 3",
+			expected: "(10 % 3)",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -144,6 +149,11 @@ func TestMixedPrecedenceAllOperators(t *testing.T) {
 			name:     "Exponentiation precedence",
 			input:    "a + b * c ^ d",
 			expected: "(a + (b * (c ^ d)))",
+		},
+		{
+			name:     "Modulo precedence",
+			input:    "a + b % c - d",
+			expected: "((a + (b % c)) - d)",
 		},
 	}
 

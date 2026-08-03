@@ -18,6 +18,7 @@ const (
 	ASTERISK TokenType = "ASTERISK"
 	SLASH    TokenType = "SLASH"
 	POWER    TokenType = "POWER"
+	MODULO   TokenType = "MODULO"
 
 	// Delimiters
 	LPAREN TokenType = "LPAREN"

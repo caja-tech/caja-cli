@@ -100,6 +100,11 @@ func (e *Evaluator) evalInfixExpression(operator string, left, right float64) (f
 			return 0, fmt.Errorf("division by zero")
 		}
 		return left / right, nil
+	case "%":
+		if right == 0 {
+			return 0, fmt.Errorf("modulo by zero")
+		}
+		return math.Mod(left, right), nil
 	case "^":
 		return math.Pow(left, right), nil
 	default:

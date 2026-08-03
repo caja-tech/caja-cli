@@ -18,6 +18,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideAsteriskToken,
 	decideSlashToken,
 	decidePowerToken,
+	decideModuloToken,
 	decideLeftParenToken,
 	decideRightParenToken,
 	decideEOFToken,
@@ -74,6 +75,15 @@ func decideSlashToken(t *Tokenizer, line int, column int) deciderResult {
 func decidePowerToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '^' {
 		return deciderResult{true, Token{Type: POWER, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideModuloToken matches the '%' character and produces a MODULO token.
+func decideModuloToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '%' {
+		return deciderResult{true, Token{Type: MODULO, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}

@@ -83,6 +83,7 @@ func TestEvaluateMath(t *testing.T) {
 		{"Subtraction", "return 10 - 2", 8.0},
 		{"Multiplication", "return 5 * 2", 10.0},
 		{"Division", "return 10 / 2", 5.0},
+		{"Modulo", "return 10 % 3", 1.0},
 		{"Exponentiation", "return 2 ^ 3", 8.0},
 		{"Order of Operations", "return 5 + 5 * 2", 15.0},
 		{"Order of Operations with Exponent", "return 2 * 3 ^ 2", 18.0},
@@ -115,6 +116,7 @@ func TestErrorHandling(t *testing.T) {
 	var tests = []testErrorScenario{
 		{"Undefined variable", "10 + rate", "identifier not found: rate"},
 		{"Division by zero", "10 / 0", "division by zero"},
+		{"Modulo by zero", "10 % 0", "modulo by zero"},
 	}
 
 	runTestErrorScenarios(t, tests)
@@ -134,13 +136,13 @@ func (m *mockNode) TokenLiteral() string { return "" }
 func (m *mockNode) ToString() string     { return "" }
 
 // TestErrorUnknownOperator verifies that evaluating an InfixExpression with an
-// unsupported operator (e.g. "%") returns an "unknown operator" error. The AST
+// unsupported operator (e.g. "#") returns an "unknown operator" error. The AST
 // node is constructed directly to bypass the parser, which would never produce
 // such an operator.
 func TestErrorUnknownOperator(t *testing.T) {
 	evaluator := New()
 	node := &parser.InfixExpression{
-		Operator: "%",
+		Operator: "#",
 		Left:     &parser.NumberLiteral{Value: 10},
 		Right:    &parser.NumberLiteral{Value: 3},
 	}
@@ -150,7 +152,7 @@ func TestErrorUnknownOperator(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "unknown operator: %"
+	expected := "unknown operator: #"
 	if err.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
