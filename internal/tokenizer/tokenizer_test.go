@@ -171,6 +171,24 @@ func TestExponentialExpression(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestModuloExpression tokenizes an arithmetic expression involving
+// the modulo operator, asserting that the percent token is correctly parsed.
+func TestModuloExpression(t *testing.T) {
+	input := "remainder = 10 % 3"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Identifier remainder", Token{IDENT, "remainder", 1, 1}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 11}},
+		{"Number 10", Token{NUMBER, "10", 1, 13}},
+		{"Modulo operator", Token{MODULO, "%", 1, 16}},
+		{"Number 3", Token{NUMBER, "3", 1, 18}},
+		{"End of file", Token{EOF, "", 1, 19}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestWindowsLineEndings checks that Windows-style CRLF line endings (\r\n)
 // are handled correctly: the carriage-return is discarded, the line counter
 // increments as expected, and subsequent tokens appear on the right line.

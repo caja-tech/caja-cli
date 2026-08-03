@@ -21,6 +21,7 @@ var precedences = map[tokenizer.TokenType]int{
 	tokenizer.MINUS:    SUM,
 	tokenizer.ASTERISK: PRODUCT,
 	tokenizer.SLASH:    PRODUCT,
+	tokenizer.MODULO:   PRODUCT,
 	tokenizer.POWER:    EXPONENT,
 }
 
@@ -79,6 +80,7 @@ func New(t *tokenizer.Tokenizer) *Parser {
 	p.infixParseFuncs[tokenizer.ASTERISK] = p.parseInfixExpression
 	p.infixParseFuncs[tokenizer.SLASH] = p.parseInfixExpression
 	p.infixParseFuncs[tokenizer.POWER] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.MODULO] = p.parseInfixExpression
 
 	p.nextToken()
 	p.nextToken()
