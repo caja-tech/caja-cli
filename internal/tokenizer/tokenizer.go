@@ -135,6 +135,15 @@ func (t *Tokenizer) isCurrentCharANewLine() bool {
 	return t.ch == '\n' || (t.ch == '\r' && (t.hasFinalizedReading() || t.input[t.readPosition] != '\n'))
 }
 
+// peekChar returns the next character in the input without advancing the
+// Tokenizer's position. It returns 0 (NUL) if the end of input has been reached.
+func (t *Tokenizer) peekChar() rune {
+	if t.hasFinalizedReading() {
+		return 0
+	}
+	return rune(t.input[t.readPosition])
+}
+
 // hasFinalizedReading reports whether the Tokenizer has consumed all bytes in
 // the input, meaning the next readChar call would produce EOF.
 func (t *Tokenizer) hasFinalizedReading() bool {

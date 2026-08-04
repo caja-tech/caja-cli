@@ -109,6 +109,23 @@ func TestEvaluateVariables(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
+// TestEvaluateIfElseExpressions verifies the evaluation of conditional if/else
+// blocks. It checks that the consequence block evaluates when the condition is
+// truthy, the alternative block evaluates when falsy, and a falsy condition
+// without an else block evaluates to 0.0.
+func TestEvaluateIfElseExpressions(t *testing.T) {
+	var tests = []testScenario{
+		{"Condition is true", "return if (10 > 5) { 100 } else { 200 }", 100.0},
+		{"Condition is false", "return if (5 > 10) { 100 } else { 200 }", 200.0},
+		{"No else, condition is true", "return if (10 > 5) { 100 }", 100.0},
+		{"No else, condition is false", "return if (5 > 10) { 100 }", 0.0},
+		{"Complex condition true", "x = 10\ny = 20\nreturn if (x < y) { 1 } else { 0 }", 1.0},
+		{"If else inside assignment", "val = if (10 == 10) { 42 } else { 0 }\nreturn val", 42.0},
+	}
+
+	runTestScenarios(t, tests)
+}
+
 // TestErrorHandling verifies that the evaluator surfaces the correct error
 // messages for common failure cases: referencing an undefined variable and
 // dividing by a literal zero.
@@ -132,8 +149,9 @@ type mockNode struct{}
 
 // TokenLiteral returns an empty string since mockNode carries no real token.
 func (m *mockNode) TokenLiteral() string { return "" }
+
 // ToString returns an empty string since mockNode has no meaningful representation.
-func (m *mockNode) ToString() string     { return "" }
+func (m *mockNode) String() string { return "" }
 
 // TestErrorUnknownOperator verifies that evaluating an InfixExpression with an
 // unsupported operator (e.g. "#") returns an "unknown operator" error. The AST
@@ -522,4 +540,3 @@ func TestIndependentEnvironments(t *testing.T) {
 		t.Fatal("expected error from second evaluator but got none")
 	}
 }
-

@@ -19,13 +19,23 @@ const (
 	SLASH    TokenType = "SLASH"
 	POWER    TokenType = "POWER"
 	MODULO   TokenType = "MODULO"
+	LT       TokenType = "LT"
+	GT       TokenType = "GT"
+	LTEQ     TokenType = "LTEQ"
+	GTEQ     TokenType = "GTEQ"
+	EQ       TokenType = "EQ"
+	NEQ      TokenType = "NEQ"
 
 	// Delimiters
 	LPAREN TokenType = "LPAREN"
 	RPAREN TokenType = "RPAREN"
+	LBRACE TokenType = "LBRACE"
+	RBRACE TokenType = "RBRACE"
 
 	// Keywords
 	RETURN TokenType = "RETURN"
+	IF     TokenType = "IF"
+	ELSE   TokenType = "ELSE"
 )
 
 type Token struct {
@@ -40,11 +50,13 @@ type Token struct {
 // of a generic IDENT token.
 var keywords = map[string]TokenType{
 	"return": RETURN,
+	"if":     IF,
+	"else":   ELSE,
 }
 
-// LookupIdent checks whether ident is a reserved keyword and returns the
+// lookupIdent checks whether ident is a reserved keyword and returns the
 // matching TokenType. If it is not a keyword, IDENT is returned.
-func LookupIdent(ident string) TokenType {
+func lookupIdent(ident string) TokenType {
 	if tok, ok := keywords[ident]; ok {
 		return tok
 	}

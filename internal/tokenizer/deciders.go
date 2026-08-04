@@ -19,8 +19,13 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideSlashToken,
 	decidePowerToken,
 	decideModuloToken,
+	decideLessThanToken,
+	decideGreaterThanToken,
+	decideNotEqualToken,
 	decideLeftParenToken,
 	decideRightParenToken,
+	decideLeftBraceToken,
+	decideRightBraceToken,
 	decideEOFToken,
 	decideLetterToken,
 	decideDigitToken,
@@ -29,6 +34,14 @@ var tokenDeciders = []tokenDeciderFunc{
 // decideAssignToken matches the '=' character and produces an ASSIGN token.
 func decideAssignToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '=' {
+		if t.peekChar() == '=' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: EQ, Literal: literal, Line: line, Column: column}}
+		}
+
 		return deciderResult{true, Token{Type: ASSIGN, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
@@ -89,6 +102,57 @@ func decideModuloToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideLessThanToken matches the '<' character and produces an LT token,
+// or an LTEQ token if it is followed by an '=' character.
+func decideLessThanToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '<' {
+		if t.peekChar() == '=' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: LTEQ, Literal: literal, Line: line, Column: column}}
+		}
+
+		return deciderResult{true, Token{Type: LT, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideGreaterThanToken matches the '>' character and produces a GT token,
+// or a GTEQ token if it is followed by an '=' character.
+func decideGreaterThanToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '>' {
+		if t.peekChar() == '=' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: GTEQ, Literal: literal, Line: line, Column: column}}
+		}
+		return deciderResult{true, Token{Type: GT, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideNotEqualToken matches the '!' character and produces an NEQ token
+// if it is followed by an '=' character.
+func decideNotEqualToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '!' {
+		if t.peekChar() == '=' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: NEQ, Literal: literal, Line: line, Column: column}}
+		}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
 // decideLeftParenToken matches the '(' character and produces an LPAREN token.
 func decideLeftParenToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '(' {
@@ -102,6 +166,24 @@ func decideLeftParenToken(t *Tokenizer, line int, column int) deciderResult {
 func decideRightParenToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == ')' {
 		return deciderResult{true, Token{Type: RPAREN, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideLeftBraceToken matches the '{' character and produces an LBRACE token.
+func decideLeftBraceToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '{' {
+		return deciderResult{true, Token{Type: LBRACE, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideRightBraceToken matches the '}' character and produces an RBRACE token.
+func decideRightBraceToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '}' {
+		return deciderResult{true, Token{Type: RBRACE, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
@@ -122,7 +204,7 @@ func decideEOFToken(t *Tokenizer, line int, column int) deciderResult {
 func decideLetterToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.isCurrentCharALetter() {
 		identifier := t.readIdentifier()
-		tokenType := LookupIdent(identifier)
+		tokenType := lookupIdent(identifier)
 		token := Token{Type: tokenType, Literal: identifier, Line: line, Column: column}
 		return deciderResult{true, token}
 	}
