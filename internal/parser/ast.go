@@ -9,7 +9,7 @@ import (
 // a human-readable string representation of itself.
 type Node interface {
 	TokenLiteral() string
-	ToString() string
+	String() string
 }
 
 // Statement represents an AST node that performs an action (e.g. an
@@ -42,10 +42,10 @@ func (p *Program) TokenLiteral() string {
 	return ""
 }
 
-func (p *Program) ToString() string {
+func (p *Program) String() string {
 	output := ""
 	for _, statement := range p.Statements {
-		output += statement.ToString()
+		output += statement.String()
 	}
 	return output
 }
@@ -62,7 +62,7 @@ func (i *Identifier) expressionNode() {}
 func (i *Identifier) TokenLiteral() string {
 	return i.Token.Literal
 }
-func (i *Identifier) ToString() string { return i.Value }
+func (i *Identifier) String() string { return i.Value }
 
 // ReturnStatement is a statement node that represents an explicit return from
 // the script (e.g. "return rate * 2"). Token holds the "return" keyword token
@@ -74,11 +74,29 @@ type ReturnStatement struct {
 
 func (r *ReturnStatement) statementNode()       {}
 func (r *ReturnStatement) TokenLiteral() string { return r.Token.Literal }
-func (r *ReturnStatement) ToString() string {
+func (r *ReturnStatement) String() string {
 	if r.ReturnValue != nil {
-		return r.TokenLiteral() + " " + r.ReturnValue.ToString()
+		return r.TokenLiteral() + " " + r.ReturnValue.String()
 	}
 	return r.TokenLiteral()
+}
+
+// BlockStatement is a statement node that represents a sequence of statements
+// grouped together, typically enclosed in curly braces. Token holds the '{' token,
+// and Statements contains the ordered list of statements within the block.
+type BlockStatement struct {
+	Token      tokenizer.Token
+	Statements []Statement
+}
+
+func (bs *BlockStatement) statementNode()       {}
+func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
+func (bs *BlockStatement) String() string {
+	var out string
+	for _, s := range bs.Statements {
+		out += s.String()
+	}
+	return out
 }
 
 // NumberLiteral is an expression node that represents a numeric constant.
@@ -93,7 +111,7 @@ func (n *NumberLiteral) expressionNode() {}
 func (n *NumberLiteral) TokenLiteral() string {
 	return n.Token.Literal
 }
-func (n *NumberLiteral) ToString() string { return n.Token.Literal }
+func (n *NumberLiteral) String() string { return n.Token.Literal }
 
 // InfixExpression is an expression node for binary operations such as
 // addition, subtraction, multiplication, and division. It stores the operator
@@ -109,8 +127,30 @@ func (i *InfixExpression) expressionNode() {}
 func (i *InfixExpression) TokenLiteral() string {
 	return i.Token.Literal
 }
-func (i *InfixExpression) ToString() string {
-	return "(" + i.Left.ToString() + " " + i.Operator + " " + i.Right.ToString() + ")"
+func (i *InfixExpression) String() string {
+	return "(" + i.Left.String() + " " + i.Operator + " " + i.Right.String() + ")"
+}
+
+// IfExpression is an expression node that represents a conditional branching
+// construct. Token holds the 'if' token, Condition is the expression to be
+// evaluated, Consequence is the block of statements to execute if the condition
+// is true, and Alternative is the optional block of statements to execute if
+// the condition is false.
+type IfExpression struct {
+	Token       tokenizer.Token
+	Condition   Expression
+	Consequence *BlockStatement
+	Alternative *BlockStatement
+}
+
+func (ie *IfExpression) expressionNode()      {}
+func (ie *IfExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IfExpression) String() string {
+	out := "if " + ie.Condition.String() + " " + ie.Consequence.String()
+	if ie.Alternative != nil {
+		out += " else " + ie.Alternative.String()
+	}
+	return out
 }
 
 // AssignStatement is a statement node that binds the result of an expression
@@ -126,8 +166,8 @@ func (a *AssignStatement) statementNode() {}
 func (a *AssignStatement) TokenLiteral() string {
 	return a.Token.Literal
 }
-func (a *AssignStatement) ToString() string {
-	return a.Name.ToString() + " = " + a.Value.ToString()
+func (a *AssignStatement) String() string {
+	return a.Name.String() + " = " + a.Value.String()
 }
 
 // ExpressionStatement wraps a standalone expression that appears as a
@@ -142,6 +182,6 @@ func (e *ExpressionStatement) statementNode() {}
 func (e *ExpressionStatement) TokenLiteral() string {
 	return e.Token.Literal
 }
-func (e *ExpressionStatement) ToString() string {
-	return e.Expression.ToString()
+func (e *ExpressionStatement) String() string {
+	return e.Expression.String()
 }

@@ -25,8 +25,8 @@ func TestEncodeDecodeValidScript(t *testing.T) {
 		t.Fatalf("Decode failed: %v", err)
 	}
 
-	if !strings.Contains(program.ToString(), "amount") {
-		t.Errorf("Expected decompiled program to contain 'amount', got: %s", program.ToString())
+	if !strings.Contains(program.String(), "amount") {
+		t.Errorf("Expected decompiled program to contain 'amount', got: %s", program.String())
 	}
 }
 

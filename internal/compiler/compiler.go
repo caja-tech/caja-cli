@@ -40,7 +40,7 @@ func Encode(script string) (token string, err error) {
 		return "", fmt.Errorf("compilation aborted")
 	}
 
-	_, writeErr := w.Write([]byte(program.ToString()))
+	_, writeErr := w.Write([]byte(program.String()))
 	if writeErr != nil {
 		return "", writeErr
 	}

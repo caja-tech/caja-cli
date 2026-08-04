@@ -10,6 +10,7 @@ const (
 	_ int = iota
 	LOWEST
 	ASSIGN
+	COMPARISON
 	SUM
 	PRODUCT
 	EXPONENT
@@ -17,6 +18,12 @@ const (
 
 var precedences = map[tokenizer.TokenType]int{
 	tokenizer.ASSIGN:   ASSIGN,
+	tokenizer.LT:       COMPARISON,
+	tokenizer.GT:       COMPARISON,
+	tokenizer.LTEQ:     COMPARISON,
+	tokenizer.GTEQ:     COMPARISON,
+	tokenizer.EQ:       COMPARISON,
+	tokenizer.NEQ:      COMPARISON,
 	tokenizer.PLUS:     SUM,
 	tokenizer.MINUS:    SUM,
 	tokenizer.ASTERISK: PRODUCT,
@@ -73,6 +80,7 @@ func New(t *tokenizer.Tokenizer) *Parser {
 	p.prefixParseFuncs[tokenizer.IDENT] = p.parseIdentifier
 	p.prefixParseFuncs[tokenizer.NUMBER] = p.parseNumberLiteral
 	p.prefixParseFuncs[tokenizer.LPAREN] = p.parseGroupedExpression
+	p.prefixParseFuncs[tokenizer.IF] = p.parseIfExpression
 
 	p.infixParseFuncs = make(map[tokenizer.TokenType]infixParseFunc)
 	p.infixParseFuncs[tokenizer.PLUS] = p.parseInfixExpression
@@ -81,6 +89,12 @@ func New(t *tokenizer.Tokenizer) *Parser {
 	p.infixParseFuncs[tokenizer.SLASH] = p.parseInfixExpression
 	p.infixParseFuncs[tokenizer.POWER] = p.parseInfixExpression
 	p.infixParseFuncs[tokenizer.MODULO] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.LT] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.GT] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.LTEQ] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.GTEQ] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.EQ] = p.parseInfixExpression
+	p.infixParseFuncs[tokenizer.NEQ] = p.parseInfixExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -251,6 +265,64 @@ func (p *Parser) parseGroupedExpression() Expression {
 	}
 
 	return groupedExpression
+}
+
+// parseIfExpression parses an 'if' expression, expecting an opening parenthesis,
+// a condition, a closing parenthesis, and a block statement for the consequence.
+// It also parses an optional 'else' block if the 'else' keyword is present.
+func (p *Parser) parseIfExpression() Expression {
+	expression := &IfExpression{Token: p.currToken}
+
+	if !p.expectPeek(tokenizer.LPAREN) {
+		return nil
+	}
+	p.nextToken()
+
+	expression.Condition = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(tokenizer.RPAREN) {
+		return nil
+	}
+	if !p.expectPeek(tokenizer.LBRACE) {
+		return nil
+	}
+
+	expression.Consequence = p.parseBlockStatement()
+
+	if p.peekToken.Type == tokenizer.ELSE {
+		p.nextToken()
+
+		if !p.expectPeek(tokenizer.LBRACE) {
+			return nil
+		}
+		expression.Alternative = p.parseBlockStatement()
+	}
+
+	return expression
+}
+
+// parseBlockStatement parses a block of statements enclosed in curly braces.
+// It consumes tokens and parses statements until a closing brace or EOF is encountered.
+func (p *Parser) parseBlockStatement() *BlockStatement {
+	block := &BlockStatement{Token: p.currToken}
+	block.Statements = []Statement{}
+
+	p.nextToken()
+
+	for p.currToken.Type != tokenizer.RBRACE && p.currToken.Type != tokenizer.EOF {
+		if p.currToken.Type == tokenizer.RETURN {
+			msg := "syntax error: 'return' statements are not allowed inside if/else blocks. Assign the result to a variable or place 'return' before the 'if'."
+			p.errors = append(p.errors, msg)
+		}
+
+		statement := p.parseStatement()
+		if statement != nil {
+			block.Statements = append(block.Statements, statement)
+		}
+		p.nextToken()
+	}
+
+	return block
 }
 
 // expectPeek checks whether the peek token matches the expected type. If it

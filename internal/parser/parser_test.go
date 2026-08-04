@@ -200,12 +200,12 @@ func TestMultipleStatements(t *testing.T) {
 		}
 
 		expected1 := "a = 10"
-		if result := program.Statements[0].ToString(); result != expected1 {
+		if result := program.Statements[0].String(); result != expected1 {
 			t.Errorf("statement 1: expected %q, got %q", expected1, result)
 		}
 
 		expected2 := "b = 20"
-		if result := program.Statements[1].ToString(); result != expected2 {
+		if result := program.Statements[1].String(); result != expected2 {
 			t.Errorf("statement 2: expected %q, got %q", expected2, result)
 		}
 	})
@@ -228,12 +228,12 @@ func TestAssignmentFollowedByExpression(t *testing.T) {
 		}
 
 		expected1 := "rate = 100"
-		if result := program.Statements[0].ToString(); result != expected1 {
+		if result := program.Statements[0].String(); result != expected1 {
 			t.Errorf("statement 1: expected %q, got %q", expected1, result)
 		}
 
 		expected2 := "(rate + 50)"
-		if result := program.Statements[1].ToString(); result != expected2 {
+		if result := program.Statements[1].String(); result != expected2 {
 			t.Errorf("statement 2: expected %q, got %q", expected2, result)
 		}
 	})
@@ -425,7 +425,7 @@ func TestMultipleErrors(t *testing.T) {
 			if es, ok := stmt.(*ExpressionStatement); ok && es.Expression == nil {
 				continue
 			}
-			if stmt.ToString() == "a = 5" {
+			if stmt.String() == "a = 5" {
 				found = true
 				break
 			}
@@ -457,10 +457,49 @@ func TestRecoveryAfterError(t *testing.T) {
 
 		lastStmt := program.Statements[len(program.Statements)-1]
 		expected := "tax = (5 * 2)"
-		if result := lastStmt.ToString(); result != expected {
+		if result := lastStmt.String(); result != expected {
 			t.Errorf("recovered statement: expected %q, got %q", expected, result)
 		}
 	})
+}
+
+// TestIfExpression verifies that if-else expressions are parsed correctly,
+// both as standalone expressions and as right-hand values in assignments.
+func TestIfExpression(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "If expression without else",
+			input:    "if (x > y) { x }",
+			expected: "if (x > y) x",
+		},
+		{
+			name:     "If expression with else",
+			input:    "if (x < y) { x } else { y }",
+			expected: "if (x < y) x else y",
+		},
+		{
+			name:     "If else in assignment",
+			input:    "result = if (a == b) { 10 } else { 20 }",
+			expected: "result = if (a == b) 10 else 20",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestReturnInsideBlockError validates the architectural rule that return
+// statements are prohibited inside block statements, ensuring that the parser
+// flags it as an error.
+func TestReturnInsideBlockError(t *testing.T) {
+	input := "if (x > y) { return x }"
+	tknzr := tokenizer.New(input)
+	p := New(tknzr)
+	p.Parse()
+
+	errors := p.Errors()
+	if len(errors) == 0 {
+		t.Fatal("expected parser error for return inside block statement, but got none")
+	}
 }
 
 // checkParseErrors is a test helper that fails the current test immediately if
@@ -487,7 +526,7 @@ func runTestScenarios(t *testing.T, tests []testScenario) {
 
 			checkParseErrors(t, p)
 
-			testResult := program.ToString()
+			testResult := program.String()
 			if testResult != test.expected {
 				t.Errorf("expected: %s, got: %s", test.expected, testResult)
 			}

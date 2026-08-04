@@ -189,6 +189,40 @@ func TestModuloExpression(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestIfElseExpression tokenizes an if-else expression involving comparison
+// operators and block braces, asserting that the new tokens are parsed correctly.
+func TestIfElseExpression(t *testing.T) {
+	input := "if (a <= 10) {\n a == 5 \n} else {\n a != 5 \n}"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"If keyword", Token{IF, "if", 1, 1}},
+		{"Left paren", Token{LPAREN, "(", 1, 4}},
+		{"Identifier a", Token{IDENT, "a", 1, 5}},
+		{"Less than or equal", Token{LTEQ, "<=", 1, 7}},
+		{"Number 10", Token{NUMBER, "10", 1, 10}},
+		{"Right paren", Token{RPAREN, ")", 1, 12}},
+		{"Left brace", Token{LBRACE, "{", 1, 14}},
+		
+		{"Identifier a", Token{IDENT, "a", 2, 2}},
+		{"Equal", Token{EQ, "==", 2, 4}},
+		{"Number 5", Token{NUMBER, "5", 2, 7}},
+		
+		{"Right brace", Token{RBRACE, "}", 3, 1}},
+		{"Else keyword", Token{ELSE, "else", 3, 3}},
+		{"Left brace", Token{LBRACE, "{", 3, 8}},
+		
+		{"Identifier a", Token{IDENT, "a", 4, 2}},
+		{"Not equal", Token{NEQ, "!=", 4, 4}},
+		{"Number 5", Token{NUMBER, "5", 4, 7}},
+		
+		{"Right brace", Token{RBRACE, "}", 5, 1}},
+		{"End of file", Token{EOF, "", 5, 2}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestWindowsLineEndings checks that Windows-style CRLF line endings (\r\n)
 // are handled correctly: the carriage-return is discarded, the line counter
 // increments as expected, and subsequent tokens appear on the right line.

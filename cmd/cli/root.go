@@ -33,7 +33,7 @@ func NewRootCmd() (*cobra.Command, error) {
 					return fmt.Errorf("invalid token: %w", err)
 				}
 
-				err = os.WriteFile(outputFile, []byte(script.ToString()), 0644)
+				err = os.WriteFile(outputFile, []byte(script.String()), 0644)
 				if err != nil {
 					return fmt.Errorf("failed to write output file: %w", err)
 				}
