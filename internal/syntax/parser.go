@@ -1,7 +1,7 @@
-package parser
+package syntax
 
 import (
-	"caja-cli/internal/tokenizer"
+	"caja-cli/internal/lexer"
 	"fmt"
 	"strconv"
 )
@@ -16,25 +16,25 @@ const (
 	EXPONENT
 )
 
-var precedences = map[tokenizer.TokenType]int{
-	tokenizer.ASSIGN:   ASSIGN,
-	tokenizer.LT:       COMPARISON,
-	tokenizer.GT:       COMPARISON,
-	tokenizer.LTEQ:     COMPARISON,
-	tokenizer.GTEQ:     COMPARISON,
-	tokenizer.EQ:       COMPARISON,
-	tokenizer.NEQ:      COMPARISON,
-	tokenizer.PLUS:     SUM,
-	tokenizer.MINUS:    SUM,
-	tokenizer.ASTERISK: PRODUCT,
-	tokenizer.SLASH:    PRODUCT,
-	tokenizer.MODULO:   PRODUCT,
-	tokenizer.POWER:    EXPONENT,
+var precedences = map[lexer.TokenType]int{
+	lexer.ASSIGN:   ASSIGN,
+	lexer.LT:       COMPARISON,
+	lexer.GT:       COMPARISON,
+	lexer.LTEQ:     COMPARISON,
+	lexer.GTEQ:     COMPARISON,
+	lexer.EQ:       COMPARISON,
+	lexer.NEQ:      COMPARISON,
+	lexer.PLUS:     SUM,
+	lexer.MINUS:    SUM,
+	lexer.ASTERISK: PRODUCT,
+	lexer.SLASH:    PRODUCT,
+	lexer.MODULO:   PRODUCT,
+	lexer.POWER:    EXPONENT,
 }
 
 // verifyPrecedenceLevel returns the precedence level associated with the given
 // token type. If the token type has no registered precedence, LOWEST is returned.
-func verifyPrecedenceLevel(t tokenizer.TokenType) int {
+func verifyPrecedenceLevel(t lexer.TokenType) int {
 	if p, ok := precedences[t]; ok {
 		return p
 	}
@@ -57,13 +57,13 @@ type infixParseFunc func(Expression) Expression
 // maintains a current and peek token for single-token lookahead and dispatches
 // to registered prefix and infix parse functions based on token type.
 type Parser struct {
-	tknzr *tokenizer.Tokenizer
+	tknzr *lexer.Tokenizer
 
-	currToken tokenizer.Token
-	peekToken tokenizer.Token
+	currToken lexer.Token
+	peekToken lexer.Token
 
-	prefixParseFuncs map[tokenizer.TokenType]prefixParseFunc
-	infixParseFuncs  map[tokenizer.TokenType]infixParseFunc
+	prefixParseFuncs map[lexer.TokenType]prefixParseFunc
+	infixParseFuncs  map[lexer.TokenType]infixParseFunc
 
 	errors []string
 }
@@ -71,30 +71,30 @@ type Parser struct {
 // New creates a Parser for the given Tokenizer, registers the built-in prefix
 // and infix parse functions for identifiers, numbers, grouped expressions, and
 // arithmetic operators, and primes the two-token lookahead by reading twice.
-func New(t *tokenizer.Tokenizer) *Parser {
+func New(t *lexer.Tokenizer) *Parser {
 	p := &Parser{
 		tknzr: t,
 	}
 
-	p.prefixParseFuncs = make(map[tokenizer.TokenType]prefixParseFunc)
-	p.prefixParseFuncs[tokenizer.IDENT] = p.parseIdentifier
-	p.prefixParseFuncs[tokenizer.NUMBER] = p.parseNumberLiteral
-	p.prefixParseFuncs[tokenizer.LPAREN] = p.parseGroupedExpression
-	p.prefixParseFuncs[tokenizer.IF] = p.parseIfExpression
+	p.prefixParseFuncs = make(map[lexer.TokenType]prefixParseFunc)
+	p.prefixParseFuncs[lexer.IDENT] = p.parseIdentifier
+	p.prefixParseFuncs[lexer.NUMBER] = p.parseNumberLiteral
+	p.prefixParseFuncs[lexer.LPAREN] = p.parseGroupedExpression
+	p.prefixParseFuncs[lexer.IF] = p.parseIfExpression
 
-	p.infixParseFuncs = make(map[tokenizer.TokenType]infixParseFunc)
-	p.infixParseFuncs[tokenizer.PLUS] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.MINUS] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.ASTERISK] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.SLASH] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.POWER] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.MODULO] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.LT] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.GT] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.LTEQ] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.GTEQ] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.EQ] = p.parseInfixExpression
-	p.infixParseFuncs[tokenizer.NEQ] = p.parseInfixExpression
+	p.infixParseFuncs = make(map[lexer.TokenType]infixParseFunc)
+	p.infixParseFuncs[lexer.PLUS] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.MINUS] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.ASTERISK] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.SLASH] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.POWER] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.MODULO] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.LT] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.GT] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.LTEQ] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.GTEQ] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.EQ] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.NEQ] = p.parseInfixExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -109,7 +109,7 @@ func (p *Parser) Parse() *Program {
 	program := &Program{}
 	program.Statements = []Statement{}
 
-	for p.currToken.Type != tokenizer.EOF {
+	for p.currToken.Type != lexer.EOF {
 		statement := p.parseStatement()
 		if statement != nil {
 			program.Statements = append(program.Statements, statement)
@@ -135,11 +135,15 @@ func (p *Parser) Errors() []string {
 // next token. If the next token is an ASSIGN operator, an AssignStatement is
 // parsed; otherwise the current tokens are treated as an ExpressionStatement.
 func (p *Parser) parseStatement() Statement {
-	if p.currToken.Type == tokenizer.RETURN {
+	if p.currToken.Type == lexer.RETURN {
 		return p.parseReturnStatement()
 	}
 
-	if p.peekToken.Type == tokenizer.ASSIGN {
+	if p.currToken.Type == lexer.LET {
+		return p.parseLetStatement()
+	}
+
+	if p.peekToken.Type == lexer.ASSIGN {
 		return p.parseAssignStatement()
 	}
 
@@ -153,6 +157,29 @@ func (p *Parser) parseReturnStatement() *ReturnStatement {
 	statement := &ReturnStatement{Token: p.currToken}
 	p.nextToken()
 	statement.ReturnValue = p.parseExpression(LOWEST)
+
+	return statement
+}
+
+// parseLetStatement parses a variable declaration of the form "let ident = expr".
+// It captures the "let" keyword token, ensures the next token is an identifier,
+// expects an assignment operator, and then parses the initialization expression.
+func (p *Parser) parseLetStatement() *LetStatement {
+	statement := &LetStatement{Token: p.currToken}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.errors = append(p.errors, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+	statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.ASSIGN) {
+		p.errors = append(p.errors, fmt.Sprintf("expected assignment, got %s", p.currToken.Type))
+		return nil
+	}
+
+	p.nextToken()
+	statement.Value = p.parseExpression(LOWEST)
 
 	return statement
 }
@@ -222,7 +249,7 @@ func (p *Parser) parseExpression(precedence int) Expression {
 	}
 
 	leftExpression := prefix()
-	for p.peekToken.Type != tokenizer.EOF && precedence < verifyPrecedenceLevel(p.peekToken.Type) {
+	for p.peekToken.Type != lexer.EOF && precedence < verifyPrecedenceLevel(p.peekToken.Type) {
 		infix := p.infixParseFuncs[p.peekToken.Type]
 		if infix == nil {
 			return leftExpression
@@ -260,7 +287,7 @@ func (p *Parser) parseGroupedExpression() Expression {
 	p.nextToken()
 
 	groupedExpression := p.parseExpression(LOWEST)
-	if !p.expectPeek(tokenizer.RPAREN) {
+	if !p.expectPeek(lexer.RPAREN) {
 		return nil
 	}
 
@@ -273,26 +300,26 @@ func (p *Parser) parseGroupedExpression() Expression {
 func (p *Parser) parseIfExpression() Expression {
 	expression := &IfExpression{Token: p.currToken}
 
-	if !p.expectPeek(tokenizer.LPAREN) {
+	if !p.expectPeek(lexer.LPAREN) {
 		return nil
 	}
 	p.nextToken()
 
 	expression.Condition = p.parseExpression(LOWEST)
 
-	if !p.expectPeek(tokenizer.RPAREN) {
+	if !p.expectPeek(lexer.RPAREN) {
 		return nil
 	}
-	if !p.expectPeek(tokenizer.LBRACE) {
+	if !p.expectPeek(lexer.LBRACE) {
 		return nil
 	}
 
 	expression.Consequence = p.parseBlockStatement()
 
-	if p.peekToken.Type == tokenizer.ELSE {
+	if p.peekToken.Type == lexer.ELSE {
 		p.nextToken()
 
-		if !p.expectPeek(tokenizer.LBRACE) {
+		if !p.expectPeek(lexer.LBRACE) {
 			return nil
 		}
 		expression.Alternative = p.parseBlockStatement()
@@ -309,8 +336,8 @@ func (p *Parser) parseBlockStatement() *BlockStatement {
 
 	p.nextToken()
 
-	for p.currToken.Type != tokenizer.RBRACE && p.currToken.Type != tokenizer.EOF {
-		if p.currToken.Type == tokenizer.RETURN {
+	for p.currToken.Type != lexer.RBRACE && p.currToken.Type != lexer.EOF {
+		if p.currToken.Type == lexer.RETURN {
 			msg := "syntax error: 'return' statements are not allowed inside if/else blocks. Assign the result to a variable or place 'return' before the 'if'."
 			p.errors = append(p.errors, msg)
 		}
@@ -328,7 +355,7 @@ func (p *Parser) parseBlockStatement() *BlockStatement {
 // expectPeek checks whether the peek token matches the expected type. If it
 // does, the parser advances and returns true; otherwise it records a peek error
 // and returns false without advancing.
-func (p *Parser) expectPeek(tokenType tokenizer.TokenType) bool {
+func (p *Parser) expectPeek(tokenType lexer.TokenType) bool {
 	if p.peekToken.Type == tokenType {
 		p.nextToken()
 		return true
@@ -340,7 +367,7 @@ func (p *Parser) expectPeek(tokenType tokenizer.TokenType) bool {
 
 // peekError appends a formatted syntax-error message indicating that the peek
 // token did not match the expected type.
-func (p *Parser) peekError(t tokenizer.TokenType) {
+func (p *Parser) peekError(t lexer.TokenType) {
 	msg := fmt.Sprintf("Syntax Error: expected next token to be %s, got %s instead", t, p.peekToken.Type)
 	p.errors = append(p.errors, msg)
 }
@@ -349,8 +376,8 @@ func (p *Parser) peekError(t tokenizer.TokenType) {
 // finds one that could plausibly begin a new statement (an IDENT or NUMBER) or
 // until EOF is reached.
 func (p *Parser) synchronize() {
-	for p.peekToken.Type != tokenizer.EOF {
-		if p.peekToken.Type == tokenizer.IDENT || p.peekToken.Type == tokenizer.NUMBER {
+	for p.peekToken.Type != lexer.EOF {
+		if p.peekToken.Type == lexer.IDENT || p.peekToken.Type == lexer.NUMBER {
 			return
 		}
 		p.nextToken()

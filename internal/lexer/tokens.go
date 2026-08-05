@@ -1,4 +1,4 @@
-package tokenizer
+package lexer
 
 type TokenType string
 
@@ -36,6 +36,7 @@ const (
 	RETURN TokenType = "RETURN"
 	IF     TokenType = "IF"
 	ELSE   TokenType = "ELSE"
+	LET    TokenType = "LET"
 )
 
 type Token struct {
@@ -52,6 +53,7 @@ var keywords = map[string]TokenType{
 	"return": RETURN,
 	"if":     IF,
 	"else":   ELSE,
+	"let":    LET,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the

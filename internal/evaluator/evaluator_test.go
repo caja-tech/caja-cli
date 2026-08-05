@@ -1,8 +1,8 @@
 package evaluator
 
 import (
-	"caja-cli/internal/parser"
-	"caja-cli/internal/tokenizer"
+	"caja-cli/internal/lexer"
+	"caja-cli/internal/syntax"
 	"fmt"
 	"testing"
 )
@@ -23,16 +23,16 @@ type testErrorScenario struct {
 // string through the full pipeline, returning the final numeric result or the
 // first error encountered (from the parser or evaluator).
 func testEval(input string) (float64, error) {
-	tknzr := tokenizer.New(input)
-	p := parser.New(tknzr)
+	tknzr := lexer.New(input)
+	p := syntax.New(tknzr)
 	program := p.Parse()
 
 	if len(p.Errors()) > 0 {
 		return 0, fmt.Errorf("parser errors: %v", p.Errors())
 	}
 
-	evaluator := New()
-	return evaluator.Eval(program)
+	env := NewEnvironment()
+	return Eval(program, env)
 }
 
 // runTestScenarios iterates over a slice of testScenario entries, evaluating
@@ -158,14 +158,14 @@ func (m *mockNode) String() string { return "" }
 // node is constructed directly to bypass the parser, which would never produce
 // such an operator.
 func TestErrorUnknownOperator(t *testing.T) {
-	evaluator := New()
-	node := &parser.InfixExpression{
+	node := &syntax.InfixExpression{
 		Operator: "#",
-		Left:     &parser.NumberLiteral{Value: 10},
-		Right:    &parser.NumberLiteral{Value: 3},
+		Left:     &syntax.NumberLiteral{Value: 10},
+		Right:    &syntax.NumberLiteral{Value: 3},
 	}
 
-	_, err := evaluator.Eval(node)
+	env := NewEnvironment()
+	_, err := Eval(node, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -180,9 +180,8 @@ func TestErrorUnknownOperator(t *testing.T) {
 // recognized by the evaluator's type switch returns an "unknown node type"
 // error. A mockNode is used to simulate this scenario.
 func TestErrorUnknownNodeType(t *testing.T) {
-	evaluator := New()
-
-	_, err := evaluator.Eval(&mockNode{})
+	env := NewEnvironment()
+	_, err := Eval(&mockNode{}, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -503,39 +502,29 @@ func TestSingleAssignmentProgram(t *testing.T) {
 // Evaluator Constructor
 // ---------------------------------------------------------------------------
 
-// TestNewReturnsNonNil verifies that the New constructor returns a valid,
-// non-nil Evaluator instance.
-func TestNewReturnsNonNil(t *testing.T) {
-	evaluator := New()
-	if evaluator == nil {
-		t.Fatal("expected New() to return a non-nil evaluator")
-	}
-}
-
 // TestIndependentEnvironments verifies that two evaluators created with New
 // have completely isolated environments: setting a variable in one must not
 // make it visible in the other.
 func TestIndependentEnvironments(t *testing.T) {
-	eval1 := New()
-	eval2 := New()
-
 	// Set variable in first evaluator
-	assignNode := &parser.AssignStatement{
-		Name:  &parser.Identifier{Value: "x"},
-		Value: &parser.NumberLiteral{Value: 42},
+	assignNode := &syntax.AssignStatement{
+		Name:  &syntax.Identifier{Value: "x"},
+		Value: &syntax.NumberLiteral{Value: 42},
 	}
 
-	_, err := eval1.Eval(assignNode)
+	env1 := NewEnvironment()
+	_, err := Eval(assignNode, env1)
 	if err != nil {
 		t.Fatalf("unexpected error setting variable: %v", err)
 	}
 
 	// Second evaluator must not see the variable
-	identNode := &parser.ExpressionStatement{
-		Expression: &parser.Identifier{Value: "x"},
+	identNode := &syntax.ExpressionStatement{
+		Expression: &syntax.Identifier{Value: "x"},
 	}
 
-	_, err = eval2.Eval(identNode)
+	env2 := NewEnvironment()
+	_, err = Eval(identNode, env2)
 	if err == nil {
 		t.Fatal("expected error from second evaluator but got none")
 	}

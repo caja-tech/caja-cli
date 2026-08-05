@@ -2,8 +2,9 @@ package main
 
 import (
 	"caja-cli/internal/evaluator"
-	"caja-cli/internal/parser"
-	"caja-cli/internal/tokenizer"
+	"caja-cli/internal/lexer"
+	"caja-cli/internal/semantic"
+	"caja-cli/internal/syntax"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,19 +34,35 @@ func NewRunCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to read file '%s': %w", filePath, err)
 			}
 
-			tknzr := tokenizer.New(string(sourceCode))
-			p := parser.New(tknzr)
+			tknzr := lexer.New(string(sourceCode))
+			p := syntax.New(tknzr)
 			program := p.Parse()
+			semanticAnalyzer := semantic.New()
+			semanticAnalyzer.Analyze(program)
 
+			hasSyntaticOrSemanticErrors := false
 			if len(p.Errors()) > 0 {
 				fmt.Println("Parser errors found:")
 				for _, msg := range p.Errors() {
 					fmt.Printf("\t- %s\n", msg)
 				}
+				hasSyntaticOrSemanticErrors = true
+			}
+
+			if len(semanticAnalyzer.Errors()) > 0 {
+				fmt.Println("Semantic errors found:")
+				for _, msg := range p.Errors() {
+					fmt.Printf("\t- %s\n", msg)
+				}
+				hasSyntaticOrSemanticErrors = true
+			}
+
+			if hasSyntaticOrSemanticErrors {
 				return fmt.Errorf("failed to parse the script")
 			}
 
-			eval, err := evaluator.New().Eval(program)
+			env := evaluator.NewEnvironment()
+			eval, err := evaluator.Eval(program, env)
 			if err != nil {
 				return fmt.Errorf("evaluation error: %w", err)
 			}

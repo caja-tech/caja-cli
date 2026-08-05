@@ -1,7 +1,7 @@
-package parser
+package syntax
 
 import (
-	"caja-cli/internal/tokenizer"
+	"caja-cli/internal/lexer"
 )
 
 // Node is the base interface for every element in the abstract syntax tree.
@@ -54,7 +54,7 @@ func (p *Program) String() string {
 // Token carries the original tokenizer.Token and Value holds the identifier's
 // name as a plain string.
 type Identifier struct {
-	Token tokenizer.Token
+	Token lexer.Token
 	Value string
 }
 
@@ -68,7 +68,7 @@ func (i *Identifier) String() string { return i.Value }
 // the script (e.g. "return rate * 2"). Token holds the "return" keyword token
 // and ReturnValue is the expression whose result becomes the script's output.
 type ReturnStatement struct {
-	Token       tokenizer.Token
+	Token       lexer.Token
 	ReturnValue Expression
 }
 
@@ -85,7 +85,7 @@ func (r *ReturnStatement) String() string {
 // grouped together, typically enclosed in curly braces. Token holds the '{' token,
 // and Statements contains the ordered list of statements within the block.
 type BlockStatement struct {
-	Token      tokenizer.Token
+	Token      lexer.Token
 	Statements []Statement
 }
 
@@ -103,7 +103,7 @@ func (bs *BlockStatement) String() string {
 // Token carries the original tokenizer.Token, and Value holds the parsed
 // float64 representation of the literal.
 type NumberLiteral struct {
-	Token tokenizer.Token
+	Token lexer.Token
 	Value float64
 }
 
@@ -117,7 +117,7 @@ func (n *NumberLiteral) String() string { return n.Token.Literal }
 // addition, subtraction, multiplication, and division. It stores the operator
 // token, the operator symbol as a string, and the left and right operands.
 type InfixExpression struct {
-	Token    tokenizer.Token
+	Token    lexer.Token
 	Left     Expression
 	Operator string
 	Right    Expression
@@ -137,7 +137,7 @@ func (i *InfixExpression) String() string {
 // is true, and Alternative is the optional block of statements to execute if
 // the condition is false.
 type IfExpression struct {
-	Token       tokenizer.Token
+	Token       lexer.Token
 	Condition   Expression
 	Consequence *BlockStatement
 	Alternative *BlockStatement
@@ -153,11 +153,31 @@ func (ie *IfExpression) String() string {
 	return out
 }
 
+// LetStatement is a statement node that represents a variable declaration
+// and initialization (e.g. "let rate = 100"). Token holds the "let" keyword token,
+// Name is the target identifier, and Value is the right-hand-side expression.
+type LetStatement struct {
+	Token lexer.Token
+	Name  *Identifier
+	Value Expression
+}
+
+func (ls *LetStatement) statementNode()       {}
+func (ls *LetStatement) TokenLiteral() string { return ls.Token.Literal }
+func (ls *LetStatement) String() string {
+	var out string
+	out += ls.TokenLiteral() + " " + ls.Name.String() + " = "
+	if ls.Value != nil {
+		out += ls.Value.String()
+	}
+	return out
+}
+
 // AssignStatement is a statement node that binds the result of an expression
 // to an identifier (e.g. "rate = 100 / 2"). Token holds the '=' token, Name
 // is the target identifier, and Value is the right-hand-side expression.
 type AssignStatement struct {
-	Token tokenizer.Token
+	Token lexer.Token
 	Name  *Identifier
 	Value Expression
 }
@@ -174,7 +194,7 @@ func (a *AssignStatement) String() string {
 // top-level statement (e.g. "rate + 50"). Token is the first token of the
 // expression, and Expression holds the parsed expression tree.
 type ExpressionStatement struct {
-	Token      tokenizer.Token
+	Token      lexer.Token
 	Expression Expression
 }
 
