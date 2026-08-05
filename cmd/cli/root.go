@@ -1,7 +1,7 @@
 package main
 
 import (
-	"caja-cli/internal/compiler"
+	"caja-cli/internal/encoder"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,22 +13,22 @@ import (
 func NewRootCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:   "cajac [token]",
-		Short: "A compiler for the custom financial caja language.",
-		Long:  "cajac compile custom financial algorithms from a .caja script file into a token.",
+		Short: "A encoder for the custom financial caja language.",
+		Long:  "cajac encode custom financial algorithms from a .caja script file into a token.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// ==========================================
-			// DECOMPILE MODE: A token argument was provided
+			// DECODE MODE: A token argument was provided
 			// ==========================================
 			if len(args) == 1 {
 				token := args[0]
 				outputFile, _ := cmd.Flags().GetString("output")
 
 				if outputFile == "" {
-					return fmt.Errorf("please provide an --output file path for the decompiled script")
+					return fmt.Errorf("please provide an --output file path for the decoded script")
 				}
 
-				script, err := compiler.Decode(token)
+				script, err := encoder.Decode(token)
 				if err != nil {
 					return fmt.Errorf("invalid token: %w", err)
 				}
@@ -38,12 +38,12 @@ func NewRootCmd() (*cobra.Command, error) {
 					return fmt.Errorf("failed to write output file: %w", err)
 				}
 
-				fmt.Printf("Successfully decompiled token to %s\n", outputFile)
+				fmt.Printf("Successfully decoded token to %s\n", outputFile)
 				return nil
 			}
 
 			// ==========================================
-			// COMPILE MODE: No token provided
+			// ENCODE MODE: No token provided
 			// ==========================================
 			filePath, err := cmd.Flags().GetString("file")
 			if err != nil {
@@ -65,9 +65,9 @@ func NewRootCmd() (*cobra.Command, error) {
 			}
 
 			script := string(sourceCode)
-			token, err := compiler.Encode(script)
+			token, err := encoder.Encode(script)
 			if err != nil {
-				return fmt.Errorf("failed to compile: %w", err)
+				return fmt.Errorf("failed to encode token: %w", err)
 			}
 
 			fmt.Println(token)
@@ -75,8 +75,8 @@ func NewRootCmd() (*cobra.Command, error) {
 		},
 	}
 
-	cmd.Flags().StringP("file", "f", "", "File path of the script to compile")
-	cmd.Flags().StringP("output", "o", "", "Path to save the decompiled script")
+	cmd.Flags().StringP("file", "f", "", "File path of the script to encode")
+	cmd.Flags().StringP("output", "o", "", "Path to save the decoded script")
 
 	return cmd, nil
 }

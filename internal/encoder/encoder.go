@@ -1,9 +1,8 @@
-package compiler
+package encoder
 
 import (
 	"bytes"
-	"caja-cli/internal/lexer"
-	"caja-cli/internal/semantic"
+	"caja-cli/internal/script"
 	"caja-cli/internal/syntax"
 	"compress/zlib"
 	"encoding/base64"
@@ -12,7 +11,7 @@ import (
 )
 
 // Encode compresses the script and returns a URL-safe Base64 token
-func Encode(script string) (token string, err error) {
+func Encode(input string) (token string, err error) {
 	var b bytes.Buffer
 
 	w, zlibErr := zlib.NewWriterLevel(&b, zlib.BestCompression)
@@ -29,31 +28,9 @@ func Encode(script string) (token string, err error) {
 		}
 	}(w)
 
-	tknzr := lexer.New(script)
-	p := syntax.New(tknzr)
-	program := p.Parse()
-
-	hasSyntaticOrSemanticErrors := false
-	if len(p.Errors()) > 0 {
-		fmt.Println("Cannot compile: script contains syntax errors:")
-		for _, msg := range p.Errors() {
-			fmt.Printf("\t- %s\n", msg)
-		}
-		hasSyntaticOrSemanticErrors = true
-	} else {
-		analyzer := semantic.New()
-		analyzer.Analyze(program)
-		if len(analyzer.Errors()) > 0 {
-			fmt.Println("Semantic errors found:")
-			for _, msg := range analyzer.Errors() {
-				fmt.Printf("\t- %s\n", msg)
-			}
-			hasSyntaticOrSemanticErrors = true
-		}
-	}
-
-	if hasSyntaticOrSemanticErrors {
-		return "", fmt.Errorf("failed to parse the script")
+	program, parseErr := script.Parse(input)
+	if parseErr != nil {
+		return "", parseErr
 	}
 
 	_, writeErr := w.Write([]byte(program.String()))
@@ -69,7 +46,7 @@ func Encode(script string) (token string, err error) {
 }
 
 // Decode reverses the token back into the original script string
-func Decode(token string) (script *syntax.Program, err error) {
+func Decode(token string) (program *syntax.Program, err error) {
 	compressedData, decodeErr := base64.RawURLEncoding.DecodeString(token)
 	if decodeErr != nil {
 		return nil, decodeErr
@@ -95,18 +72,10 @@ func Decode(token string) (script *syntax.Program, err error) {
 		return nil, copyErr
 	}
 
-	decodedScript := b.String()
-	tknzr := lexer.New(decodedScript)
-	p := syntax.New(tknzr)
-	program := p.Parse()
-
-	if len(p.Errors()) > 0 {
-		fmt.Println("Cannot decompile: script contains syntax errors:")
-		for _, msg := range p.Errors() {
-			fmt.Printf("\t- %s\n", msg)
-		}
-		return nil, fmt.Errorf("decompilation aborted")
+	p, parseErr := script.Parse(b.String())
+	if parseErr != nil {
+		return nil, parseErr
 	}
 
-	return program, nil
+	return p, nil
 }
