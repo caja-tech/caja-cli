@@ -1,7 +1,6 @@
 package lexer
 
 import (
-	"caja-cli/internal/tokenizer"
 	"testing"
 )
 
@@ -20,7 +19,7 @@ func TestIntegerNumber(t *testing.T) {
 	}
 
 	num := tokens[0]
-	if num.Type != tokenizer.NUMBER {
+	if num.Type != NUMBER {
 		t.Errorf("expected NUMBER, got %q", num.Type)
 	}
 	if num.Literal != "42" {
@@ -31,7 +30,7 @@ func TestIntegerNumber(t *testing.T) {
 	}
 
 	eof := tokens[1]
-	if eof.Type != tokenizer.EOF {
+	if eof.Type != EOF {
 		t.Errorf("expected EOF, got %q", eof.Type)
 	}
 	if eof.Line != 1 || eof.Column != 3 {
@@ -60,13 +59,13 @@ func TestLeadingDecimalNumber(t *testing.T) {
 		t.Fatalf("expected 3 tokens (ILLEGAL + NUMBER + EOF), got %d", len(tokens))
 	}
 
-	if tokens[0].Type != tokenizer.ILLEGAL || tokens[0].Literal != "." || tokens[0].Column != 1 {
+	if tokens[0].Type != ILLEGAL || tokens[0].Literal != "." || tokens[0].Column != 1 {
 		t.Errorf("expected ILLEGAL '.', got %q %q col=%d", tokens[0].Type, tokens[0].Literal, tokens[0].Column)
 	}
-	if tokens[1].Type != tokenizer.NUMBER || tokens[1].Literal != "5" || tokens[1].Column != 2 {
+	if tokens[1].Type != NUMBER || tokens[1].Literal != "5" || tokens[1].Column != 2 {
 		t.Errorf("expected NUMBER '5' at col 2, got %q %q col=%d", tokens[1].Type, tokens[1].Literal, tokens[1].Column)
 	}
-	if tokens[2].Type != tokenizer.EOF || tokens[2].Literal != "" || tokens[2].Column != 3 {
+	if tokens[2].Type != EOF || tokens[2].Literal != "" || tokens[2].Column != 3 {
 		t.Errorf("expected EOF '' at col 3, got %q %q col=%d", tokens[2].Type, tokens[2].Literal, tokens[2].Column)
 	}
 }
@@ -86,7 +85,7 @@ func TestUnderscoreIdentifier(t *testing.T) {
 	}
 
 	ident := tokens[0]
-	if ident.Type != tokenizer.IDENT {
+	if ident.Type != IDENT {
 		t.Errorf("expected IDENT, got %q", ident.Type)
 	}
 	if ident.Literal != "my_rate" {
@@ -97,7 +96,7 @@ func TestUnderscoreIdentifier(t *testing.T) {
 	}
 
 	eof := tokens[1]
-	if eof.Type != tokenizer.EOF {
+	if eof.Type != EOF {
 		t.Errorf("expected EOF, got %q", eof.Type)
 	}
 	if eof.Line != 1 || eof.Column != 8 {
@@ -106,7 +105,7 @@ func TestUnderscoreIdentifier(t *testing.T) {
 }
 
 // TestUppercaseIdentifier confirms that identifiers starting with an uppercase
-// letter (e.g. "Rate") are recognised as IDENT tokens and that the literal is
+// letter (e.g. "Rate") are recognized as IDENT tokens and that the literal is
 // preserved with its original casing intact.
 func TestUppercaseIdentifier(t *testing.T) {
 	input := "Rate"
@@ -120,7 +119,7 @@ func TestUppercaseIdentifier(t *testing.T) {
 	}
 
 	ident := tokens[0]
-	if ident.Type != tokenizer.IDENT {
+	if ident.Type != IDENT {
 		t.Errorf("expected IDENT, got %q", ident.Type)
 	}
 	if ident.Literal != "Rate" {
@@ -131,7 +130,7 @@ func TestUppercaseIdentifier(t *testing.T) {
 	}
 
 	eof := tokens[1]
-	if eof.Type != tokenizer.EOF {
+	if eof.Type != EOF {
 		t.Errorf("expected EOF, got %q", eof.Type)
 	}
 	if eof.Line != 1 || eof.Column != 5 {
@@ -153,7 +152,7 @@ func TestEmptyInput(t *testing.T) {
 	}
 
 	eof := tokens[0]
-	if eof.Type != tokenizer.EOF {
+	if eof.Type != EOF {
 		t.Errorf("expected EOF, got %q", eof.Type)
 	}
 	if eof.Line != 1 || eof.Column != 1 {
@@ -177,7 +176,7 @@ func TestWhitespaceOnlyInput(t *testing.T) {
 		}
 
 		eof := tokens[0]
-		if eof.Type != tokenizer.EOF {
+		if eof.Type != EOF {
 			t.Errorf("expected EOF, got %q", eof.Type)
 		}
 
@@ -203,7 +202,7 @@ func TestNewLinesOnlyInput(t *testing.T) {
 		}
 
 		eof := tokens[0]
-		if eof.Type != tokenizer.EOF {
+		if eof.Type != EOF {
 			t.Errorf("expected EOF, got %q", eof.Type)
 		}
 
@@ -237,13 +236,13 @@ func TestConsecutiveIllegalCharacters(t *testing.T) {
 	if len(tokens) != 3 {
 		t.Fatalf("expected 3 tokens (ILLEGAL + ILLEGAL + EOF), got %d", len(tokens))
 	}
-	if tokens[0].Type != tokenizer.ILLEGAL || tokens[0].Column != 1 {
+	if tokens[0].Type != ILLEGAL || tokens[0].Column != 1 {
 		t.Errorf("token 0: expected ILLEGAL at col 1, got %q col=%d", tokens[0].Type, tokens[0].Column)
 	}
-	if tokens[1].Type != tokenizer.ILLEGAL || tokens[1].Column != 2 {
+	if tokens[1].Type != ILLEGAL || tokens[1].Column != 2 {
 		t.Errorf("token 1: expected ILLEGAL at col 2, got %q col=%d", tokens[1].Type, tokens[1].Column)
 	}
-	if tokens[2].Type != tokenizer.EOF || tokens[2].Column != 3 {
+	if tokens[2].Type != EOF || tokens[2].Column != 3 {
 		t.Errorf("token 2: expected EOF, got %q col=%d", tokens[2].Type, tokens[2].Column)
 	}
 }

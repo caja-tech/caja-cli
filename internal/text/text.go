@@ -1,7 +1,7 @@
 package text
 
 func ContainsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && SearchSubstring(s, substr)
+	return SearchSubstring(s, substr) && len(s) >= len(substr)
 }
 
 func SearchSubstring(s, substr string) bool {

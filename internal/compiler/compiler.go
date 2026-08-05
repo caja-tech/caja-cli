@@ -2,8 +2,9 @@ package compiler
 
 import (
 	"bytes"
-	"caja-cli/internal/parser"
-	"caja-cli/internal/tokenizer"
+	"caja-cli/internal/lexer"
+	"caja-cli/internal/semantic"
+	"caja-cli/internal/syntax"
 	"compress/zlib"
 	"encoding/base64"
 	"fmt"
@@ -28,16 +29,31 @@ func Encode(script string) (token string, err error) {
 		}
 	}(w)
 
-	tknzr := tokenizer.New(script)
-	p := parser.New(tknzr)
+	tknzr := lexer.New(script)
+	p := syntax.New(tknzr)
 	program := p.Parse()
 
+	hasSyntaticOrSemanticErrors := false
 	if len(p.Errors()) > 0 {
 		fmt.Println("Cannot compile: script contains syntax errors:")
 		for _, msg := range p.Errors() {
 			fmt.Printf("\t- %s\n", msg)
 		}
-		return "", fmt.Errorf("compilation aborted")
+		hasSyntaticOrSemanticErrors = true
+	} else {
+		analyzer := semantic.New()
+		analyzer.Analyze(program)
+		if len(analyzer.Errors()) > 0 {
+			fmt.Println("Semantic errors found:")
+			for _, msg := range analyzer.Errors() {
+				fmt.Printf("\t- %s\n", msg)
+			}
+			hasSyntaticOrSemanticErrors = true
+		}
+	}
+
+	if hasSyntaticOrSemanticErrors {
+		return "", fmt.Errorf("failed to parse the script")
 	}
 
 	_, writeErr := w.Write([]byte(program.String()))
@@ -53,7 +69,7 @@ func Encode(script string) (token string, err error) {
 }
 
 // Decode reverses the token back into the original script string
-func Decode(token string) (script *parser.Program, err error) {
+func Decode(token string) (script *syntax.Program, err error) {
 	compressedData, decodeErr := base64.RawURLEncoding.DecodeString(token)
 	if decodeErr != nil {
 		return nil, decodeErr
@@ -80,8 +96,8 @@ func Decode(token string) (script *parser.Program, err error) {
 	}
 
 	decodedScript := b.String()
-	tknzr := tokenizer.New(decodedScript)
-	p := parser.New(tknzr)
+	tknzr := lexer.New(decodedScript)
+	p := syntax.New(tknzr)
 	program := p.Parse()
 
 	if len(p.Errors()) > 0 {

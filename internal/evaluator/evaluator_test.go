@@ -1,8 +1,8 @@
 package evaluator
 
 import (
-	"caja-cli/internal/parser"
-	"caja-cli/internal/tokenizer"
+	"caja-cli/internal/lexer"
+	"caja-cli/internal/syntax"
 	"fmt"
 	"testing"
 )
@@ -23,16 +23,16 @@ type testErrorScenario struct {
 // string through the full pipeline, returning the final numeric result or the
 // first error encountered (from the parser or evaluator).
 func testEval(input string) (float64, error) {
-	tknzr := tokenizer.New(input)
-	p := parser.New(tknzr)
+	tknzr := lexer.New(input)
+	p := syntax.New(tknzr)
 	program := p.Parse()
 
 	if len(p.Errors()) > 0 {
 		return 0, fmt.Errorf("parser errors: %v", p.Errors())
 	}
 
-	evaluator := New()
-	return evaluator.Eval(program)
+	env := NewEnvironment()
+	return Eval(program, env)
 }
 
 // runTestScenarios iterates over a slice of testScenario entries, evaluating
@@ -100,10 +100,10 @@ func TestEvaluateMath(t *testing.T) {
 // earlier ones.
 func TestEvaluateVariables(t *testing.T) {
 	var tests = []testScenario{
-		{"Assign and return", "rate = 15.5\nreturn rate", 15.5},
-		{"Math with variables", "rate = 10\ntax = 5\nreturn rate * tax", 50.0},
-		{"Reassignment", "x = 5\nx = x + 5\nreturn x", 10.0},
-		{"Cascading variables", "a = 5\nb = a\nc = a + b + 5\nreturn c", 15.0},
+		{"Assign and return", "let rate = 15.5\nreturn rate", 15.5},
+		{"Math with variables", "let rate = 10\nlet tax = 5\nreturn rate * tax", 50.0},
+		{"Reassignment", "let x = 5\nx = x + 5\nreturn x", 10.0},
+		{"Cascading variables", "let a = 5\nlet b = a\nlet c = a + b + 5\nreturn c", 15.0},
 	}
 
 	runTestScenarios(t, tests)
@@ -119,8 +119,8 @@ func TestEvaluateIfElseExpressions(t *testing.T) {
 		{"Condition is false", "return if (5 > 10) { 100 } else { 200 }", 200.0},
 		{"No else, condition is true", "return if (10 > 5) { 100 }", 100.0},
 		{"No else, condition is false", "return if (5 > 10) { 100 }", 0.0},
-		{"Complex condition true", "x = 10\ny = 20\nreturn if (x < y) { 1 } else { 0 }", 1.0},
-		{"If else inside assignment", "val = if (10 == 10) { 42 } else { 0 }\nreturn val", 42.0},
+		{"Complex condition true", "let x = 10\nlet y = 20\nreturn if (x < y) { 1 } else { 0 }", 1.0},
+		{"If else inside assignment", "let val = if (10 == 10) { 42 } else { 0 }\nreturn val", 42.0},
 	}
 
 	runTestScenarios(t, tests)
@@ -134,6 +134,39 @@ func TestErrorHandling(t *testing.T) {
 		{"Undefined variable", "10 + rate", "identifier not found: rate"},
 		{"Division by zero", "10 / 0", "division by zero"},
 		{"Modulo by zero", "10 % 0", "modulo by zero"},
+	}
+
+	runTestErrorScenarios(t, tests)
+}
+
+// TestEvaluateBlockScoping verifies that isolated environments created by
+// block statements correctly handle variable modification and shadowing.
+func TestEvaluateBlockScoping(t *testing.T) {
+	var tests = []testScenario{
+		{
+			name:     "Outer scope modification",
+			input:    "let x = 10\nif (10 > 5) {\n x = 20 \n}\nreturn x",
+			expected: 20.0,
+		},
+		{
+			name:     "Environment shadowing",
+			input:    "let x = 10\nif (10 > 5) {\n let x = 20 \n}\nreturn x",
+			expected: 10.0,
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestErrorBlockScoping verifies that variables declared inside an inner block
+// do not leak into the outer environment when the block terminates.
+func TestErrorBlockScoping(t *testing.T) {
+	var tests = []testErrorScenario{
+		{
+			name:          "Inner scope leak prevention",
+			input:         "if (10 > 5) {\n let x = 20 \n}\nreturn x",
+			expectedError: "identifier not found: x",
+		},
 	}
 
 	runTestErrorScenarios(t, tests)
@@ -158,14 +191,14 @@ func (m *mockNode) String() string { return "" }
 // node is constructed directly to bypass the parser, which would never produce
 // such an operator.
 func TestErrorUnknownOperator(t *testing.T) {
-	evaluator := New()
-	node := &parser.InfixExpression{
+	node := &syntax.InfixExpression{
 		Operator: "#",
-		Left:     &parser.NumberLiteral{Value: 10},
-		Right:    &parser.NumberLiteral{Value: 3},
+		Left:     &syntax.NumberLiteral{Value: 10},
+		Right:    &syntax.NumberLiteral{Value: 3},
 	}
 
-	_, err := evaluator.Eval(node)
+	env := NewEnvironment()
+	_, err := Eval(node, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -180,9 +213,8 @@ func TestErrorUnknownOperator(t *testing.T) {
 // recognized by the evaluator's type switch returns an "unknown node type"
 // error. A mockNode is used to simulate this scenario.
 func TestErrorUnknownNodeType(t *testing.T) {
-	evaluator := New()
-
-	_, err := evaluator.Eval(&mockNode{})
+	env := NewEnvironment()
+	_, err := Eval(&mockNode{}, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -240,7 +272,7 @@ func TestErrorInAssignmentValue(t *testing.T) {
 // program encounters an error in an intermediate statement, execution stops
 // immediately and subsequent statements are not evaluated.
 func TestErrorMidProgramHaltsExecution(t *testing.T) {
-	_, err := testEval("x = 5\ny = unknown\nx + 1")
+	_, err := testEval("let x = 5\nlet y = unknown\nx + 1")
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -255,7 +287,7 @@ func TestErrorMidProgramHaltsExecution(t *testing.T) {
 // whose value is zero produces a "division by zero" error, testing the runtime
 // check rather than a static literal check.
 func TestErrorDivisionByZeroWithVariable(t *testing.T) {
-	_, err := testEval("x = 0\nreturn 10 / x")
+	_, err := testEval("let x = 0\nreturn 10 / x")
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -386,7 +418,7 @@ func TestMixedPrecedenceChain(t *testing.T) {
 // TestVariableInComplexExpression verifies that a stored variable can be used
 // inside a grouped arithmetic expression.
 func TestVariableInComplexExpression(t *testing.T) {
-	evaluated, err := testEval("x = 10\nreturn (x + 5) * 2")
+	evaluated, err := testEval("let x = 10\nreturn (x + 5) * 2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -398,7 +430,7 @@ func TestVariableInComplexExpression(t *testing.T) {
 // TestMultipleReassignments verifies that a variable can be overwritten
 // multiple times and that reading it returns the most recent value.
 func TestMultipleReassignments(t *testing.T) {
-	evaluated, err := testEval("x = 1\nx = 2\nx = 3\nreturn x")
+	evaluated, err := testEval("let x = 1\nx = 2\nx = 3\nreturn x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -411,7 +443,7 @@ func TestMultipleReassignments(t *testing.T) {
 // reassigned using its own current value in the right-hand expression
 // (x = x * x).
 func TestVariableOverwriteWithExpression(t *testing.T) {
-	evaluated, err := testEval("x = 10\nx = x * x\nreturn x")
+	evaluated, err := testEval("let x = 10\nx = x * x\nreturn x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -423,7 +455,7 @@ func TestVariableOverwriteWithExpression(t *testing.T) {
 // TestManyVariablesInOneExpression verifies that multiple distinct variables
 // can be referenced together in a single arithmetic expression.
 func TestManyVariablesInOneExpression(t *testing.T) {
-	evaluated, err := testEval("a = 1\nb = 2\nc = 3\nreturn a + b + c")
+	evaluated, err := testEval("let a = 1\nlet b = 2\nlet c = 3\nreturn a + b + c")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -435,7 +467,7 @@ func TestManyVariablesInOneExpression(t *testing.T) {
 // TestAssignmentRequiresReturn verifies that an assignment statement alone
 // does not produce a valid program without a return statement.
 func TestAssignmentRequiresReturn(t *testing.T) {
-	_, err := testEval("x = 42")
+	_, err := testEval("let x = 42")
 	if err == nil {
 		t.Fatal("expected an error but got none")
 	}
@@ -449,7 +481,7 @@ func TestAssignmentRequiresReturn(t *testing.T) {
 // each variable depends on previously assigned ones (a=2, b=a*3, c=b+a),
 // ensuring correct evaluation order and environment state.
 func TestChainOfDependentAssignments(t *testing.T) {
-	evaluated, err := testEval("a = 2\nb = a * 3\nc = b + a\nreturn c")
+	evaluated, err := testEval("let a = 2\nlet b = a * 3\nlet c = b + a\nreturn c")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -490,7 +522,7 @@ func TestProgramReturnsReturnStatement(t *testing.T) {
 // TestSingleAssignmentProgram verifies that a program consisting of a single
 // assignment statement and a return returns the assigned value as its result.
 func TestSingleAssignmentProgram(t *testing.T) {
-	evaluated, err := testEval("x = 99\nreturn x")
+	evaluated, err := testEval("let x = 99\nreturn x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -503,39 +535,29 @@ func TestSingleAssignmentProgram(t *testing.T) {
 // Evaluator Constructor
 // ---------------------------------------------------------------------------
 
-// TestNewReturnsNonNil verifies that the New constructor returns a valid,
-// non-nil Evaluator instance.
-func TestNewReturnsNonNil(t *testing.T) {
-	evaluator := New()
-	if evaluator == nil {
-		t.Fatal("expected New() to return a non-nil evaluator")
-	}
-}
-
 // TestIndependentEnvironments verifies that two evaluators created with New
 // have completely isolated environments: setting a variable in one must not
 // make it visible in the other.
 func TestIndependentEnvironments(t *testing.T) {
-	eval1 := New()
-	eval2 := New()
-
 	// Set variable in first evaluator
-	assignNode := &parser.AssignStatement{
-		Name:  &parser.Identifier{Value: "x"},
-		Value: &parser.NumberLiteral{Value: 42},
+	assignNode := &syntax.LetStatement{
+		Name:  &syntax.Identifier{Value: "x"},
+		Value: &syntax.NumberLiteral{Value: 42},
 	}
 
-	_, err := eval1.Eval(assignNode)
+	env1 := NewEnvironment()
+	_, err := Eval(assignNode, env1)
 	if err != nil {
 		t.Fatalf("unexpected error setting variable: %v", err)
 	}
 
 	// Second evaluator must not see the variable
-	identNode := &parser.ExpressionStatement{
-		Expression: &parser.Identifier{Value: "x"},
+	identNode := &syntax.ExpressionStatement{
+		Expression: &syntax.Identifier{Value: "x"},
 	}
 
-	_, err = eval2.Eval(identNode)
+	env2 := NewEnvironment()
+	_, err = Eval(identNode, env2)
 	if err == nil {
 		t.Fatal("expected error from second evaluator but got none")
 	}

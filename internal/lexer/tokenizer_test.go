@@ -1,4 +1,4 @@
-package tokenizer
+package lexer
 
 import "testing"
 
@@ -127,7 +127,7 @@ func TestTrailingTab(t *testing.T) {
 // TestFullArithmeticExpression tokenizes a complete arithmetic expression
 // involving nested parentheses and all four operators, asserting that every
 // token — including the return keyword, two sets of parentheses, and a numeric
-// literal — is emitted with the correct type, literal value, and column position.
+// literal — is emitted with the correct type, literal value, and column.
 func TestFullArithmeticExpression(t *testing.T) {
 	input := "return (a + b) * (c - d) / 2"
 	tknzr := New(input)
@@ -203,19 +203,19 @@ func TestIfElseExpression(t *testing.T) {
 		{"Number 10", Token{NUMBER, "10", 1, 10}},
 		{"Right paren", Token{RPAREN, ")", 1, 12}},
 		{"Left brace", Token{LBRACE, "{", 1, 14}},
-		
+
 		{"Identifier a", Token{IDENT, "a", 2, 2}},
 		{"Equal", Token{EQ, "==", 2, 4}},
 		{"Number 5", Token{NUMBER, "5", 2, 7}},
-		
+
 		{"Right brace", Token{RBRACE, "}", 3, 1}},
 		{"Else keyword", Token{ELSE, "else", 3, 3}},
 		{"Left brace", Token{LBRACE, "{", 3, 8}},
-		
+
 		{"Identifier a", Token{IDENT, "a", 4, 2}},
 		{"Not equal", Token{NEQ, "!=", 4, 4}},
 		{"Number 5", Token{NUMBER, "5", 4, 7}},
-		
+
 		{"Right brace", Token{RBRACE, "}", 5, 1}},
 		{"End of file", Token{EOF, "", 5, 2}},
 	}
@@ -237,6 +237,60 @@ func TestWindowsLineEndings(t *testing.T) {
 		{"Return keyword", Token{RETURN, "return", 2, 1}},
 		{"Identifier rate", Token{IDENT, "rate", 2, 8}},
 		{"End of file", Token{EOF, "", 2, 12}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestLetStatementBasic tests that the 'let' keyword is properly tokenized.
+func TestLetStatementBasic(t *testing.T) {
+	input := "let rate = 15.5"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier rate", Token{IDENT, "rate", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 10}},
+		{"Number 15.5", Token{NUMBER, "15.5", 1, 12}},
+		{"End of file", Token{EOF, "", 1, 16}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestLetStatementWithExpressions tests that 'let' works correctly with a mathematical expression.
+func TestLetStatementWithExpressions(t *testing.T) {
+	input := "let total = rate * 2"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier total", Token{IDENT, "total", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 11}},
+		{"Identifier rate", Token{IDENT, "rate", 1, 13}},
+		{"Asterisk", Token{ASTERISK, "*", 1, 18}},
+		{"Number 2", Token{NUMBER, "2", 1, 20}},
+		{"End of file", Token{EOF, "", 1, 21}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestMultipleLetStatements tests multiple let declarations separated by a newline.
+func TestMultipleLetStatements(t *testing.T) {
+	input := "let a = 5\nlet b = 10"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier a", Token{IDENT, "a", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 7}},
+		{"Number 5", Token{NUMBER, "5", 1, 9}},
+		{"Let keyword", Token{LET, "let", 2, 1}},
+		{"Identifier b", Token{IDENT, "b", 2, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 2, 7}},
+		{"Number 10", Token{NUMBER, "10", 2, 9}},
+		{"End of file", Token{EOF, "", 2, 11}},
 	}
 
 	runTestsOnTokens(tknzr, tests, t)

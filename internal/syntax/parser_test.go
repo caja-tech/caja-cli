@@ -1,8 +1,8 @@
-package parser
+package syntax
 
 import (
+	"caja-cli/internal/lexer"
 	"caja-cli/internal/text"
-	"caja-cli/internal/tokenizer"
 	"testing"
 )
 
@@ -189,7 +189,7 @@ func TestDecimalNumberLiterals(t *testing.T) {
 func TestMultipleStatements(t *testing.T) {
 	t.Run("Two assignments", func(t *testing.T) {
 		input := "a = 10\nb = 20"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		program := p.Parse()
 
@@ -217,7 +217,7 @@ func TestMultipleStatements(t *testing.T) {
 func TestAssignmentFollowedByExpression(t *testing.T) {
 	t.Run("Assignment followed by expression", func(t *testing.T) {
 		input := "rate = 100\nrate + 50"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		program := p.Parse()
 
@@ -267,7 +267,7 @@ func TestAssignmentOnly(t *testing.T) {
 // that the basic error reporting mechanism works.
 func TestParseErrors(t *testing.T) {
 	input := "rate = 10 + )\ntax = 5 * 2"
-	tknzr := tokenizer.New(input)
+	tknzr := lexer.New(input)
 	p := New(tknzr)
 	p.Parse()
 
@@ -284,7 +284,7 @@ func TestParseErrors(t *testing.T) {
 func TestConsecutiveOperators(t *testing.T) {
 	t.Run("Consecutive operators produce error", func(t *testing.T) {
 		input := "10 + * 5"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		p.Parse()
 
@@ -301,7 +301,7 @@ func TestConsecutiveOperators(t *testing.T) {
 func TestStandaloneOperator(t *testing.T) {
 	t.Run("Standalone operator produces error", func(t *testing.T) {
 		input := "+"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		p.Parse()
 
@@ -318,7 +318,7 @@ func TestStandaloneOperator(t *testing.T) {
 func TestUnmatchedLeftParen(t *testing.T) {
 	t.Run("Unmatched left paren produces RPAREN error", func(t *testing.T) {
 		input := "(10 + 5"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		p.Parse()
 
@@ -345,7 +345,7 @@ func TestUnmatchedLeftParen(t *testing.T) {
 func TestUnmatchedRightParen(t *testing.T) {
 	t.Run("Unmatched right paren produces error", func(t *testing.T) {
 		input := "rate = 10 + )"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		p.Parse()
 
@@ -373,7 +373,7 @@ func TestUnmatchedRightParen(t *testing.T) {
 func TestWhitespaceOnlyCases(t *testing.T) {
 	t.Run("Whitespace-only input produces empty program", func(t *testing.T) {
 		input := "   \t\n  "
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		program := p.Parse()
 
@@ -390,7 +390,7 @@ func TestWhitespaceOnlyCases(t *testing.T) {
 func TestEmptyInput(t *testing.T) {
 	t.Run("Empty input produces empty program", func(t *testing.T) {
 		input := ""
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		program := p.Parse()
 
@@ -408,7 +408,7 @@ func TestEmptyInput(t *testing.T) {
 func TestMultipleErrors(t *testing.T) {
 	t.Run("Multiple errors on separate lines", func(t *testing.T) {
 		input := "+ 10\na = 5"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		program := p.Parse()
 
@@ -442,7 +442,7 @@ func TestMultipleErrors(t *testing.T) {
 func TestRecoveryAfterError(t *testing.T) {
 	t.Run("Recovers after error and parses next statement", func(t *testing.T) {
 		input := "rate = 10 + )\ntax = 5 * 2"
-		tknzr := tokenizer.New(input)
+		tknzr := lexer.New(input)
 		p := New(tknzr)
 		program := p.Parse()
 
@@ -492,13 +492,58 @@ func TestIfExpression(t *testing.T) {
 // flags it as an error.
 func TestReturnInsideBlockError(t *testing.T) {
 	input := "if (x > y) { return x }"
-	tknzr := tokenizer.New(input)
+	tknzr := lexer.New(input)
 	p := New(tknzr)
 	p.Parse()
 
 	errors := p.Errors()
 	if len(errors) == 0 {
 		t.Fatal("expected parser error for return inside block statement, but got none")
+	}
+}
+
+// TestLetStatements verifies that let statements with various assignments parse correctly.
+func TestLetStatements(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Simple let declaration",
+			input:    "let x = 5",
+			expected: "let x = 5",
+		},
+		{
+			name:     "Let declaration with mathematical expression",
+			input:    "let result = (10 + 5) * 2",
+			expected: "let result = ((10 + 5) * 2)",
+		},
+		{
+			name:     "Let declaration with decimal",
+			input:    "let rate = 15.5",
+			expected: "let rate = 15.5",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestLetStatementErrors validates that malformed let statements are caught by the parser.
+func TestLetStatementErrors(t *testing.T) {
+	tests := []string{
+		"let = 5",      // Missing identifier
+		"let 5 = 10",   // Identifier is a number
+		"let x 10",     // Missing assign operator
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
 	}
 }
 
@@ -520,7 +565,7 @@ func checkParseErrors(t *testing.T, p *Parser) {
 func runTestScenarios(t *testing.T, tests []testScenario) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			tknzr := tokenizer.New(test.input)
+			tknzr := lexer.New(test.input)
 			p := New(tknzr)
 			program := p.Parse()
 
