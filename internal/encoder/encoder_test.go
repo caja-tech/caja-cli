@@ -1,4 +1,4 @@
-package compiler
+package encoder
 
 import (
 	"bytes"
@@ -26,7 +26,7 @@ func TestEncodeDecodeValidScript(t *testing.T) {
 	}
 
 	if !strings.Contains(program.String(), "amount") {
-		t.Errorf("Expected decompiled program to contain 'amount', got: %s", program.String())
+		t.Errorf("Expected decoded program to contain 'amount', got: %s", program.String())
 	}
 }
 
@@ -99,7 +99,7 @@ func TestDecodeValidZlibInvalidScript(t *testing.T) {
 		t.Fatal("Expected Decode to fail due to script syntax errors")
 	}
 	if !strings.Contains(err.Error(), "aborted") {
-		t.Errorf("Expected decompilation aborted error, got: %v", err)
+		t.Errorf("Expected decoding aborted error, got: %v", err)
 	}
 }
 
