@@ -32,8 +32,6 @@ func Encode(script string) (token string, err error) {
 	tknzr := lexer.New(script)
 	p := syntax.New(tknzr)
 	program := p.Parse()
-	analyzer := semantic.New()
-	analyzer.Analyze(program)
 
 	hasSyntaticOrSemanticErrors := false
 	if len(p.Errors()) > 0 {
@@ -42,14 +40,16 @@ func Encode(script string) (token string, err error) {
 			fmt.Printf("\t- %s\n", msg)
 		}
 		hasSyntaticOrSemanticErrors = true
-	}
-
-	if len(analyzer.Errors()) > 0 {
-		fmt.Println("Semantic errors found:")
-		for _, msg := range p.Errors() {
-			fmt.Printf("\t- %s\n", msg)
+	} else {
+		analyzer := semantic.New()
+		analyzer.Analyze(program)
+		if len(analyzer.Errors()) > 0 {
+			fmt.Println("Semantic errors found:")
+			for _, msg := range analyzer.Errors() {
+				fmt.Printf("\t- %s\n", msg)
+			}
+			hasSyntaticOrSemanticErrors = true
 		}
-		hasSyntaticOrSemanticErrors = true
 	}
 
 	if hasSyntaticOrSemanticErrors {

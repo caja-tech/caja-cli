@@ -37,8 +37,6 @@ func NewRunCmd() (*cobra.Command, error) {
 			tknzr := lexer.New(string(sourceCode))
 			p := syntax.New(tknzr)
 			program := p.Parse()
-			semanticAnalyzer := semantic.New()
-			semanticAnalyzer.Analyze(program)
 
 			hasSyntaticOrSemanticErrors := false
 			if len(p.Errors()) > 0 {
@@ -47,14 +45,16 @@ func NewRunCmd() (*cobra.Command, error) {
 					fmt.Printf("\t- %s\n", msg)
 				}
 				hasSyntaticOrSemanticErrors = true
-			}
-
-			if len(semanticAnalyzer.Errors()) > 0 {
-				fmt.Println("Semantic errors found:")
-				for _, msg := range p.Errors() {
-					fmt.Printf("\t- %s\n", msg)
+			} else {
+				analyzer := semantic.New()
+				analyzer.Analyze(program)
+				if len(analyzer.Errors()) > 0 {
+					fmt.Println("Semantic errors found:")
+					for _, msg := range analyzer.Errors() {
+						fmt.Printf("\t- %s\n", msg)
+					}
+					hasSyntaticOrSemanticErrors = true
 				}
-				hasSyntaticOrSemanticErrors = true
 			}
 
 			if hasSyntaticOrSemanticErrors {

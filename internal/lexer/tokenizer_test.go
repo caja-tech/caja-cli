@@ -242,6 +242,60 @@ func TestWindowsLineEndings(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestLetStatementBasic tests that the 'let' keyword is properly tokenized.
+func TestLetStatementBasic(t *testing.T) {
+	input := "let rate = 15.5"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier rate", Token{IDENT, "rate", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 10}},
+		{"Number 15.5", Token{NUMBER, "15.5", 1, 12}},
+		{"End of file", Token{EOF, "", 1, 16}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestLetStatementWithExpressions tests that 'let' works correctly with a mathematical expression.
+func TestLetStatementWithExpressions(t *testing.T) {
+	input := "let total = rate * 2"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier total", Token{IDENT, "total", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 11}},
+		{"Identifier rate", Token{IDENT, "rate", 1, 13}},
+		{"Asterisk", Token{ASTERISK, "*", 1, 18}},
+		{"Number 2", Token{NUMBER, "2", 1, 20}},
+		{"End of file", Token{EOF, "", 1, 21}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestMultipleLetStatements tests multiple let declarations separated by a newline.
+func TestMultipleLetStatements(t *testing.T) {
+	input := "let a = 5\nlet b = 10"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier a", Token{IDENT, "a", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 7}},
+		{"Number 5", Token{NUMBER, "5", 1, 9}},
+		{"Let keyword", Token{LET, "let", 2, 1}},
+		{"Identifier b", Token{IDENT, "b", 2, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 2, 7}},
+		{"Number 10", Token{NUMBER, "10", 2, 9}},
+		{"End of file", Token{EOF, "", 2, 11}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

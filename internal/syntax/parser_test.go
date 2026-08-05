@@ -502,6 +502,51 @@ func TestReturnInsideBlockError(t *testing.T) {
 	}
 }
 
+// TestLetStatements verifies that let statements with various assignments parse correctly.
+func TestLetStatements(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Simple let declaration",
+			input:    "let x = 5",
+			expected: "let x = 5",
+		},
+		{
+			name:     "Let declaration with mathematical expression",
+			input:    "let result = (10 + 5) * 2",
+			expected: "let result = ((10 + 5) * 2)",
+		},
+		{
+			name:     "Let declaration with decimal",
+			input:    "let rate = 15.5",
+			expected: "let rate = 15.5",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestLetStatementErrors validates that malformed let statements are caught by the parser.
+func TestLetStatementErrors(t *testing.T) {
+	tests := []string{
+		"let = 5",      // Missing identifier
+		"let 5 = 10",   // Identifier is a number
+		"let x 10",     // Missing assign operator
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
 // checkParseErrors is a test helper that fails the current test immediately if
 // the parser accumulated any errors, logging each error message for debugging.
 func checkParseErrors(t *testing.T, p *Parser) {

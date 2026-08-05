@@ -11,7 +11,7 @@ import (
 
 // TestEncodeDecodeValidScript verifies a basic end-to-end compilation and decompilation
 func TestEncodeDecodeValidScript(t *testing.T) {
-	script := "amount = 100\nreturn amount"
+	script := "let amount = 100\nreturn amount"
 	token, err := Encode(script)
 	if err != nil {
 		t.Fatalf("Encode failed: %v", err)
@@ -55,8 +55,8 @@ func TestEncodeInvalidSyntax(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected Encode to fail with syntax errors, but it succeeded")
 	}
-	if !strings.Contains(err.Error(), "aborted") {
-		t.Errorf("Expected compilation aborted error, got: %v", err)
+	if !strings.Contains(err.Error(), "failed to parse") {
+		t.Errorf("Expected failed to parse error, got: %v", err)
 	}
 }
 
@@ -106,7 +106,8 @@ func TestDecodeValidZlibInvalidScript(t *testing.T) {
 // TestEncodeLargeScript verifies the compiler can handle very large scripts
 func TestEncodeLargeScript(t *testing.T) {
 	var sb strings.Builder
-	for i := 0; i < 10000; i++ {
+	sb.WriteString("let x = 0\n")
+	for i := 1; i < 10000; i++ {
 		sentence := fmt.Sprintf("x = %d\n", i)
 		sb.WriteString(sentence)
 	}
