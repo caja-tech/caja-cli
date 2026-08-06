@@ -152,6 +152,10 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseLetStatement()
 	}
 
+	if p.currToken.Type == lexer.TYPE {
+		return p.parseTypeAliasStatement()
+	}
+
 	if p.peekToken.Type == lexer.ASSIGN {
 		return p.parseAssignStatement()
 	}
@@ -177,18 +181,71 @@ func (p *Parser) parseLetStatement() *LetStatement {
 	statement := &LetStatement{Token: p.currToken}
 
 	if !p.expectPeek(lexer.IDENT) {
-		p.errors = append(p.errors, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
 		return nil
 	}
 	statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
 	if !p.expectPeek(lexer.ASSIGN) {
-		p.errors = append(p.errors, fmt.Sprintf("expected assignment, got %s", p.currToken.Type))
+		p.reportError(p.peekToken, fmt.Sprintf("expected assignment, got %s", p.currToken.Type))
 		return nil
 	}
 
 	p.nextToken()
 	statement.Value = p.parseExpression(LOWEST)
+
+	return statement
+}
+
+// parseTypeAliasStatement parses a type alias declaration of the form "type Name fn(...): ReturnType".
+// It captures the "type" keyword token implicitly, ensures the next token is an identifier,
+// expects the "fn" keyword, and then parses the function signature.
+func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
+	statement := &TypeAliasStatement{Token: p.currToken}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+	statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.FN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected function name, got %s", p.currToken.Type))
+		return nil
+	}
+
+	statement.Signature = &FunctionSignature{}
+	if !p.expectPeek(lexer.LPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected lparen, got %s", p.currToken.Type))
+		return nil
+	}
+
+	if p.peekToken.Type != lexer.RPAREN {
+		p.nextToken()
+		statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, p.currToken.Literal)
+		for p.peekToken.Type == lexer.COMMA {
+			p.nextToken() // move to comma
+			p.nextToken() // move to next type
+			statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, p.currToken.Literal)
+		}
+	}
+
+	if !p.expectPeek(lexer.RPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected rparen, got %s", p.currToken.Type))
+		return nil
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected colon got %s", p.currToken.Type))
+		return nil
+	}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+
+	statement.Signature.ReturnType = p.currToken.Literal
 
 	return statement
 }
@@ -218,6 +275,11 @@ func (p *Parser) parseExpressionStatement() *ExpressionStatement {
 	return statement
 }
 
+// reportError formats and appends a syntax error with the given token's line and column.
+func (p *Parser) reportError(token lexer.Token, msg string) {
+	p.errors = append(p.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+}
+
 // nextToken advances the parser's two-token window by shifting peekToken into
 // currToken and reading the next token from the Tokenizer into peekToken.
 func (p *Parser) nextToken() {
@@ -238,7 +300,7 @@ func (p *Parser) parseNumberLiteral() Expression {
 
 	value, err := strconv.ParseFloat(p.currToken.Literal, 64)
 	if err != nil {
-		p.errors = append(p.errors, fmt.Sprintf("could not parse %q as float", p.currToken.Literal))
+		p.reportError(p.currToken, fmt.Sprintf("could not parse %q as float", p.currToken.Literal))
 		return nil
 	}
 
@@ -265,7 +327,7 @@ func (p *Parser) parseDateLiteral() Expression {
 	_, err := time.Parse("2006-01-02", lit.Value)
 	if err != nil {
 		msg := fmt.Sprintf("syntax error: invalid date format '%s'. Must use 'YYYY-MM-DD'", lit.Value)
-		p.errors = append(p.errors, msg)
+		p.reportError(p.currToken, msg)
 		return nil
 	}
 
@@ -287,7 +349,7 @@ func (p *Parser) parseBoolean() Expression {
 func (p *Parser) parseExpression(precedence int) Expression {
 	prefix := p.prefixParseFuncs[p.currToken.Type]
 	if prefix == nil {
-		p.errors = append(p.errors, fmt.Sprintf("unknown prefix type %q", p.currToken.Type))
+		p.reportError(p.currToken, fmt.Sprintf("unknown prefix type %q", p.currToken.Type))
 		return nil
 	}
 
@@ -331,6 +393,7 @@ func (p *Parser) parseGroupedExpression() Expression {
 
 	groupedExpression := p.parseExpression(LOWEST)
 	if !p.expectPeek(lexer.RPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected ')' after grouped expression, got %s", p.currToken.Type))
 		return nil
 	}
 
@@ -344,6 +407,7 @@ func (p *Parser) parseIfExpression() Expression {
 	expression := &IfExpression{Token: p.currToken}
 
 	if !p.expectPeek(lexer.LPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '(', got %s", p.currToken.Type))
 		return nil
 	}
 	p.nextToken()
@@ -351,9 +415,11 @@ func (p *Parser) parseIfExpression() Expression {
 	expression.Condition = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(lexer.RPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected ')' after condition, got %s", p.currToken.Type))
 		return nil
 	}
 	if !p.expectPeek(lexer.LBRACE) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.currToken.Type))
 		return nil
 	}
 
@@ -363,6 +429,7 @@ func (p *Parser) parseIfExpression() Expression {
 		p.nextToken()
 
 		if !p.expectPeek(lexer.LBRACE) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.currToken.Type))
 			return nil
 		}
 		expression.Alternative = p.parseBlockStatement()
@@ -396,23 +463,29 @@ func (p *Parser) parseFunctionLiteral() Expression {
 	lit := &FunctionLiteral{Token: p.currToken}
 
 	if !p.expectPeek(lexer.LPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '(', got %s", p.currToken.Type))
 		return nil
 	}
 
 	lit.Parameters = p.parseFunctionParameters()
 
-	if p.peekToken.Type == lexer.COLON {
-		p.nextToken() // Move to the ':'
-
-		if !p.expectPeek(lexer.IDENT) {
-			return nil
-		} // Expect the type (e.g., String)
-		lit.ReturnType = p.currToken.Literal
-	}
-
-	if !p.expectPeek(lexer.LBRACE) {
+	if !p.expectPeek(lexer.COLON) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected ':', got %s", p.currToken.Type))
 		return nil
 	}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+
+	lit.ReturnType = p.currToken.Literal
+
+	if !p.expectPeek(lexer.LBRACE) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.currToken.Type))
+		return nil
+	}
+
 	lit.Body = p.parseBlockStatement()
 
 	return lit
@@ -433,10 +506,12 @@ func (p *Parser) parseFunctionParameters() []*Parameter {
 		param := &Parameter{Name: p.currToken.Literal}
 
 		if !p.expectPeek(lexer.COLON) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected ':', got '%s'", param.Type))
 			return nil
 		}
 
 		if !p.expectPeek(lexer.IDENT) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got '%s'", param.Type))
 			return nil
 		}
 		param.Type = p.currToken.Literal
@@ -491,6 +566,7 @@ func (p *Parser) parseFunctionCallArguments() []Expression {
 	}
 
 	if !p.expectPeek(lexer.RPAREN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected ')', got %s", p.currToken.Type))
 		return nil
 	}
 	return args
@@ -505,15 +581,8 @@ func (p *Parser) expectPeek(tokenType lexer.TokenType) bool {
 		return true
 	}
 
-	p.peekError(tokenType)
+	p.reportError(p.peekToken, fmt.Sprintf("expected next token to be %s, got %s instead", tokenType, p.peekToken.Type))
 	return false
-}
-
-// peekError appends a formatted syntax-error message indicating that the peek
-// token did not match the expected type.
-func (p *Parser) peekError(t lexer.TokenType) {
-	msg := fmt.Sprintf("Syntax Error: expected next token to be %s, got %s instead", t, p.peekToken.Type)
-	p.errors = append(p.errors, msg)
 }
 
 // synchronize performs panic-mode error recovery by discarding tokens until it

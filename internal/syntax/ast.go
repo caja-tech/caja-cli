@@ -309,3 +309,45 @@ func (ce *CallExpression) String() string {
 
 	return out
 }
+
+// FunctionSignature represents the expected type signature of a function,
+// including its parameter types and optional return type.
+type FunctionSignature struct {
+	ParamTypes []string
+	ReturnType string
+}
+
+func (fs *FunctionSignature) String() string {
+	out := "fn("
+
+	if len(fs.ParamTypes) > 0 {
+		for i, param := range fs.ParamTypes {
+			out += param
+			if i != len(fs.ParamTypes)-1 {
+				out += ", "
+			}
+		}
+	}
+
+	out += ")"
+	if fs.ReturnType != "" {
+		out += ": " + fs.ReturnType
+	}
+
+	return out
+}
+
+// TypeAliasStatement represents a top-level type alias declaration
+// (e.g. "type BinaryOp fn(Number, Number): Number"). It holds the "type" token,
+// Name is the new alias identifier, and Signature is the function signature.
+type TypeAliasStatement struct {
+	Token     lexer.Token
+	Name      *Identifier
+	Signature *FunctionSignature
+}
+
+func (ts *TypeAliasStatement) statementNode()       {}
+func (ts *TypeAliasStatement) TokenLiteral() string { return ts.Token.Literal }
+func (ts *TypeAliasStatement) String() string {
+	return "type " + ts.Name.Value + " " + ts.Signature.String()
+}

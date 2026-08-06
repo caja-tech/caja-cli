@@ -44,6 +44,7 @@ const (
 	COLON  TokenType = "COLON"
 	TRUE   TokenType = "TRUE"
 	FALSE  TokenType = "FALSE"
+	TYPE   TokenType = "TYPE"
 )
 
 type Token struct {
@@ -64,6 +65,7 @@ var keywords = map[string]TokenType{
 	"fn":     FN,
 	"true":   TRUE,
 	"false":  FALSE,
+	"type":   TYPE,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the

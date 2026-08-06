@@ -44,6 +44,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalBlockStatement(node, env)
 	case *syntax.InfixExpression:
 		return evalInfixExpressionNode(node, env)
+	case *syntax.TypeAliasStatement:
+		return nil, nil
 	case *syntax.FunctionLiteral:
 		return evalFunctionLiteral(node, env)
 	case *syntax.CallExpression:
@@ -291,7 +293,7 @@ func evalIfExpression(ie *syntax.IfExpression, env *environment.Environment) (en
 	return &environment.Number{Value: 0.0}, nil
 }
 
-// boolToPrimitive converts a boolean value to a environment.Object representation,
+// boolToPrimitive converts a boolean value to an environment.Object representation,
 // mapping true to 1.0 and false to 0.0.
 func boolToPrimitive(b bool) environment.Object {
 	if b {

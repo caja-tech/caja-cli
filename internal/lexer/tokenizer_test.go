@@ -379,6 +379,28 @@ func TestDateTokenization(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+func TestTypeAliasTokenization(t *testing.T) {
+	input := "type Add = fn(Number, Number): Number"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Type keyword", Token{TYPE, "type", 1, 1}},
+		{"Identifier Add", Token{IDENT, "Add", 1, 6}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 10}},
+		{"Fn keyword", Token{FN, "fn", 1, 12}},
+		{"Left paren", Token{LPAREN, "(", 1, 14}},
+		{"Type Number", Token{IDENT, "Number", 1, 15}},
+		{"Comma", Token{COMMA, ",", 1, 21}},
+		{"Type Number", Token{IDENT, "Number", 1, 23}},
+		{"Right paren", Token{RPAREN, ")", 1, 29}},
+		{"Colon", Token{COLON, ":", 1, 30}},
+		{"Return Type Number", Token{IDENT, "Number", 1, 32}},
+		{"End of file", Token{EOF, "", 1, 38}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
