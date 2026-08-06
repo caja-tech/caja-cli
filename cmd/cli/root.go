@@ -12,10 +12,12 @@ import (
 // NewRootCmd creates and returns the root command for the cajac CLI application.
 func NewRootCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
-		Use:   "cajac [token]",
-		Short: "A encoder for the custom financial caja language.",
-		Long:  "cajac encode custom financial algorithms from a .caja script file into a token.",
-		Args:  cobra.MaximumNArgs(1),
+		Use:           "cajac [token]",
+		Short:         "A encoder for the custom financial caja language.",
+		Long:          "cajac encode custom financial algorithms from a .caja script file into a token.",
+		Args:          cobra.MaximumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// ==========================================
 			// DECODE MODE: A token argument was provided
@@ -25,6 +27,7 @@ func NewRootCmd() (*cobra.Command, error) {
 				outputFile, _ := cmd.Flags().GetString("output")
 
 				if outputFile == "" {
+					_ = cmd.Help()
 					return fmt.Errorf("please provide an --output file path for the decoded script")
 				}
 
@@ -47,11 +50,13 @@ func NewRootCmd() (*cobra.Command, error) {
 			// ==========================================
 			filePath, err := cmd.Flags().GetString("file")
 			if err != nil {
+				_ = cmd.Help()
 				return fmt.Errorf("failed to retrieve 'file' flag: %w", err)
 			}
 
 			if filePath == "" {
-				return fmt.Errorf("the --file flag is required to compile a script")
+				_ = cmd.Help()
+				return fmt.Errorf("the --file flag is required to encode a script")
 			}
 
 			ext := filepath.Ext(filePath)
