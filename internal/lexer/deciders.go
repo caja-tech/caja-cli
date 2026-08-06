@@ -227,6 +227,7 @@ func decideDigitToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideCommaToken matches the ',' character and produces a COMMA token.
 func decideCommaToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == ',' {
 		return deciderResult{true, Token{Type: COMMA, Literal: string(t.ch), Line: line, Column: column}}
@@ -235,6 +236,7 @@ func decideCommaToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideColonToken matches the ':' character and produces a COLON token.
 func decideColonToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == ':' {
 		return deciderResult{true, Token{Type: COLON, Literal: string(t.ch), Line: line, Column: column}}
@@ -243,6 +245,8 @@ func decideColonToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideStringToken matches the '"' character, reads the full string literal,
+// and produces a STRING token.
 func decideStringToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '"' {
 		return deciderResult{true, Token{Type: STRING, Literal: t.readString(), Line: line, Column: column}}

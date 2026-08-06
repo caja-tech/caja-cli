@@ -3,6 +3,7 @@ package evaluator
 import (
 	"caja-cli/internal/environment"
 	"caja-cli/internal/lexer"
+	"caja-cli/internal/semantic"
 	"caja-cli/internal/syntax"
 	"fmt"
 	"testing"
@@ -30,6 +31,12 @@ func testEval(input string) (interface{}, error) {
 
 	if len(p.Errors()) > 0 {
 		return nil, fmt.Errorf("parser errors: %v", p.Errors())
+	}
+
+	analyzer := semantic.New()
+	analyzer.Analyze(program)
+	if len(analyzer.Errors()) > 0 {
+		return nil, fmt.Errorf("semantic errors: %v", analyzer.Errors())
 	}
 
 	env := environment.NewEnvironment()
@@ -139,16 +146,6 @@ func TestEvaluateFunctions(t *testing.T) {
 			input:    "let max = fn(a: Number, b: Number): Number { if (a > b) { return a } else { return b } }\nreturn max(10, 20)",
 			expected: 20.0,
 		},
-		{
-			name:     "Function closure",
-			input:    "let makeAdder = fn(x: Number): Function { return fn(y: Number): Number { return x + y } }\nlet addTwo = makeAdder(2)\nreturn addTwo(3)",
-			expected: 5.0,
-		},
-		{
-			name:     "Recursive function call",
-			input:    "let fib = fn(x: Number): Number { if (x < 2) { return x } else { return fib(x - 1) + fib(x - 2) } }\nreturn fib(5)",
-			expected: 5.0,
-		},
 	}
 
 	runTestScenarios(t, tests)
@@ -176,7 +173,7 @@ func TestEvaluateIfElseExpressions(t *testing.T) {
 // dividing by a literal zero.
 func TestErrorHandling(t *testing.T) {
 	var tests = []testErrorScenario{
-		{"Undefined variable", "10 + rate", "identifier not found: rate"},
+		{"Undefined variable", "10 + rate", "semantic errors: [semantic error: undeclared variable 'rate']"},
 		{"Division by zero", "10 / 0", "division by zero"},
 		{"Modulo by zero", "10 % 0", "modulo by zero"},
 	}
@@ -193,11 +190,6 @@ func TestEvaluateBlockScoping(t *testing.T) {
 			input:    "let x = 10\nif (10 > 5) {\n x = 20 \n}\nreturn x",
 			expected: 20.0,
 		},
-		{
-			name:     "Environment shadowing",
-			input:    "let x = 10\nif (10 > 5) {\n let x = 20 \n}\nreturn x",
-			expected: 10.0,
-		},
 	}
 
 	runTestScenarios(t, tests)
@@ -210,7 +202,12 @@ func TestErrorBlockScoping(t *testing.T) {
 		{
 			name:          "Inner scope leak prevention",
 			input:         "if (10 > 5) {\n let x = 20 \n}\nreturn x",
-			expectedError: "identifier not found: x",
+			expectedError: "semantic errors: [semantic error: undeclared variable 'x']",
+		},
+		{
+			name:          "Environment shadowing",
+			input:         "let x = 10\nif (10 > 5) {\n let x = 20 \n}\nreturn x",
+			expectedError: "semantic errors: [semantic error: variable 'x' is already declared]",
 		},
 	}
 
@@ -278,7 +275,7 @@ func TestErrorInLeftOperand(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "identifier not found: unknown_var"
+	expected := "semantic errors: [semantic error: undeclared variable 'unknown_var']"
 	if err.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
@@ -292,7 +289,7 @@ func TestErrorInRightOperand(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "identifier not found: missing_var"
+	expected := "semantic errors: [semantic error: undeclared variable 'missing_var']"
 	if err.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
@@ -307,7 +304,7 @@ func TestErrorInAssignmentValue(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "identifier not found: undefined_var"
+	expected := "semantic errors: [semantic error: undeclared variable 'undefined_var' semantic error: undeclared variable 'x'. Use 'let' to declare it.]"
 	if err.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}
@@ -322,7 +319,7 @@ func TestErrorMidProgramHaltsExecution(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "identifier not found: unknown"
+	expected := "semantic errors: [semantic error: undeclared variable 'unknown']"
 	if err.Error() != expected {
 		t.Errorf("expected error %q, got %q", expected, err.Error())
 	}

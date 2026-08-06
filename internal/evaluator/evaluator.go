@@ -20,95 +20,144 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 	case *syntax.Program:
 		return evalProgram(node, env)
 	case *syntax.ExpressionStatement:
-		return Eval(node.Expression, env)
+		return evalExpressionStatement(node, env)
 	case *syntax.AssignStatement:
-		val, err := Eval(node.Value, env)
-		if err != nil {
-			return nil, err
-		}
-		env.Assign(node.Name.Value, val)
-		return val, nil
+		return evalAssignStatement(node, env)
 	case *syntax.NumberLiteral:
-		return &environment.Number{Value: node.Value}, nil
+		return evalNumberLiteral(node)
 	case *syntax.StringLiteral:
-		return &environment.String{Value: node.Value}, nil
+		return evalStringLiteral(node)
 	case *syntax.Boolean:
-		return nativeBoolToBooleanObject(node.Value), nil
+		return evalBooleanLiteral(node)
 	case *syntax.Identifier:
 		return evalIdentifier(node, env)
 	case *syntax.ReturnStatement:
-		val, err := Eval(node.ReturnValue, env)
-		if err != nil {
-			return nil, err
-		}
-		return &environment.ReturnValue{Value: val}, nil
+		return evalReturnStatement(node, env)
 	case *syntax.LetStatement:
-		val, err := Eval(node.Value, env)
-		if err != nil {
-			return nil, err
-		}
-		env.Set(node.Name.Value, val)
-		return val, nil
+		return evalLetStatement(node, env)
 	case *syntax.IfExpression:
 		return evalIfExpression(node, env)
 	case *syntax.BlockStatement:
 		return evalBlockStatement(node, env)
 	case *syntax.InfixExpression:
-		left, err := Eval(node.Left, env)
-		if err != nil {
-			return nil, err
-		}
-
-		right, err := Eval(node.Right, env)
-		if err != nil {
-			return nil, err
-		}
-
-		return evalInfixExpression(node.Operator, left, right)
+		return evalInfixExpressionNode(node, env)
 	case *syntax.FunctionLiteral:
-		params := node.Parameters
-		body := node.Body
-		return &environment.Function{Parameters: params, Env: env, Body: body}, nil
-
+		return evalFunctionLiteral(node, env)
 	case *syntax.CallExpression:
-		function, err := Eval(node.Function, env)
-		if err != nil {
-			return nil, err
-		}
-
-		var args []environment.Object
-		for _, argNode := range node.Arguments {
-			evaluated, err := Eval(argNode, env)
-			if err != nil {
-				return nil, err
-			}
-			args = append(args, evaluated)
-		}
-
-		fn, ok := function.(*environment.Function)
-		if !ok {
-			return nil, fmt.Errorf("not a function")
-		}
-
-		extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
-		for i, param := range fn.Parameters {
-			extendedEnv.Set(param.Name, args[i])
-		}
-
-		evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
-		if err != nil {
-			return nil, err
-		}
-
-		// Unwrap any early return values so the whole program doesn't halt
-		if retVal, ok := evaluated.(*environment.ReturnValue); ok {
-			return retVal.Value, nil
-		}
-
-		return evaluated, nil
+		return evalCallExpression(node, env)
 	}
 
 	return nil, fmt.Errorf("unknown node type: %T", n)
+}
+
+// evalExpressionStatement evaluates the inner expression of an expression statement.
+func evalExpressionStatement(node *syntax.ExpressionStatement, env *environment.Environment) (environment.Object, error) {
+	return Eval(node.Expression, env)
+}
+
+// evalAssignStatement evaluates the assigned value and updates the existing variable in the environment.
+func evalAssignStatement(node *syntax.AssignStatement, env *environment.Environment) (environment.Object, error) {
+	val, err := Eval(node.Value, env)
+	if err != nil {
+		return nil, err
+	}
+	env.Assign(node.Name.Value, val)
+	return val, nil
+}
+
+// evalNumberLiteral returns a Number object representing the literal's value.
+func evalNumberLiteral(node *syntax.NumberLiteral) (environment.Object, error) {
+	return &environment.Number{Value: node.Value}, nil
+}
+
+// evalStringLiteral returns a String object representing the literal's value.
+func evalStringLiteral(node *syntax.StringLiteral) (environment.Object, error) {
+	return &environment.String{Value: node.Value}, nil
+}
+
+// evalBooleanLiteral returns a Boolean object representing the literal's value.
+func evalBooleanLiteral(node *syntax.Boolean) (environment.Object, error) {
+	return nativeBoolToBooleanObject(node.Value), nil
+}
+
+// evalReturnStatement evaluates the returned expression and wraps it in a ReturnValue object.
+func evalReturnStatement(node *syntax.ReturnStatement, env *environment.Environment) (environment.Object, error) {
+	val, err := Eval(node.ReturnValue, env)
+	if err != nil {
+		return nil, err
+	}
+	return &environment.ReturnValue{Value: val}, nil
+}
+
+// evalLetStatement evaluates the assigned value and creates a new variable in the environment.
+func evalLetStatement(node *syntax.LetStatement, env *environment.Environment) (environment.Object, error) {
+	val, err := Eval(node.Value, env)
+	if err != nil {
+		return nil, err
+	}
+	env.Set(node.Name.Value, val)
+	return val, nil
+}
+
+// evalInfixExpressionNode evaluates the left and right operands and applies the operator.
+func evalInfixExpressionNode(node *syntax.InfixExpression, env *environment.Environment) (environment.Object, error) {
+	left, err := Eval(node.Left, env)
+	if err != nil {
+		return nil, err
+	}
+
+	right, err := Eval(node.Right, env)
+	if err != nil {
+		return nil, err
+	}
+
+	return evalInfixExpression(node.Operator, left, right)
+}
+
+// evalFunctionLiteral returns a Function object capturing its parameters, body, and the current environment.
+func evalFunctionLiteral(node *syntax.FunctionLiteral, env *environment.Environment) (environment.Object, error) {
+	params := node.Parameters
+	body := node.Body
+	return &environment.Function{Parameters: params, Env: env, Body: body}, nil
+}
+
+// evalCallExpression evaluates the function and its arguments, then executes the function body in an extended environment.
+func evalCallExpression(node *syntax.CallExpression, env *environment.Environment) (environment.Object, error) {
+	function, err := Eval(node.Function, env)
+	if err != nil {
+		return nil, err
+	}
+
+	var args []environment.Object
+	for _, argNode := range node.Arguments {
+		evaluated, err := Eval(argNode, env)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, evaluated)
+	}
+
+	fn, ok := function.(*environment.Function)
+	if !ok {
+		return nil, fmt.Errorf("not a function")
+	}
+
+	extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+	for i, param := range fn.Parameters {
+		extendedEnv.Set(param.Name, args[i])
+	}
+
+	evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unwrap any early return values so the whole program doesn't halt
+	if retVal, ok := evaluated.(*environment.ReturnValue); ok {
+		return retVal.Value, nil
+	}
+
+	return evaluated, nil
 }
 
 // evalProgram evaluates every statement in the program sequentially. When a
@@ -231,7 +280,7 @@ func evalIfExpression(ie *syntax.IfExpression, env *environment.Environment) (en
 	return &environment.Number{Value: 0.0}, nil
 }
 
-// boolToPrimitive converts a boolean value to a types.Object representation,
+// boolToPrimitive converts a boolean value to a environment.Object representation,
 // mapping true to 1.0 and false to 0.0.
 func boolToPrimitive(b bool) environment.Object {
 	if b {
@@ -240,6 +289,8 @@ func boolToPrimitive(b bool) environment.Object {
 	return &environment.Number{Value: 0.0}
 }
 
+// nativeBoolToBooleanObject converts a native Go boolean into its corresponding
+// environment.Boolean object wrapper, returning either the TRUE or FALSE singleton.
 func nativeBoolToBooleanObject(input bool) *environment.Boolean {
 	if input {
 		return TRUE

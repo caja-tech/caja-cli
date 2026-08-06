@@ -244,6 +244,7 @@ func (p *Parser) parseNumberLiteral() Expression {
 	return literal
 }
 
+// parseStringLiteral returns a StringLiteral expression node for the current token.
 func (p *Parser) parseStringLiteral() Expression {
 	return &StringLiteral{
 		Token: p.currToken,
@@ -251,6 +252,7 @@ func (p *Parser) parseStringLiteral() Expression {
 	}
 }
 
+// parseBoolean returns a Boolean expression node for the current token.
 func (p *Parser) parseBoolean() Expression {
 	return &Boolean{
 		Token: p.currToken,
@@ -368,6 +370,8 @@ func (p *Parser) parseBlockStatement() *BlockStatement {
 	return block
 }
 
+// parseFunctionLiteral parses a function definition, including its parameters,
+// optional return type, and body block.
 func (p *Parser) parseFunctionLiteral() Expression {
 	lit := &FunctionLiteral{Token: p.currToken}
 
@@ -394,6 +398,8 @@ func (p *Parser) parseFunctionLiteral() Expression {
 	return lit
 }
 
+// parseFunctionParameters parses the comma-separated list of typed parameters
+// within a function declaration.
 func (p *Parser) parseFunctionParameters() []*Parameter {
 	var parameters []*Parameter
 
@@ -437,12 +443,16 @@ func (p *Parser) parseFunctionParameters() []*Parameter {
 	return parameters
 }
 
+// parseFunctionCallExpression parses a function call, capturing the function
+// expression and its parsed arguments.
 func (p *Parser) parseFunctionCallExpression(function Expression) Expression {
 	exp := &CallExpression{Token: p.currToken, Function: function}
 	exp.Arguments = p.parseFunctionCallArguments()
 	return exp
 }
 
+// parseFunctionCallArguments parses the comma-separated list of expressions
+// provided as arguments to a function call.
 func (p *Parser) parseFunctionCallArguments() []Expression {
 	var args []Expression
 

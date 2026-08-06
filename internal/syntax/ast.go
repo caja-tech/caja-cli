@@ -113,6 +113,8 @@ func (n *NumberLiteral) TokenLiteral() string {
 }
 func (n *NumberLiteral) String() string { return n.Token.Literal }
 
+// StringLiteral is an expression node that represents a string constant.
+// Token carries the original tokenizer.Token, and Value holds the string content.
 type StringLiteral struct {
 	Token lexer.Token
 	Value string
@@ -122,6 +124,8 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return `"` + sl.Value + `"` }
 
+// Boolean is an expression node that represents a boolean constant.
+// Token carries the original tokenizer.Token, and Value holds the boolean value.
 type Boolean struct {
 	Token lexer.Token
 	Value bool
@@ -224,6 +228,8 @@ func (e *ExpressionStatement) String() string {
 	return e.Expression.String()
 }
 
+// Parameter represents a single parameter in a function declaration, containing
+// its Name and expected Type.
 type Parameter struct {
 	Name string
 	Type string
@@ -233,6 +239,8 @@ func (p *Parameter) String() string {
 	return p.Name + ": " + p.Type
 }
 
+// FunctionLiteral is an expression node that represents a function definition.
+// It includes the parameters, optional return type, and the function body.
 type FunctionLiteral struct {
 	Token      lexer.Token
 	Parameters []*Parameter
@@ -263,6 +271,8 @@ func (fl *FunctionLiteral) String() string {
 	return out
 }
 
+// CallExpression is an expression node that represents a function invocation.
+// It contains the function being called and the list of argument expressions.
 type CallExpression struct {
 	Token     lexer.Token
 	Function  Expression
