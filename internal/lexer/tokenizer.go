@@ -103,6 +103,24 @@ func (t *Tokenizer) readString() string {
 	return result
 }
 
+// readDate consumes characters until a closing single quote or EOF is
+// encountered, returning the enclosed date literal. It also consumes the
+// closing quote if present.
+func (t *Tokenizer) readDate() string {
+	position := t.position + 1
+	for {
+		t.readChar()
+		if t.ch == '\'' || t.ch == 0 {
+			break
+		}
+	}
+	result := t.input[position:t.position]
+	if t.ch == '\'' {
+		t.readChar() // consume the closing quote
+	}
+	return result
+}
+
 // skipWhitespace advances past any combination of spaces, tabs, newlines, and
 // carriage-returns, updating line and column tracking along the way.
 func (t *Tokenizer) skipWhitespace() {

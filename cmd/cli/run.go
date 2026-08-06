@@ -1,6 +1,7 @@
 package main
 
 import (
+	"caja-cli/internal/environment"
 	"caja-cli/internal/script"
 	"fmt"
 	"os"
@@ -41,8 +42,7 @@ func NewRunCmd() (*cobra.Command, error) {
 				return err
 			}
 
-			fmt.Println(eval)
-
+			environment.PrintObject(eval)
 			return nil
 		},
 	}

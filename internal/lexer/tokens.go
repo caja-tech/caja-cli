@@ -11,6 +11,7 @@ const (
 	IDENT  TokenType = "IDENT"
 	NUMBER TokenType = "NUMBER"
 	STRING TokenType = "STRING"
+	DATE   TokenType = "DATE"
 
 	// Operators
 	ASSIGN   TokenType = "ASSIGN"

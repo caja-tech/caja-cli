@@ -5,6 +5,7 @@ import (
 	"caja-cli/internal/syntax"
 	"fmt"
 	"math"
+	"time"
 )
 
 var (
@@ -27,7 +28,9 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalNumberLiteral(node)
 	case *syntax.StringLiteral:
 		return evalStringLiteral(node)
-	case *syntax.Boolean:
+	case *syntax.DateLiteral:
+		return evalDateLiteral(node)
+	case *syntax.BooleanLiteral:
 		return evalBooleanLiteral(node)
 	case *syntax.Identifier:
 		return evalIdentifier(node, env)
@@ -75,8 +78,16 @@ func evalStringLiteral(node *syntax.StringLiteral) (environment.Object, error) {
 	return &environment.String{Value: node.Value}, nil
 }
 
+// evalDateLiteral parses the DateLiteral string value as 'YYYY-MM-DD' and returns
+// a Date object representing the parsed time.
+func evalDateLiteral(node *syntax.DateLiteral) (environment.Object, error) {
+	parsedTime, _ := time.Parse("2006-01-02", node.Value)
+
+	return &environment.Date{Value: parsedTime}, nil
+}
+
 // evalBooleanLiteral returns a Boolean object representing the literal's value.
-func evalBooleanLiteral(node *syntax.Boolean) (environment.Object, error) {
+func evalBooleanLiteral(node *syntax.BooleanLiteral) (environment.Object, error) {
 	return nativeBoolToBooleanObject(node.Value), nil
 }
 

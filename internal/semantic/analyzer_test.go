@@ -221,3 +221,45 @@ let check = fn(a: Number): Boolean {
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticAnalysisDates(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid date declaration and reassignment",
+			input: `
+let d = '2023-10-25'
+d = '2023-12-01'
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Invalid assignment to date variable",
+			input: `
+let d = '2023-10-25'
+d = 10
+`,
+			expectedErrors: []string{
+				"type error: cannot assign NUMBER to variable 'd' of type DATE",
+			},
+		},
+		{
+			name: "Function returning Date",
+			input: `
+let getDate = fn(): Date { return '2023-10-25' }
+let d = getDate()
+d = '2023-12-01'
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Function returning wrong type instead of Date",
+			input: `
+let getDate = fn(): Date { return 10 }
+`,
+			expectedErrors: []string{
+				"type error: function declared to return DATE, but body returns NUMBER",
+			},
+		},
+	}
+	runTestScenarios(t, tests)
+}

@@ -60,11 +60,13 @@ func (a *Analyzer) Analyze(node syntax.Node) Symbol {
 	case *syntax.CallExpression:
 		return a.analyzeCallExpression(n)
 	case *syntax.NumberLiteral:
-		return a.analyzeNumberLiteral(n)
+		return Symbol{Type: environment.NUMBER_OBJ}
 	case *syntax.StringLiteral:
-		return a.analyzeStringLiteral(n)
-	case *syntax.Boolean:
-		return a.analyzeBoolean(n)
+		return Symbol{Type: environment.STRING_OBJ}
+	case *syntax.DateLiteral:
+		return Symbol{Type: environment.DATE_OBJ}
+	case *syntax.BooleanLiteral:
+		return Symbol{Type: environment.BOOLEAN_OBJ}
 	}
 
 	return anySymbol
@@ -277,21 +279,6 @@ func (a *Analyzer) analyzeCallExpression(n *syntax.CallExpression) Symbol {
 	}
 
 	return anySymbol
-}
-
-// analyzeNumberLiteral produces the semantic symbol for a number literal.
-func (a *Analyzer) analyzeNumberLiteral(n *syntax.NumberLiteral) Symbol {
-	return Symbol{Type: environment.NUMBER_OBJ}
-}
-
-// analyzeStringLiteral produces the semantic symbol for a string literal.
-func (a *Analyzer) analyzeStringLiteral(n *syntax.StringLiteral) Symbol {
-	return Symbol{Type: environment.STRING_OBJ}
-}
-
-// analyzeBoolean produces the semantic symbol for a boolean literal.
-func (a *Analyzer) analyzeBoolean(n *syntax.Boolean) Symbol {
-	return Symbol{Type: environment.BOOLEAN_OBJ}
 }
 
 // pushScope creates a new inner scope and pushes it onto the scope stack.

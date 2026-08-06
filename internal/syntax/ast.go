@@ -124,16 +124,27 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return `"` + sl.Value + `"` }
 
-// Boolean is an expression node that represents a boolean constant.
+// DateLiteral is an expression node that represents a date constant.
+// Token carries the original tokenizer.Token, and Value holds the date content.
+type DateLiteral struct {
+	Token lexer.Token
+	Value string
+}
+
+func (dl *DateLiteral) expressionNode()      {}
+func (dl *DateLiteral) TokenLiteral() string { return dl.Token.Literal }
+func (dl *DateLiteral) String() string       { return "'" + dl.Value + "'" }
+
+// BooleanLiteral is an expression node that represents a boolean constant.
 // Token carries the original tokenizer.Token, and Value holds the boolean value.
-type Boolean struct {
+type BooleanLiteral struct {
 	Token lexer.Token
 	Value bool
 }
 
-func (b *Boolean) expressionNode()      {}
-func (b *Boolean) TokenLiteral() string { return b.Token.Literal }
-func (b *Boolean) String() string       { return b.Token.Literal }
+func (b *BooleanLiteral) expressionNode()      {}
+func (b *BooleanLiteral) TokenLiteral() string { return b.Token.Literal }
+func (b *BooleanLiteral) String() string       { return b.Token.Literal }
 
 // InfixExpression is an expression node for binary operations such as
 // addition, subtraction, multiplication, and division. It stores the operator
