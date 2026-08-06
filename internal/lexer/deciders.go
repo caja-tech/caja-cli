@@ -32,6 +32,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideCommaToken,
 	decideColonToken,
 	decideStringToken,
+	decideDateToken,
 }
 
 // decideAssignToken matches the '=' character and produces an ASSIGN token.
@@ -250,6 +251,16 @@ func decideColonToken(t *Tokenizer, line int, column int) deciderResult {
 func decideStringToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '"' {
 		return deciderResult{true, Token{Type: STRING, Literal: t.readString(), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideDateToken matches the '\'' character, reads the full date literal,
+// and produces a DATE token.
+func decideDateToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '\'' {
+		return deciderResult{true, Token{Type: DATE, Literal: t.readDate(), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}

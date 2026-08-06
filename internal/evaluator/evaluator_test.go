@@ -52,6 +52,8 @@ func testEval(input string) (interface{}, error) {
 		return obj.Value, nil
 	case *environment.Boolean:
 		return obj.Value, nil
+	case *environment.Date:
+		return obj.Value.Format("2006-01-02"), nil
 	default:
 		return obj, nil
 	}
@@ -633,6 +635,16 @@ func TestEvaluateTypes(t *testing.T) {
 			name:     "Return boolean from function",
 			input:    "let isTrue = fn(): Boolean { return true }\nreturn isTrue()",
 			expected: true,
+		},
+		{
+			name:     "Date literal",
+			input:    "return '2023-10-25'",
+			expected: "2023-10-25",
+		},
+		{
+			name:     "Return date from function",
+			input:    "let getToday = fn(): Date { return '2023-10-25' }\nreturn getToday()",
+			expected: "2023-10-25",
 		},
 	}
 

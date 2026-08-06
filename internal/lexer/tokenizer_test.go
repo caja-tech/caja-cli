@@ -363,6 +363,22 @@ func TestBooleanTokenization(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestDateTokenization tests the tokenization of date literals.
+func TestDateTokenization(t *testing.T) {
+	input := "let today = '2023-10-25'"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier today", Token{IDENT, "today", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 11}},
+		{"Date value", Token{DATE, "2023-10-25", 1, 13}},
+		{"End of file", Token{EOF, "", 1, 25}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

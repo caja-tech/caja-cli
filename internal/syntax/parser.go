@@ -4,6 +4,7 @@ import (
 	"caja-cli/internal/lexer"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 const (
@@ -82,6 +83,7 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.prefixParseFuncs[lexer.IDENT] = p.parseIdentifier
 	p.prefixParseFuncs[lexer.NUMBER] = p.parseNumberLiteral
 	p.prefixParseFuncs[lexer.STRING] = p.parseStringLiteral
+	p.prefixParseFuncs[lexer.DATE] = p.parseDateLiteral
 	p.prefixParseFuncs[lexer.LPAREN] = p.parseGroupedExpression
 	p.prefixParseFuncs[lexer.IF] = p.parseIfExpression
 	p.prefixParseFuncs[lexer.TRUE] = p.parseBoolean
@@ -252,9 +254,27 @@ func (p *Parser) parseStringLiteral() Expression {
 	}
 }
 
-// parseBoolean returns a Boolean expression node for the current token.
+// parseDateLiteral parses a date literal string, validates its format
+// as 'YYYY-MM-DD', and returns a DateLiteral expression node.
+func (p *Parser) parseDateLiteral() Expression {
+	lit := &DateLiteral{
+		Token: p.currToken,
+		Value: p.currToken.Literal,
+	}
+
+	_, err := time.Parse("2006-01-02", lit.Value)
+	if err != nil {
+		msg := fmt.Sprintf("syntax error: invalid date format '%s'. Must use 'YYYY-MM-DD'", lit.Value)
+		p.errors = append(p.errors, msg)
+		return nil
+	}
+
+	return lit
+}
+
+// parseBoolean returns a BooleanLiteral expression node for the current token.
 func (p *Parser) parseBoolean() Expression {
-	return &Boolean{
+	return &BooleanLiteral{
 		Token: p.currToken,
 		Value: p.currToken.Type == lexer.TRUE,
 	}

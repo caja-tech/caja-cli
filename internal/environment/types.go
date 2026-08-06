@@ -66,3 +66,16 @@ type ReturnValue struct {
 
 func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_OBJ }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
+
+// FormatObject takes an environment Object and returns its formatted string representation.
+func FormatObject(obj Object) string {
+	if obj == nil {
+		return "null"
+	}
+	return obj.Inspect()
+}
+
+// PrintObject formats the given environment Object and prints it to standard output.
+func PrintObject(obj Object) {
+	fmt.Println(FormatObject(obj))
+}

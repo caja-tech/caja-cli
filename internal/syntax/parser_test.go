@@ -624,6 +624,41 @@ func TestStringAndBooleanParsing(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
+// TestDateParsing verifies parsing of date literals.
+func TestDateParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Date literal in assignment",
+			input:    "let today = '2023-10-25'",
+			expected: "let today = '2023-10-25'",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestDateParsingErrors verifies that invalid date literals produce parse errors.
+func TestDateParsingErrors(t *testing.T) {
+	tests := []string{
+		"let today = '2023-10-32'", // Invalid day
+		"let today = '10-25-2023'", // Invalid format
+		"let today = 'not-a-date'", // Invalid string
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
 // checkParseErrors is a test helper that fails the current test immediately if
 // the parser accumulated any errors, logging each error message for debugging.
 func checkParseErrors(t *testing.T, p *Parser) {
