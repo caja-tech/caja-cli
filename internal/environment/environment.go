@@ -1,17 +1,30 @@
 package environment
 
+import (
+	"fmt"
+	"strings"
+)
+
+type StackFrame struct {
+	FuncName string
+	Line     int
+	Column   int
+	Args     []string
+}
+
 // Environment provides a symbol table to store and retrieve variables
 // during evaluation. It supports variable shadowing and scope resolution
 // through a reference to an outer enclosing environment.
 type Environment struct {
-	store map[string]Object
-	outer *Environment
+	store     map[string]Object
+	outer     *Environment
+	CallStack []StackFrame
 }
 
 // NewEnvironment creates and returns a new top-level environment with
 // no outer scope.
 func NewEnvironment() *Environment {
-	return &Environment{store: make(map[string]Object), outer: nil}
+	return &Environment{store: make(map[string]Object), outer: nil, CallStack: []StackFrame{}}
 }
 
 // NewEnclosedEnvironment creates and returns a new environment that extends
@@ -19,6 +32,9 @@ func NewEnvironment() *Environment {
 func NewEnclosedEnvironment(outer *Environment) *Environment {
 	env := NewEnvironment()
 	env.outer = outer
+	if outer != nil {
+		env.CallStack = outer.CallStack
+	}
 	return env
 }
 
@@ -52,4 +68,26 @@ func (env *Environment) Assign(name string, val Object) {
 	if env.outer != nil {
 		env.outer.Assign(name, val)
 	}
+}
+
+// GetStackTrace generates a formatted string representing the current call stack,
+// showing the function names, arguments, line numbers, and column positions
+// of each active frame in the environment's execution history.
+func (env *Environment) GetStackTrace() string {
+	if len(env.CallStack) == 0 {
+		return ""
+	}
+
+	trace := "\nStack trace:\n"
+	for i := len(env.CallStack) - 1; i >= 0; i-- {
+		frame := env.CallStack[i]
+		argsJoined := strings.Join(frame.Args, ", ")
+
+		trace += fmt.Sprintf("  at %s(%s) line %d, col %d\n",
+			frame.FuncName,
+			argsJoined,
+			frame.Line,
+			frame.Column)
+	}
+	return trace
 }

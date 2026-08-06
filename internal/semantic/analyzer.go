@@ -99,17 +99,43 @@ func (a *Analyzer) analyzeBlockStatement(n *syntax.BlockStatement) Symbol {
 // analyzeLetStatement checks for variable redeclarations and registers the
 // newly declared variable in the current scope with its analyzed type.
 func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) Symbol {
-	sym := anySymbol
-	if n.Value != nil {
-		sym = a.Analyze(n.Value)
-	}
-
 	if _, exists := a.resolve(n.Name.Value); exists {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
 	}
 
-	a.declare(n.Name.Value, sym)
-	return sym
+	if fnNode, ok := n.Value.(*syntax.FunctionLiteral); ok {
+		var paramTypes []Symbol
+		for _, param := range fnNode.Parameters {
+			paramTypes = append(paramTypes, a.resolveTypeName(param.Type, n.Token))
+		}
+
+		var retType *Symbol
+		if fnNode.ReturnType != "" {
+			resolved := a.resolveTypeName(fnNode.ReturnType, n.Token)
+			retType = &resolved
+		}
+
+		fnSymbol := Symbol{
+			Type:       environment.FUNCTION_OBJ,
+			Arity:      len(fnNode.Parameters),
+			ParamTypes: paramTypes,
+			ReturnType: retType,
+		}
+
+		a.declare(n.Name.Value, fnSymbol)
+
+		if guaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
+		}
+	}
+
+	valType := anySymbol
+	if n.Value != nil {
+		valType = a.Analyze(n.Value)
+	}
+
+	a.declare(n.Name.Value, valType)
+	return valType
 }
 
 // analyzeAssignStatement ensures the assigned variable has been declared
@@ -360,23 +386,6 @@ func (a *Analyzer) resolveTypeName(typeName string, token lexer.Token) Symbol {
 	return anySymbol
 }
 
-// stringToObjectType converts a string representation of a type (e.g., "Number")
-// into its corresponding environment.ObjectType.
-func stringToObjectType(t string) environment.ObjectType {
-	switch t {
-	case "Number":
-		return environment.NUMBER_OBJ
-	case "String":
-		return environment.STRING_OBJ
-	case "Boolean":
-		return environment.BOOLEAN_OBJ
-	case "Date":
-		return environment.DATE_OBJ
-	default:
-		return environment.ANY_OBJ
-	}
-}
-
 // guaranteesReturn checks if a given AST node is guaranteed to execute a return
 // statement on all of its code paths.
 func guaranteesReturn(node syntax.Node) bool {
@@ -398,6 +407,68 @@ func guaranteesReturn(node syntax.Node) bool {
 		if n.Alternative != nil {
 			return guaranteesReturn(n.Consequence) && guaranteesReturn(n.Alternative)
 		}
+		return false
+
+	default:
+		return false
+	}
+}
+
+// guaranteesRecursiveCall determines if evaluating the given AST node guarantees
+// that the function named targetName will be recursively called unconditionally
+// on all of its code execution paths.
+func guaranteesRecursiveCall(node syntax.Node, targetName string) bool {
+	if node == nil {
+		return false
+	}
+
+	switch n := node.(type) {
+	case *syntax.BlockStatement:
+		for _, stmt := range n.Statements {
+			if guaranteesRecursiveCall(stmt, targetName) {
+				return true
+			}
+		}
+		return false
+
+	case *syntax.CallExpression:
+		if ident, ok := n.Function.(*syntax.Identifier); ok && ident.Value == targetName {
+			return true
+		}
+
+		for _, arg := range n.Arguments {
+			if guaranteesRecursiveCall(arg, targetName) {
+				return true
+			}
+		}
+		return guaranteesRecursiveCall(n.Function, targetName)
+
+	case *syntax.IfExpression:
+		if guaranteesRecursiveCall(n.Condition, targetName) {
+			return true
+		}
+		if n.Alternative == nil {
+			return false
+		}
+		return guaranteesRecursiveCall(n.Consequence, targetName) &&
+			guaranteesRecursiveCall(n.Alternative, targetName)
+
+	case *syntax.ReturnStatement:
+		return guaranteesRecursiveCall(n.ReturnValue, targetName)
+
+	case *syntax.LetStatement:
+		return guaranteesRecursiveCall(n.Value, targetName)
+
+	case *syntax.ExpressionStatement:
+		return guaranteesRecursiveCall(n.Expression, targetName)
+
+	case *syntax.InfixExpression: // e.g., targetName() + 5
+		return guaranteesRecursiveCall(n.Left, targetName) || guaranteesRecursiveCall(n.Right, targetName)
+
+	//case *syntax.PrefixExpression: // e.g., !targetName()
+	//	return guaranteesRecursiveCall(n.Right, targetName)
+
+	case *syntax.FunctionLiteral:
 		return false
 
 	default:
