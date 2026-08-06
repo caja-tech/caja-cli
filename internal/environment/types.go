@@ -16,6 +16,7 @@ const (
 	DATE_OBJ         ObjectType = "DATE"
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
 	RETURN_VALUE_OBJ ObjectType = "RETURN_VALUE"
+	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
 )
 
 type Object interface {
@@ -66,6 +67,17 @@ type ReturnValue struct {
 
 func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_OBJ }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
+
+// TailCall represents an intercepted function call in tail position.
+// It holds the target function and its evaluated arguments, allowing the
+// evaluator to reuse the current stack frame and execute in constant memory space.
+type TailCall struct {
+	Function  *Function
+	Arguments []Object
+}
+
+func (tc *TailCall) Type() ObjectType { return TAIL_CALL_OBJ }
+func (tc *TailCall) Inspect() string  { return "tail call" }
 
 // FormatObject takes an environment Object and returns its formatted string representation.
 func FormatObject(obj Object) string {

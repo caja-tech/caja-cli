@@ -182,6 +182,20 @@ return fib(6)
 `,
 			expected: 8.0,
 		},
+		{
+			name: "Tail recursive function execution",
+			input: `
+let deepRecurse = fn(n: Number): Number {
+	if (n == 0) {
+		return 0
+	} else {
+		return deepRecurse(n - 1)
+	}
+}
+return deepRecurse(10005)
+`,
+			expected: 0.0,
+		},
 	}
 
 	runTestScenarios(t, tests)
