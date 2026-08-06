@@ -19,6 +19,7 @@ func NewRunCmd() (*cobra.Command, error) {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath, err := cmd.Flags().GetString("file")
 			if err != nil {
+				_ = cmd.Help()
 				return fmt.Errorf("failed to retrieve 'file' flag: %w", err)
 			}
 
