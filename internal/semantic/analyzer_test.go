@@ -388,3 +388,26 @@ let res = sum([1, 2, 3])
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticAnalysisAnyType(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "Function accepting Any parameter",
+			input: "let f = fn(x: Any): Any { return x }\nf(10)\nf(\"hello\")\nf(true)",
+		},
+		{
+			name:  "Function returning Any",
+			input: "let a = fn(): Any { return 10 }\nlet b = fn(): Any { return \"string\" }",
+		},
+		{
+			name:  "Array of Any",
+			input: "let getAny = fn(x: Any): Any { return x }\nlet f = fn(arr: [Any]): Any { return arr[0] }\nf([getAny(1), getAny(\"string\"), getAny(true)])",
+		},
+		{
+			name:  "Assigning Any to concrete type is allowed statically",
+			input: "let f = fn(): Any { return 10 }\nlet n = f()\nlet x = 1\nx = n", 
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
