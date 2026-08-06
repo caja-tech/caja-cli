@@ -727,6 +727,60 @@ func TestDateParsingErrors(t *testing.T) {
 	}
 }
 
+// TestArrayParsing verifies parsing of array literals and indexing.
+func TestArrayParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Empty array",
+			input:    "[]",
+			expected: "[]",
+		},
+		{
+			name:     "Array with numbers",
+			input:    "[1, 2, 3]",
+			expected: "[1, 2, 3]",
+		},
+		{
+			name:     "Array with expressions",
+			input:    "[1 + 2, 3 * 4]",
+			expected: "[(1 + 2), (3 * 4)]",
+		},
+		{
+			name:     "Array index expression",
+			input:    "myArray[1]",
+			expected: "(myArray[1])",
+		},
+		{
+			name:     "Array index with complex expression",
+			input:    "myArray[1 + 2]",
+			expected: "(myArray[(1 + 2)])",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestArrayParsingErrors verifies that malformed arrays or index expressions produce parse errors.
+func TestArrayParsingErrors(t *testing.T) {
+	tests := []string{
+		"[1, 2",       // Missing closing bracket
+		"myArray[1",   // Missing closing bracket in index
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
 // checkParseErrors is a test helper that fails the current test immediately if
 // the parser accumulated any errors, logging each error message for debugging.
 func checkParseErrors(t *testing.T, p *Parser) {

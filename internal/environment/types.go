@@ -15,6 +15,7 @@ const (
 	BOOLEAN_OBJ      ObjectType = "BOOLEAN"
 	DATE_OBJ         ObjectType = "DATE"
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
+	ARRAY_OBJ        ObjectType = "ARRAY"
 	RETURN_VALUE_OBJ ObjectType = "RETURN_VALUE"
 	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
 )
@@ -57,7 +58,36 @@ type Function struct {
 }
 
 func (f *Function) Type() ObjectType { return FUNCTION_OBJ }
-func (f *Function) Inspect() string  { return "fn(...)" }
+func (f *Function) Inspect() string {
+	out := "fn("
+	for i, p := range f.Parameters {
+		out += p.String()
+		if i != len(f.Parameters)-1 {
+			out += ", "
+		}
+	}
+	out += ") {\n" + f.Body.String() + "\n}"
+	return out
+}
+
+// Array represents an ordered collection of evaluated Objects.
+// Elements holds the slice of objects contained within the array.
+type Array struct {
+	Elements []Object
+}
+
+func (ao *Array) Type() ObjectType { return ARRAY_OBJ }
+func (ao *Array) Inspect() string {
+	out := "["
+	for i, el := range ao.Elements {
+		out += el.Inspect()
+		if i != len(ao.Elements)-1 {
+			out += ", "
+		}
+	}
+	out += "]"
+	return out
+}
 
 // ReturnValue represents a wrapper object that causes the evaluator to halt
 // block execution and return the enclosed value.
@@ -77,7 +107,17 @@ type TailCall struct {
 }
 
 func (tc *TailCall) Type() ObjectType { return TAIL_CALL_OBJ }
-func (tc *TailCall) Inspect() string  { return "tail call" }
+func (tc *TailCall) Inspect() string {
+	out := "tail call with args: ("
+	for i, arg := range tc.Arguments {
+		out += arg.Inspect()
+		if i != len(tc.Arguments)-1 {
+			out += ", "
+		}
+	}
+	out += ")"
+	return out
+}
 
 // FormatObject takes an environment Object and returns its formatted string representation.
 func FormatObject(obj Object) string {

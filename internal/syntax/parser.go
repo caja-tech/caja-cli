@@ -16,6 +16,7 @@ const (
 	PRODUCT
 	EXPONENT
 	CALL
+	INDEX
 )
 
 var precedences = map[lexer.TokenType]int{
@@ -33,6 +34,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.MODULO:   PRODUCT,
 	lexer.POWER:    EXPONENT,
 	lexer.LPAREN:   CALL,
+	lexer.LBRACKET: INDEX,
 }
 
 // verifyPrecedenceLevel returns the precedence level associated with the given
@@ -86,9 +88,10 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.prefixParseFuncs[lexer.DATE] = p.parseDateLiteral
 	p.prefixParseFuncs[lexer.LPAREN] = p.parseGroupedExpression
 	p.prefixParseFuncs[lexer.IF] = p.parseIfExpression
-	p.prefixParseFuncs[lexer.TRUE] = p.parseBoolean
-	p.prefixParseFuncs[lexer.FALSE] = p.parseBoolean
+	p.prefixParseFuncs[lexer.TRUE] = p.parseBooleanLiteral
+	p.prefixParseFuncs[lexer.FALSE] = p.parseBooleanLiteral
 	p.prefixParseFuncs[lexer.FN] = p.parseFunctionLiteral
+	p.prefixParseFuncs[lexer.LBRACKET] = p.parseArrayLiteral
 
 	p.infixParseFuncs = make(map[lexer.TokenType]infixParseFunc)
 	p.infixParseFuncs[lexer.PLUS] = p.parseInfixExpression
@@ -104,6 +107,7 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.infixParseFuncs[lexer.EQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.NEQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.LPAREN] = p.parseFunctionCallExpression
+	p.infixParseFuncs[lexer.LBRACKET] = p.parseIndexExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -221,12 +225,16 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 	}
 
 	if p.peekToken.Type != lexer.RPAREN {
-		p.nextToken()
-		statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, p.currToken.Literal)
+		paramType := p.parseTypeSignature()
+		if paramType != "" {
+			statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
+		}
 		for p.peekToken.Type == lexer.COMMA {
 			p.nextToken() // move to comma
-			p.nextToken() // move to next type
-			statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, p.currToken.Literal)
+			paramType := p.parseTypeSignature()
+			if paramType != "" {
+				statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
+			}
 		}
 	}
 
@@ -240,12 +248,7 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.IDENT) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
-		return nil
-	}
-
-	statement.Signature.ReturnType = p.currToken.Literal
+	statement.Signature.ReturnType = p.parseTypeSignature()
 
 	return statement
 }
@@ -334,12 +337,32 @@ func (p *Parser) parseDateLiteral() Expression {
 	return lit
 }
 
-// parseBoolean returns a BooleanLiteral expression node for the current token.
-func (p *Parser) parseBoolean() Expression {
+// parseBooleanLiteral returns a BooleanLiteral expression node for the current token.
+func (p *Parser) parseBooleanLiteral() Expression {
 	return &BooleanLiteral{
 		Token: p.currToken,
 		Value: p.currToken.Type == lexer.TRUE,
 	}
+}
+
+// parseArrayLiteral consumes the opening bracket, parses a comma-separated list
+// of expressions, and returns an ArrayLiteral expression node.
+func (p *Parser) parseArrayLiteral() Expression {
+	array := &ArrayLiteral{Token: p.currToken}
+	array.Elements = p.parseExpressionList(lexer.RBRACKET)
+	return array
+}
+
+// parseIndexExpression parses an array index operation, capturing the left-hand
+// expression (the array) and parsing the expression inside the brackets as the index.
+func (p *Parser) parseIndexExpression(left Expression) Expression {
+	exp := &IndexExpression{Token: p.currToken, Left: left}
+	p.nextToken()
+	exp.Index = p.parseExpression(LOWEST)
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+	return exp
 }
 
 // parseExpression is the core of the Pratt parser. It looks up a prefix parse
@@ -474,12 +497,7 @@ func (p *Parser) parseFunctionLiteral() Expression {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.IDENT) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
-		return nil
-	}
-
-	lit.ReturnType = p.currToken.Literal
+	lit.ReturnType = p.parseTypeSignature()
 
 	if !p.expectPeek(lexer.LBRACE) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.currToken.Type))
@@ -510,11 +528,10 @@ func (p *Parser) parseFunctionParameters() []*Parameter {
 			return nil
 		}
 
-		if !p.expectPeek(lexer.IDENT) {
-			p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got '%s'", param.Type))
+		param.Type = p.parseTypeSignature()
+		if param.Type == "" {
 			return nil
 		}
-		param.Type = p.currToken.Literal
 
 		return param
 	}
@@ -542,34 +559,35 @@ func (p *Parser) parseFunctionParameters() []*Parameter {
 // expression and its parsed arguments.
 func (p *Parser) parseFunctionCallExpression(function Expression) Expression {
 	exp := &CallExpression{Token: p.currToken, Function: function}
-	exp.Arguments = p.parseFunctionCallArguments()
+	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
 	return exp
 }
 
-// parseFunctionCallArguments parses the comma-separated list of expressions
-// provided as arguments to a function call.
-func (p *Parser) parseFunctionCallArguments() []Expression {
-	var args []Expression
+// parseExpressionList parses a comma-separated list of expressions until it
+// encounters the specified end token (e.g., closing parenthesis or bracket).
+func (p *Parser) parseExpressionList(end lexer.TokenType) []Expression {
+	var list []Expression
 
-	if p.peekToken.Type == lexer.RPAREN {
+	if p.peekToken.Type == end {
 		p.nextToken()
-		return args
+		return list
 	}
 
 	p.nextToken()
-	args = append(args, p.parseExpression(LOWEST))
+	list = append(list, p.parseExpression(LOWEST))
 	for p.peekToken.Type == lexer.COMMA {
-		p.nextToken()
-		p.nextToken()
+		p.nextToken() // Move to the comma
+		p.nextToken() // Move past the comma to the next expression
 
-		args = append(args, p.parseExpression(LOWEST))
+		list = append(list, p.parseExpression(LOWEST))
 	}
 
-	if !p.expectPeek(lexer.RPAREN) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected ')', got %s", p.currToken.Type))
+	if !p.expectPeek(end) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '%s', got %s", end, p.currToken.Type))
 		return nil
 	}
-	return args
+
+	return list
 }
 
 // expectPeek checks whether the peek token matches the expected type. If it
@@ -595,4 +613,23 @@ func (p *Parser) synchronize() {
 		}
 		p.nextToken()
 	}
+}
+
+// parseTypeSignature parses a type identifier or array type like [Number] or [[Number]].
+func (p *Parser) parseTypeSignature() string {
+	if p.peekToken.Type == lexer.LBRACKET {
+		p.nextToken() // move to [
+		innerType := p.parseTypeSignature()
+		if !p.expectPeek(lexer.RBRACKET) {
+			return ""
+		}
+		return "[" + innerType + "]"
+	}
+
+	if p.expectPeek(lexer.IDENT) {
+		return p.currToken.Literal
+	}
+
+	p.reportError(p.peekToken, fmt.Sprintf("expected type identifier, got %s", p.peekToken.Type))
+	return ""
 }
