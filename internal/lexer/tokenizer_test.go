@@ -296,6 +296,73 @@ func TestMultipleLetStatements(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestFunctionTokenization tests the tokenization of a function declaration with parameters and a return type.
+func TestFunctionTokenization(t *testing.T) {
+	input := "fn add(a: Number, b: Number): Number {\n return a + b\n}"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Function keyword", Token{FN, "fn", 1, 1}},
+		{"Identifier add", Token{IDENT, "add", 1, 4}},
+		{"Left paren", Token{LPAREN, "(", 1, 7}},
+		{"Identifier a", Token{IDENT, "a", 1, 8}},
+		{"Colon", Token{COLON, ":", 1, 9}},
+		{"Type Number", Token{IDENT, "Number", 1, 11}},
+		{"Comma", Token{COMMA, ",", 1, 17}},
+		{"Identifier b", Token{IDENT, "b", 1, 19}},
+		{"Colon", Token{COLON, ":", 1, 20}},
+		{"Type Number", Token{IDENT, "Number", 1, 22}},
+		{"Right paren", Token{RPAREN, ")", 1, 28}},
+		{"Colon", Token{COLON, ":", 1, 29}},
+		{"Type Number", Token{IDENT, "Number", 1, 31}},
+		{"Left brace", Token{LBRACE, "{", 1, 38}},
+		{"Return keyword", Token{RETURN, "return", 2, 2}},
+		{"Identifier a", Token{IDENT, "a", 2, 9}},
+		{"Plus", Token{PLUS, "+", 2, 11}},
+		{"Identifier b", Token{IDENT, "b", 2, 13}},
+		{"Right brace", Token{RBRACE, "}", 3, 1}},
+		{"End of file", Token{EOF, "", 3, 2}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestStringTokenization tests the tokenization of string literals.
+func TestStringTokenization(t *testing.T) {
+	input := "let name = \"John Doe\""
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier name", Token{IDENT, "name", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 10}},
+		{"String value", Token{STRING, "John Doe", 1, 12}},
+		{"End of file", Token{EOF, "", 1, 22}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestBooleanTokenization tests the tokenization of boolean literals.
+func TestBooleanTokenization(t *testing.T) {
+	input := "let isDone = true\nlet isFailed = false"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier isDone", Token{IDENT, "isDone", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 12}},
+		{"True keyword", Token{TRUE, "true", 1, 14}},
+		{"Let keyword", Token{LET, "let", 2, 1}},
+		{"Identifier isFailed", Token{IDENT, "isFailed", 2, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 2, 14}},
+		{"False keyword", Token{FALSE, "false", 2, 16}},
+		{"End of file", Token{EOF, "", 2, 21}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

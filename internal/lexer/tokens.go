@@ -10,6 +10,7 @@ const (
 	// Identifiers and Literals
 	IDENT  TokenType = "IDENT"
 	NUMBER TokenType = "NUMBER"
+	STRING TokenType = "STRING"
 
 	// Operators
 	ASSIGN   TokenType = "ASSIGN"
@@ -37,6 +38,11 @@ const (
 	IF     TokenType = "IF"
 	ELSE   TokenType = "ELSE"
 	LET    TokenType = "LET"
+	FN     TokenType = "FN"
+	COMMA  TokenType = "COMMA"
+	COLON  TokenType = "COLON"
+	TRUE   TokenType = "TRUE"
+	FALSE  TokenType = "FALSE"
 )
 
 type Token struct {
@@ -54,6 +60,9 @@ var keywords = map[string]TokenType{
 	"if":     IF,
 	"else":   ELSE,
 	"let":    LET,
+	"fn":     FN,
+	"true":   TRUE,
+	"false":  FALSE,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the

@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"caja-cli/internal/environment"
 	"caja-cli/internal/lexer"
 	"caja-cli/internal/syntax"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 type testScenario struct {
 	name     string
 	input    string
-	expected float64
+	expected interface{}
 }
 
 type testErrorScenario struct {
@@ -20,23 +21,37 @@ type testErrorScenario struct {
 }
 
 // testEval is a helper that tokenizes, parses, and evaluates the given input
-// string through the full pipeline, returning the final numeric result or the
+// string through the full pipeline, returning the final result or the
 // first error encountered (from the parser or evaluator).
-func testEval(input string) (float64, error) {
+func testEval(input string) (interface{}, error) {
 	tknzr := lexer.New(input)
 	p := syntax.New(tknzr)
 	program := p.Parse()
 
 	if len(p.Errors()) > 0 {
-		return 0, fmt.Errorf("parser errors: %v", p.Errors())
+		return nil, fmt.Errorf("parser errors: %v", p.Errors())
 	}
 
-	env := NewEnvironment()
-	return Eval(program, env)
+	env := environment.NewEnvironment()
+	result, err := Eval(program, env)
+	if err != nil {
+		return nil, err
+	}
+
+	switch obj := result.(type) {
+	case *environment.Number:
+		return obj.Value, nil
+	case *environment.String:
+		return obj.Value, nil
+	case *environment.Boolean:
+		return obj.Value, nil
+	default:
+		return obj, nil
+	}
 }
 
 // runTestScenarios iterates over a slice of testScenario entries, evaluating
-// each input and asserting that the result matches the expected float64 value.
+// each input and asserting that the result matches the expected value.
 func runTestScenarios(t *testing.T, tests []testScenario) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +62,7 @@ func runTestScenarios(t *testing.T, tests []testScenario) {
 			}
 
 			if evaluated != tc.expected {
-				t.Errorf("expected %f, got %f", tc.expected, evaluated)
+				t.Errorf("expected %v, got %v", tc.expected, evaluated)
 			}
 		})
 	}
@@ -104,6 +119,36 @@ func TestEvaluateVariables(t *testing.T) {
 		{"Math with variables", "let rate = 10\nlet tax = 5\nreturn rate * tax", 50.0},
 		{"Reassignment", "let x = 5\nx = x + 5\nreturn x", 10.0},
 		{"Cascading variables", "let a = 5\nlet b = a\nlet c = a + b + 5\nreturn c", 15.0},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestEvaluateFunctions verifies that function declarations, closures, and calls
+// are evaluated correctly, and that return statements inside functions properly
+// halt block execution and return the correct value.
+func TestEvaluateFunctions(t *testing.T) {
+	var tests = []testScenario{
+		{
+			name:     "Simple function call",
+			input:    "let add = fn(x: Number, y: Number): Number { return x + y }\nreturn add(5, 5)",
+			expected: 10.0,
+		},
+		{
+			name:     "Function with early return",
+			input:    "let max = fn(a: Number, b: Number): Number { if (a > b) { return a } else { return b } }\nreturn max(10, 20)",
+			expected: 20.0,
+		},
+		{
+			name:     "Function closure",
+			input:    "let makeAdder = fn(x: Number): Function { return fn(y: Number): Number { return x + y } }\nlet addTwo = makeAdder(2)\nreturn addTwo(3)",
+			expected: 5.0,
+		},
+		{
+			name:     "Recursive function call",
+			input:    "let fib = fn(x: Number): Number { if (x < 2) { return x } else { return fib(x - 1) + fib(x - 2) } }\nreturn fib(5)",
+			expected: 5.0,
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -197,7 +242,7 @@ func TestErrorUnknownOperator(t *testing.T) {
 		Right:    &syntax.NumberLiteral{Value: 3},
 	}
 
-	env := NewEnvironment()
+	env := environment.NewEnvironment()
 	_, err := Eval(node, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
@@ -213,7 +258,7 @@ func TestErrorUnknownOperator(t *testing.T) {
 // recognized by the evaluator's type switch returns an "unknown node type"
 // error. A mockNode is used to simulate this scenario.
 func TestErrorUnknownNodeType(t *testing.T) {
-	env := NewEnvironment()
+	env := environment.NewEnvironment()
 	_, err := Eval(&mockNode{}, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
@@ -545,7 +590,7 @@ func TestIndependentEnvironments(t *testing.T) {
 		Value: &syntax.NumberLiteral{Value: 42},
 	}
 
-	env1 := NewEnvironment()
+	env1 := environment.NewEnvironment()
 	_, err := Eval(assignNode, env1)
 	if err != nil {
 		t.Fatalf("unexpected error setting variable: %v", err)
@@ -556,9 +601,43 @@ func TestIndependentEnvironments(t *testing.T) {
 		Expression: &syntax.Identifier{Value: "x"},
 	}
 
-	env2 := NewEnvironment()
+	env2 := environment.NewEnvironment()
 	_, err = Eval(identNode, env2)
 	if err == nil {
 		t.Fatal("expected error from second evaluator but got none")
 	}
+}
+
+// TestEvaluateTypes verifies the evaluation of types other than Number,
+// such as Strings, Booleans, and potentially Dates.
+func TestEvaluateTypes(t *testing.T) {
+	var tests = []testScenario{
+		{
+			name:     "String literal",
+			input:    "return \"hello world\"",
+			expected: "hello world",
+		},
+		{
+			name:     "Boolean true",
+			input:    "return true",
+			expected: true,
+		},
+		{
+			name:     "Boolean false",
+			input:    "return false",
+			expected: false,
+		},
+		{
+			name:     "Return string from function",
+			input:    "let greet = fn(): String { return \"hello\" }\nreturn greet()",
+			expected: "hello",
+		},
+		{
+			name:     "Return boolean from function",
+			input:    "let isTrue = fn(): Boolean { return true }\nreturn isTrue()",
+			expected: true,
+		},
+	}
+
+	runTestScenarios(t, tests)
 }

@@ -29,6 +29,9 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideEOFToken,
 	decideLetterToken,
 	decideDigitToken,
+	decideCommaToken,
+	decideColonToken,
+	decideStringToken,
 }
 
 // decideAssignToken matches the '=' character and produces an ASSIGN token.
@@ -219,6 +222,30 @@ func decideDigitToken(t *Tokenizer, line int, column int) deciderResult {
 		number := t.readNumber()
 		token := Token{Type: NUMBER, Literal: number, Line: line, Column: column}
 		return deciderResult{true, token}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+func decideCommaToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == ',' {
+		return deciderResult{true, Token{Type: COMMA, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+func decideColonToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == ':' {
+		return deciderResult{true, Token{Type: COLON, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+func decideStringToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '"' {
+		return deciderResult{true, Token{Type: STRING, Literal: t.readString(), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}

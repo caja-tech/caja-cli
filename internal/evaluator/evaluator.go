@@ -1,15 +1,21 @@
 package evaluator
 
 import (
+	"caja-cli/internal/environment"
 	"caja-cli/internal/syntax"
 	"fmt"
 	"math"
 )
 
+var (
+	TRUE  = &environment.Boolean{Value: true}
+	FALSE = &environment.Boolean{Value: false}
+)
+
 // Eval recursively evaluates a single AST node and returns its numeric
 // value. It dispatches on the concrete node type: programs, statements,
 // literals, identifiers, return statements, and infix expressions.
-func Eval(n syntax.Node, env *Environment) (float64, error) {
+func Eval(n syntax.Node, env *environment.Environment) (environment.Object, error) {
 	switch node := n.(type) {
 	case *syntax.Program:
 		return evalProgram(node, env)
@@ -18,20 +24,28 @@ func Eval(n syntax.Node, env *Environment) (float64, error) {
 	case *syntax.AssignStatement:
 		val, err := Eval(node.Value, env)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		env.Assign(node.Name.Value, val)
 		return val, nil
 	case *syntax.NumberLiteral:
-		return node.Value, nil
+		return &environment.Number{Value: node.Value}, nil
+	case *syntax.StringLiteral:
+		return &environment.String{Value: node.Value}, nil
+	case *syntax.Boolean:
+		return nativeBoolToBooleanObject(node.Value), nil
 	case *syntax.Identifier:
 		return evalIdentifier(node, env)
 	case *syntax.ReturnStatement:
-		return Eval(node.ReturnValue, env)
+		val, err := Eval(node.ReturnValue, env)
+		if err != nil {
+			return nil, err
+		}
+		return &environment.ReturnValue{Value: val}, nil
 	case *syntax.LetStatement:
 		val, err := Eval(node.Value, env)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		env.Set(node.Name.Value, val)
 		return val, nil
@@ -42,102 +56,155 @@ func Eval(n syntax.Node, env *Environment) (float64, error) {
 	case *syntax.InfixExpression:
 		left, err := Eval(node.Left, env)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 
 		right, err := Eval(node.Right, env)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 
 		return evalInfixExpression(node.Operator, left, right)
+	case *syntax.FunctionLiteral:
+		params := node.Parameters
+		body := node.Body
+		return &environment.Function{Parameters: params, Env: env, Body: body}, nil
+
+	case *syntax.CallExpression:
+		function, err := Eval(node.Function, env)
+		if err != nil {
+			return nil, err
+		}
+
+		var args []environment.Object
+		for _, argNode := range node.Arguments {
+			evaluated, err := Eval(argNode, env)
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, evaluated)
+		}
+
+		fn, ok := function.(*environment.Function)
+		if !ok {
+			return nil, fmt.Errorf("not a function")
+		}
+
+		extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+		for i, param := range fn.Parameters {
+			extendedEnv.Set(param.Name, args[i])
+		}
+
+		evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
+		if err != nil {
+			return nil, err
+		}
+
+		// Unwrap any early return values so the whole program doesn't halt
+		if retVal, ok := evaluated.(*environment.ReturnValue); ok {
+			return retVal.Value, nil
+		}
+
+		return evaluated, nil
 	}
 
-	return 0, fmt.Errorf("unknown node type: %T", n)
+	return nil, fmt.Errorf("unknown node type: %T", n)
 }
 
 // evalProgram evaluates every statement in the program sequentially. When a
 // ReturnStatement is encountered its value is returned immediately. If the
 // program ends without a return statement an error is produced.
-func evalProgram(program *syntax.Program, env *Environment) (float64, error) {
-	var result float64
+func evalProgram(program *syntax.Program, env *environment.Environment) (environment.Object, error) {
+	var result environment.Object
 	var err error
 
 	for _, statement := range program.Statements {
 		result, err = Eval(statement, env)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 
-		if _, ok := statement.(*syntax.ReturnStatement); ok {
-			return result, nil
+		// UNWRAP IT: Halt the global script
+		if retVal, ok := result.(*environment.ReturnValue); ok {
+			return retVal.Value, nil
 		}
 	}
 
-	return 0, fmt.Errorf("execution error: script finished without a return statement")
+	return nil, fmt.Errorf("execution error: script finished without a return statement")
 }
 
 // evalIdentifier resolves an identifier to its value in the current
 // environment. An error is returned if the identifier has not been assigned.
-func evalIdentifier(node *syntax.Identifier, env *Environment) (float64, error) {
+func evalIdentifier(node *syntax.Identifier, env *environment.Environment) (environment.Object, error) {
 	val, ok := env.Get(node.Value)
 	if !ok {
-		return 0, fmt.Errorf("identifier not found: %s", node.Value)
+		return nil, fmt.Errorf("identifier not found: %s", node.Value)
 	}
 	return val, nil
 }
 
 // evalInfixExpression applies a binary arithmetic operator (+, -, *, /) to
 // the left and right operands. Division by zero produces an error.
-func evalInfixExpression(operator string, left, right float64) (float64, error) {
+func evalInfixExpression(operator string, left, right environment.Object) (environment.Object, error) {
+	if left.Type() != environment.NUMBER_OBJ || right.Type() != environment.NUMBER_OBJ {
+		return nil, fmt.Errorf("type mismatch")
+	}
+
+	leftVal := left.(*environment.Number).Value
+	rightVal := right.(*environment.Number).Value
+
 	switch operator {
 	case "+":
-		return left + right, nil
+		return &environment.Number{Value: leftVal + rightVal}, nil
 	case "-":
-		return left - right, nil
+		return &environment.Number{Value: leftVal - rightVal}, nil
 	case "*":
-		return left * right, nil
+		return &environment.Number{Value: leftVal * rightVal}, nil
 	case "/":
-		if right == 0 {
-			return 0, fmt.Errorf("division by zero")
+		if rightVal == 0 {
+			return nil, fmt.Errorf("division by zero")
 		}
-		return left / right, nil
+		return &environment.Number{Value: leftVal / rightVal}, nil
 	case "%":
-		if right == 0 {
-			return 0, fmt.Errorf("modulo by zero")
+		if rightVal == 0 {
+			return nil, fmt.Errorf("modulo by zero")
 		}
-		return math.Mod(left, right), nil
+		return &environment.Number{Value: math.Mod(leftVal, rightVal)}, nil
 	case "^":
-		return math.Pow(left, right), nil
+		return &environment.Number{Value: math.Pow(leftVal, rightVal)}, nil
 	case "<":
-		return boolToFloat(left < right), nil
+		return boolToPrimitive(leftVal < rightVal), nil
 	case ">":
-		return boolToFloat(left > right), nil
+		return boolToPrimitive(leftVal > rightVal), nil
 	case "<=":
-		return boolToFloat(left <= right), nil
+		return boolToPrimitive(leftVal <= rightVal), nil
 	case ">=":
-		return boolToFloat(left >= right), nil
+		return boolToPrimitive(leftVal >= rightVal), nil
 	case "==":
-		return boolToFloat(left == right), nil
+		return boolToPrimitive(leftVal == rightVal), nil
 	case "!=":
-		return boolToFloat(left != right), nil
+		return boolToPrimitive(leftVal != rightVal), nil
 	default:
-		return 0, fmt.Errorf("unknown operator: %s", operator)
+		return nil, fmt.Errorf("unknown operator: %s", operator)
 	}
 }
 
 // evalBlockStatement evaluates a sequence of statements in a block,
 // returning the result of the last evaluated statement.
-func evalBlockStatement(block *syntax.BlockStatement, env *Environment) (float64, error) {
-	blockEnv := NewEnclosedEnvironment(env)
+func evalBlockStatement(block *syntax.BlockStatement, env *environment.Environment) (environment.Object, error) {
+	blockEnv := environment.NewEnclosedEnvironment(env)
 
-	var result float64
+	var result environment.Object
 	var err error
 
 	for _, statement := range block.Statements {
 		result, err = Eval(statement, blockEnv)
 		if err != nil {
-			return 0, err
+			return nil, err
+		}
+
+		if result != nil && result.Type() == environment.RETURN_VALUE_OBJ {
+			return result, nil
 		}
 	}
 
@@ -147,10 +214,10 @@ func evalBlockStatement(block *syntax.BlockStatement, env *Environment) (float64
 // evalIfExpression evaluates an if-else conditional expression,
 // executing the consequence block if the condition is truthy,
 // and the alternative block otherwise.
-func evalIfExpression(ie *syntax.IfExpression, env *Environment) (float64, error) {
+func evalIfExpression(ie *syntax.IfExpression, env *environment.Environment) (environment.Object, error) {
 	condition, err := Eval(ie.Condition, env)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if isTruthy(condition) {
@@ -161,20 +228,30 @@ func evalIfExpression(ie *syntax.IfExpression, env *Environment) (float64, error
 		return evalBlockStatement(ie.Alternative, env)
 	}
 
-	return 0.0, nil
+	return &environment.Number{Value: 0.0}, nil
 }
 
-// boolToFloat converts a boolean value to a float64 representation,
+// boolToPrimitive converts a boolean value to a types.Object representation,
 // mapping true to 1.0 and false to 0.0.
-func boolToFloat(b bool) float64 {
+func boolToPrimitive(b bool) environment.Object {
 	if b {
-		return 1.0
+		return &environment.Number{Value: 1.0}
 	}
-	return 0.0
+	return &environment.Number{Value: 0.0}
 }
 
-// isTruthy determines if a float64 value is considered true,
+func nativeBoolToBooleanObject(input bool) *environment.Boolean {
+	if input {
+		return TRUE
+	}
+	return FALSE
+}
+
+// isTruthy determines if a types.Object value is considered true,
 // which is any non-zero value.
-func isTruthy(val float64) bool {
-	return val != 0.0
+func isTruthy(val environment.Object) bool {
+	if val.Type() == environment.NUMBER_OBJ {
+		return val.(*environment.Number).Value != 0.0
+	}
+	return false
 }

@@ -1,17 +1,17 @@
-package evaluator
+package environment
 
 // Environment provides a symbol table to store and retrieve variables
 // during evaluation. It supports variable shadowing and scope resolution
 // through a reference to an outer enclosing environment.
 type Environment struct {
-	store map[string]float64
+	store map[string]Object
 	outer *Environment
 }
 
 // NewEnvironment creates and returns a new top-level environment with
 // no outer scope.
 func NewEnvironment() *Environment {
-	return &Environment{store: make(map[string]float64), outer: nil}
+	return &Environment{store: make(map[string]Object), outer: nil}
 }
 
 // NewEnclosedEnvironment creates and returns a new environment that extends
@@ -25,7 +25,7 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 // Get retrieves the value of a variable by its name. It searches the
 // current environment first, then recursively searches the outer environment
 // if the variable is not found locally.
-func (env *Environment) Get(key string) (float64, bool) {
+func (env *Environment) Get(key string) (Object, bool) {
 	val, ok := env.store[key]
 	if !ok && env.outer != nil {
 		return env.outer.Get(key)
@@ -35,7 +35,7 @@ func (env *Environment) Get(key string) (float64, bool) {
 
 // Set defines a new variable or updates an existing one in the current
 // environment and returns its value.
-func (env *Environment) Set(key string, val float64) float64 {
+func (env *Environment) Set(key string, val Object) Object {
 	env.store[key] = val
 	return val
 }
@@ -43,7 +43,7 @@ func (env *Environment) Set(key string, val float64) float64 {
 // Assign updates the value of an existing variable in the innermost scope
 // where it is defined. It recursively searches outer environments to find
 // the variable if it's not present in the current one.
-func (env *Environment) Assign(name string, val float64) {
+func (env *Environment) Assign(name string, val Object) {
 	if _, ok := env.store[name]; ok {
 		env.store[name] = val
 		return

@@ -1,6 +1,7 @@
 package script
 
 import (
+	"caja-cli/internal/environment"
 	"caja-cli/internal/evaluator"
 	"caja-cli/internal/lexer"
 	"caja-cli/internal/semantic"
@@ -37,12 +38,12 @@ func Parse(input string) (*syntax.Program, error) {
 }
 
 // Run evaluates the given syntax program in a new environment and returns its computed result.
-// It returns the result as a float64 or an error if the evaluation fails.
-func Run(program *syntax.Program) (float64, error) {
-	env := evaluator.NewEnvironment()
+// It returns the result as an environment.Object or an error if the evaluation fails.
+func Run(program *syntax.Program) (environment.Object, error) {
+	env := environment.NewEnvironment()
 	eval, err := evaluator.Eval(program, env)
 	if err != nil {
-		return 0, fmt.Errorf("evaluation error: %w", err)
+		return nil, fmt.Errorf("evaluation error: %w", err)
 	}
 
 	return eval, nil
