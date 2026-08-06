@@ -5,12 +5,14 @@ import (
 	"caja-cli/internal/syntax"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
 var (
-	TRUE  = &environment.Boolean{Value: true}
-	FALSE = &environment.Boolean{Value: false}
+	TRUE            = &environment.Boolean{Value: true}
+	FALSE           = &environment.Boolean{Value: false}
+	stackTraceLimit = 10000
 )
 
 // Eval recursively evaluates a single AST node and returns its numeric
@@ -155,13 +157,38 @@ func evalCallExpression(node *syntax.CallExpression, env *environment.Environmen
 		return nil, fmt.Errorf("not a function")
 	}
 
+	funcName := ""
+	if ident, ok := node.Function.(*syntax.Identifier); ok {
+		funcName = ident.Value
+	}
+
+	var argContext []string
+	for _, arg := range args {
+		argContext = append(argContext, arg.Inspect())
+	}
+
+	frame := environment.StackFrame{
+		FuncName: funcName,
+		Line:     node.Token.Line,
+		Column:   node.Token.Column,
+		Args:     argContext,
+	}
+
 	extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+	extendedEnv.CallStack = append(append([]environment.StackFrame(nil), env.CallStack...), frame)
+	if len(extendedEnv.CallStack) > stackTraceLimit {
+		return nil, fmt.Errorf("runtime error: stack overflow%s", extendedEnv.GetStackTrace())
+	}
+
 	for i, param := range fn.Parameters {
 		extendedEnv.Set(param.Name, args[i])
 	}
 
 	evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
 	if err != nil {
+		if !strings.Contains(err.Error(), "Stack trace:") {
+			return nil, fmt.Errorf("%s%s", err.Error(), extendedEnv.GetStackTrace())
+		}
 		return nil, err
 	}
 

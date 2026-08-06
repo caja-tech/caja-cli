@@ -154,6 +154,34 @@ func TestEvaluateFunctions(t *testing.T) {
 			input:    "type Op fn(Number, Number): Number\nlet applyOp = fn(a: Number, b: Number, op: Op): Number { return op(a, b) }\nlet add = fn(x: Number, y: Number): Number { return x + y }\nreturn applyOp(10, 20, add)",
 			expected: 30.0,
 		},
+		{
+			name: "Recursive function execution (factorial)",
+			input: `
+let factorial = fn(n: Number): Number {
+	if (n == 0) {
+		return 1
+	} else {
+		return n * factorial(n - 1)
+	}
+}
+return factorial(5)
+`,
+			expected: 120.0,
+		},
+		{
+			name: "Recursive function execution (fibonacci)",
+			input: `
+let fib = fn(n: Number): Number {
+	if (n < 2) {
+		return n
+	} else {
+		return fib(n - 1) + fib(n - 2)
+	}
+}
+return fib(6)
+`,
+			expected: 8.0,
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -187,6 +215,22 @@ func TestErrorHandling(t *testing.T) {
 	}
 
 	runTestErrorScenarios(t, tests)
+
+	// Test stack overflow separately to control the limit
+	t.Run("Stack overflow triggers stack tracer", func(t *testing.T) {
+		originalLimit := stackTraceLimit
+		stackTraceLimit = 10
+		defer func() { stackTraceLimit = originalLimit }()
+
+		_, err := testEval("let deepRecurse = fn(n: Number): Number { if (n == 0) { return 0 } else { return 1 + deepRecurse(n - 1) } }\nreturn deepRecurse(20)")
+		if err == nil {
+			t.Fatalf("expected an error but got none")
+		}
+
+		if !strings.Contains(err.Error(), "stack overflow") {
+			t.Errorf("expected error to contain 'stack overflow', got %q", err.Error())
+		}
+	})
 }
 
 // TestEvaluateBlockScoping verifies that isolated environments created by

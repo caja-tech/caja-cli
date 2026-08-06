@@ -219,6 +219,71 @@ let check = fn(a: Number): Boolean {
 `,
 			expectedErrors: []string{},
 		},
+		{
+			name: "Valid recursive function",
+			input: `
+let factorial = fn(n: Number): Number {
+	if (n == 0) {
+		return 1
+	} else {
+		return n * factorial(n - 1)
+	}
+}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Invalid recursive function call (wrong argument type)",
+			input: `
+let loop = fn(n: Number): Number {
+	if (n == 0) {
+		return 0
+	} else {
+		return loop("string instead of number")
+	}
+}
+`,
+			expectedErrors: []string{
+				"type error: argument 1 expected NUMBER, got STRING",
+			},
+		},
+		{
+			name: "Unconditional recursion (infinite loop)",
+			input: `
+let loop = fn(): Number {
+	return loop()
+}
+`,
+			expectedErrors: []string{
+				"semantic error: function 'loop' contains unconditional recursion and will infinitely loop",
+			},
+		},
+		{
+			name: "Unconditional recursion in all if-else branches",
+			input: `
+let alwaysLoops = fn(n: Number): Number {
+	if (n > 0) {
+		return alwaysLoops(n - 1)
+	} else {
+		return alwaysLoops(n + 1)
+	}
+}
+`,
+			expectedErrors: []string{
+				"semantic error: function 'alwaysLoops' contains unconditional recursion and will infinitely loop",
+			},
+		},
+		{
+			name: "Unconditional recursion in infix expression",
+			input: `
+let count = fn(n: Number): Number {
+	return 1 + count(n + 1)
+}
+`,
+			expectedErrors: []string{
+				"semantic error: function 'count' contains unconditional recursion and will infinitely loop",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }
