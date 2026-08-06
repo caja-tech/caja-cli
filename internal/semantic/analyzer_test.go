@@ -3,6 +3,7 @@ package semantic
 import (
 	"caja-cli/internal/lexer"
 	"caja-cli/internal/syntax"
+	"strings"
 	"testing"
 )
 
@@ -33,8 +34,8 @@ func runTestScenarios(t *testing.T, tests []testScenario) {
 			}
 
 			for i, err := range errors {
-				if err != tt.expectedErrors[i] {
-					t.Errorf("expected error %q, got %q", tt.expectedErrors[i], err)
+				if !strings.Contains(err, tt.expectedErrors[i]) {
+					t.Errorf("expected error to contain %q, got %q", tt.expectedErrors[i], err)
 				}
 			}
 		})

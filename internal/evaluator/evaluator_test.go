@@ -6,6 +6,7 @@ import (
 	"caja-cli/internal/semantic"
 	"caja-cli/internal/syntax"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -89,8 +90,8 @@ func runTestErrorScenarios(t *testing.T, tests []testErrorScenario) {
 				t.Fatalf("expected an error but got none")
 			}
 
-			if err.Error() != tc.expectedError {
-				t.Errorf("expected error %q, got %q", tc.expectedError, err.Error())
+			if !strings.Contains(err.Error(), tc.expectedError) {
+				t.Errorf("expected error to contain %q, got %q", tc.expectedError, err.Error())
 			}
 		})
 	}
@@ -144,9 +145,14 @@ func TestEvaluateFunctions(t *testing.T) {
 			expected: 10.0,
 		},
 		{
-			name:     "Function with early return",
+			name:     "Function returning highest number",
 			input:    "let max = fn(a: Number, b: Number): Number { if (a > b) { return a } else { return b } }\nreturn max(10, 20)",
 			expected: 20.0,
+		},
+		{
+			name:     "Higher order function with type alias",
+			input:    "type Op fn(Number, Number): Number\nlet applyOp = fn(a: Number, b: Number, op: Op): Number { return op(a, b) }\nlet add = fn(x: Number, y: Number): Number { return x + y }\nreturn applyOp(10, 20, add)",
+			expected: 30.0,
 		},
 	}
 
@@ -175,7 +181,7 @@ func TestEvaluateIfElseExpressions(t *testing.T) {
 // dividing by a literal zero.
 func TestErrorHandling(t *testing.T) {
 	var tests = []testErrorScenario{
-		{"Undefined variable", "10 + rate", "semantic errors: [semantic error: undeclared variable 'rate']"},
+		{"Undefined variable", "10 + rate", "semantic error: undeclared variable 'rate'"},
 		{"Division by zero", "10 / 0", "division by zero"},
 		{"Modulo by zero", "10 % 0", "modulo by zero"},
 	}
@@ -204,12 +210,12 @@ func TestErrorBlockScoping(t *testing.T) {
 		{
 			name:          "Inner scope leak prevention",
 			input:         "if (10 > 5) {\n let x = 20 \n}\nreturn x",
-			expectedError: "semantic errors: [semantic error: undeclared variable 'x']",
+			expectedError: "semantic error: undeclared variable 'x'",
 		},
 		{
 			name:          "Environment shadowing",
 			input:         "let x = 10\nif (10 > 5) {\n let x = 20 \n}\nreturn x",
-			expectedError: "semantic errors: [semantic error: variable 'x' is already declared]",
+			expectedError: "semantic error: variable 'x' is already declared",
 		},
 	}
 
@@ -277,9 +283,9 @@ func TestErrorInLeftOperand(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "semantic errors: [semantic error: undeclared variable 'unknown_var']"
-	if err.Error() != expected {
-		t.Errorf("expected error %q, got %q", expected, err.Error())
+	expected := "semantic error: undeclared variable 'unknown_var'"
+	if !strings.Contains(err.Error(), expected) {
+		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
 	}
 }
 
@@ -291,9 +297,9 @@ func TestErrorInRightOperand(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "semantic errors: [semantic error: undeclared variable 'missing_var']"
-	if err.Error() != expected {
-		t.Errorf("expected error %q, got %q", expected, err.Error())
+	expected := "semantic error: undeclared variable 'missing_var'"
+	if !strings.Contains(err.Error(), expected) {
+		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
 	}
 }
 
@@ -306,9 +312,10 @@ func TestErrorInAssignmentValue(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "semantic errors: [semantic error: undeclared variable 'undefined_var' semantic error: undeclared variable 'x'. Use 'let' to declare it.]"
-	if err.Error() != expected {
-		t.Errorf("expected error %q, got %q", expected, err.Error())
+	expected1 := "undeclared variable 'undefined_var'"
+	expected2 := "undeclared variable 'x'. Use 'let' to declare it."
+	if !strings.Contains(err.Error(), expected1) || !strings.Contains(err.Error(), expected2) {
+		t.Errorf("expected error to contain %q and %q, got %q", expected1, expected2, err.Error())
 	}
 }
 
@@ -321,9 +328,9 @@ func TestErrorMidProgramHaltsExecution(t *testing.T) {
 		t.Fatal("expected an error but got none")
 	}
 
-	expected := "semantic errors: [semantic error: undeclared variable 'unknown']"
-	if err.Error() != expected {
-		t.Errorf("expected error %q, got %q", expected, err.Error())
+	expected := "semantic error: undeclared variable 'unknown'"
+	if !strings.Contains(err.Error(), expected) {
+		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
 	}
 }
 

@@ -564,9 +564,9 @@ func TestFunctionParsing(t *testing.T) {
 			expected: "let check = fn(name: String, isValid: Boolean): Boolean { ... }",
 		},
 		{
-			name:     "Function with Date type and no return type",
-			input:    "let log = fn(date: Date) { date }",
-			expected: "let log = fn(date: Date) { ... }",
+			name:     "Function with Date type and Date return type",
+			input:    "let log = fn(date: Date): Date { date }",
+			expected: "let log = fn(date: Date): Date { ... }",
 		},
 		{
 			name:     "Function with no parameters",
@@ -576,6 +576,28 @@ func TestFunctionParsing(t *testing.T) {
 	}
 
 	runTestScenarios(t, tests)
+}
+
+// TestFunctionErrors verifies that invalid function literals (like missing return type) result in parse errors.
+func TestFunctionErrors(t *testing.T) {
+	tests := []string{
+		"let f = fn() { 10 }",                // Missing return type completely
+		"let f = fn(a: Number) { a }",        // Missing return type with parameters
+		"let f = fn(a: Number): { a }",       // Missing return type identifier
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
 }
 
 // TestCallExpressionParsing verifies that function calls with different argument types parse correctly.
@@ -599,6 +621,52 @@ func TestCallExpressionParsing(t *testing.T) {
 	}
 
 	runTestScenarios(t, tests)
+}
+
+// TestTypeAliasParsing verifies that type alias statements parse correctly.
+func TestTypeAliasParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Type alias with parameters and return type",
+			input:    "type BinaryOp fn(Number, Number): Number",
+			expected: "type BinaryOp fn(Number, Number): Number",
+		},
+		{
+			name:     "Type alias with no parameters",
+			input:    "type Provider fn(): String",
+			expected: "type Provider fn(): String",
+		},
+		{
+			name:     "Type alias with Date",
+			input:    "type DateFactory fn(): Date",
+			expected: "type DateFactory fn(): Date",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestTypeAliasErrors verifies that malformed type aliases produce syntax errors.
+func TestTypeAliasErrors(t *testing.T) {
+	tests := []string{
+		"type fn(Number): Number",               // Missing alias name
+		"type BinaryOp (Number, Number): Number",// Missing fn keyword
+		"type BinaryOp fn(Number, Number) Number",// Missing colon
+		"type BinaryOp fn(Number, Number):",      // Missing return type
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
 }
 
 // TestStringAndBooleanParsing verifies parsing of string and boolean literals.

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"caja-cli/internal/environment"
+	"caja-cli/internal/lexer"
 	"caja-cli/internal/syntax"
 	"fmt"
 )
@@ -11,25 +12,16 @@ import (
 // undeclared variables and variable redeclarations.
 type Analyzer struct {
 	scopes []map[string]Symbol
+	types  map[string]Symbol
 	errors []string
 }
-
-// Symbol represents a semantic entity (like a variable or function) tracked during
-// analysis, containing its type information and function signature details if applicable.
-type Symbol struct {
-	Type       environment.ObjectType
-	Arity      int
-	ParamTypes []environment.ObjectType
-	ReturnType environment.ObjectType
-}
-
-var anySymbol = Symbol{Type: environment.ANY_OBJ, Arity: 0}
 
 // New creates and returns a new Analyzer with an initial global scope.
 func New() *Analyzer {
 	globalScope := make(map[string]Symbol)
 	return &Analyzer{
 		scopes: []map[string]Symbol{globalScope},
+		types:  make(map[string]Symbol),
 	}
 }
 
@@ -55,6 +47,8 @@ func (a *Analyzer) Analyze(node syntax.Node) Symbol {
 		return a.analyzeInfixExpression(n)
 	case *syntax.ExpressionStatement:
 		return a.analyzeExpressionStatement(n)
+	case *syntax.TypeAliasStatement:
+		return a.analyzeTypeAliasStatement(n)
 	case *syntax.FunctionLiteral:
 		return a.analyzeFunctionLiteral(n)
 	case *syntax.CallExpression:
@@ -70,6 +64,11 @@ func (a *Analyzer) Analyze(node syntax.Node) Symbol {
 	}
 
 	return anySymbol
+}
+
+// reportError formats and appends a semantic error with the token's line and column.
+func (a *Analyzer) reportError(token lexer.Token, msg string) {
+	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
 }
 
 // Errors returns the list of semantic errors encountered during analysis.
@@ -106,7 +105,7 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) Symbol {
 	}
 
 	if _, exists := a.resolve(n.Name.Value); exists {
-		a.errors = append(a.errors, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
+		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
 	}
 
 	a.declare(n.Name.Value, sym)
@@ -123,10 +122,10 @@ func (a *Analyzer) analyzeAssignStatement(n *syntax.AssignStatement) Symbol {
 
 	expectedType, exists := a.resolve(n.Name.Value)
 	if !exists {
-		a.errors = append(a.errors, fmt.Sprintf("semantic error: undeclared variable '%s'. Use 'let' to declare it.", n.Name.Value))
+		a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'. Use 'let' to declare it.", n.Name.Value))
 	} else {
 		if expectedType.Type != sym.Type && expectedType.Type != environment.ANY_OBJ && sym.Type != environment.ANY_OBJ {
-			a.errors = append(a.errors, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type, n.Name.Value, expectedType.Type))
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type, n.Name.Value, expectedType.Type))
 		}
 	}
 	return sym
@@ -138,7 +137,7 @@ func (a *Analyzer) analyzeIdentifier(n *syntax.Identifier) Symbol {
 	if sym, ok := a.resolve(n.Value); ok {
 		return sym
 	}
-	a.errors = append(a.errors, fmt.Sprintf("semantic error: undeclared variable '%s'", n.Value))
+	a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'", n.Value))
 	return anySymbol
 }
 
@@ -179,23 +178,23 @@ func (a *Analyzer) analyzeInfixExpression(n *syntax.InfixExpression) Symbol {
 		if leftType.Type == environment.STRING_OBJ && rightType.Type == environment.STRING_OBJ {
 			return Symbol{Type: environment.STRING_OBJ}
 		}
-		a.errors = append(a.errors, fmt.Sprintf("type error: cannot add %s and %s", leftType.Type, rightType.Type))
+		a.reportError(n.Token, fmt.Sprintf("type error: cannot add %s and %s", leftType.Type, rightType.Type))
 		return Symbol{Type: environment.ANY_OBJ}
 
 	case "-", "*", "/", "%", "^":
 		if leftType.Type != environment.NUMBER_OBJ || rightType.Type != environment.NUMBER_OBJ {
-			a.errors = append(a.errors, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftType.Type, rightType.Type))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftType.Type, rightType.Type))
 			return Symbol{Type: environment.ANY_OBJ}
 		}
 		return Symbol{Type: environment.NUMBER_OBJ}
 	case "<", ">", "<=", ">=":
 		if leftType.Type != environment.NUMBER_OBJ || rightType.Type != environment.NUMBER_OBJ {
-			a.errors = append(a.errors, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftType.Type, rightType.Type))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftType.Type, rightType.Type))
 		}
 		return Symbol{Type: environment.BOOLEAN_OBJ}
 	case "==", "!=":
 		if leftType.Type != rightType.Type {
-			a.errors = append(a.errors, fmt.Sprintf("type error: cannot compare %s and %s using '%s'", leftType.Type, rightType.Type, n.Operator))
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot compare %s and %s using '%s'", leftType.Type, rightType.Type, n.Operator))
 		}
 		return Symbol{Type: environment.BOOLEAN_OBJ}
 	}
@@ -211,32 +210,58 @@ func (a *Analyzer) analyzeExpressionStatement(n *syntax.ExpressionStatement) Sym
 	return anySymbol
 }
 
+// analyzeTypeAliasStatement resolves the parameter and return types for a type alias
+// and registers the resulting function signature in the analyzer's type registry.
+func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) Symbol {
+	var paramTypes []Symbol
+	for _, pt := range n.Signature.ParamTypes {
+		paramTypes = append(paramTypes, a.resolveTypeName(pt, n.Token))
+	}
+
+	var retType *Symbol
+	if n.Signature.ReturnType != "" {
+		resolved := a.resolveTypeName(n.Signature.ReturnType, n.Token)
+		retType = &resolved
+	}
+
+	a.types[n.Name.Value] = Symbol{
+		Type:       environment.FUNCTION_OBJ,
+		Arity:      len(n.Signature.ParamTypes),
+		ParamTypes: paramTypes,
+		ReturnType: retType,
+	}
+
+	return anySymbol
+}
+
 // analyzeFunctionLiteral analyzes a function definition within a new scope,
 // registers its parameters, checks its body's return type against the declared
 // return type, and verifies that the function guarantees a return if needed.
 func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) Symbol {
 	a.pushScope()
 
-	var paramTypes []environment.ObjectType
+	var paramTypes []Symbol
 
 	for _, param := range n.Parameters {
-		objType := stringToObjectType(param.Type)
-		paramTypes = append(paramTypes, objType)
-
-		a.declare(param.Name, Symbol{Type: objType})
+		sym := a.resolveTypeName(param.Type, n.Token)
+		paramTypes = append(paramTypes, sym)
+		a.declare(param.Name, sym)
 	}
 
 	actualReturnSymbol := a.Analyze(n.Body)
 	a.popScope()
 
-	expectedReturnType := stringToObjectType(n.ReturnType)
-	if n.ReturnType != "" && actualReturnSymbol.Type != expectedReturnType && actualReturnSymbol.Type != environment.ANY_OBJ {
-		a.errors = append(a.errors, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnType, actualReturnSymbol.Type))
-	}
-
+	var expectedReturnSymbol *Symbol
 	if n.ReturnType != "" {
 		if !guaranteesReturn(n.Body) {
-			a.errors = append(a.errors, "semantic error: function is missing a guaranteed return statement. All code paths must return a value.")
+			a.reportError(n.Token, "semantic error: function is missing a guaranteed return statement. All code paths must return a value.")
+		}
+
+		resolved := a.resolveTypeName(n.ReturnType, n.Token)
+		expectedReturnSymbol = &resolved
+
+		if !expectedReturnSymbol.Equals(actualReturnSymbol) {
+			a.reportError(n.Token, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnSymbol.Type, actualReturnSymbol.Type))
 		}
 	}
 
@@ -244,7 +269,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) Symbol {
 		Type:       environment.FUNCTION_OBJ,
 		Arity:      len(n.Parameters),
 		ParamTypes: paramTypes,
-		ReturnType: expectedReturnType,
+		ReturnType: expectedReturnSymbol,
 	}
 }
 
@@ -254,12 +279,12 @@ func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) Symbol {
 func (a *Analyzer) analyzeCallExpression(n *syntax.CallExpression) Symbol {
 	fnSymbol := a.Analyze(n.Function)
 
-	if fnSymbol.Type != environment.FUNCTION_OBJ && fnSymbol.Type != "ANY" {
-		a.errors = append(a.errors, fmt.Sprintf("type error: cannot call a non-function (got %s)", fnSymbol.Type))
+	if fnSymbol.Type != environment.FUNCTION_OBJ && fnSymbol.Type != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: cannot call a non-function (got %s)", fnSymbol.Type))
 	}
 
 	if fnSymbol.Type != environment.ANY_OBJ && len(n.Arguments) != fnSymbol.Arity {
-		a.errors = append(a.errors, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity, len(n.Arguments)))
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity, len(n.Arguments)))
 	}
 
 	for i, arg := range n.Arguments {
@@ -268,14 +293,14 @@ func (a *Analyzer) analyzeCallExpression(n *syntax.CallExpression) Symbol {
 		if i < len(fnSymbol.ParamTypes) {
 			expectedType := fnSymbol.ParamTypes[i]
 
-			if argSymbol.Type != expectedType && argSymbol.Type != "ANY" && expectedType != "ANY" {
-				a.errors = append(a.errors, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType, argSymbol.Type))
+			if !expectedType.Equals(argSymbol) {
+				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.Type, argSymbol.Type))
 			}
 		}
 	}
 
-	if fnSymbol.ReturnType != "" {
-		return Symbol{Type: fnSymbol.ReturnType}
+	if fnSymbol.ReturnType != nil {
+		return *fnSymbol.ReturnType
 	}
 
 	return anySymbol
@@ -307,6 +332,32 @@ func (a *Analyzer) resolve(name string) (Symbol, bool) {
 	}
 
 	return anySymbol, false
+}
+
+// resolveTypeName converts a type name string into its corresponding Symbol representation,
+// checking built-in types first, and then looking up custom types in the registry.
+func (a *Analyzer) resolveTypeName(typeName string, token lexer.Token) Symbol {
+	if typeName == "" {
+		return anySymbol
+	}
+
+	switch typeName {
+	case "Number":
+		return Symbol{Type: environment.NUMBER_OBJ}
+	case "String":
+		return Symbol{Type: environment.STRING_OBJ}
+	case "Boolean":
+		return Symbol{Type: environment.BOOLEAN_OBJ}
+	case "Date":
+		return Symbol{Type: environment.DATE_OBJ}
+	}
+
+	if sym, ok := a.types[typeName]; ok {
+		return sym
+	}
+
+	a.reportError(token, fmt.Sprintf("unknown type '%s'", typeName))
+	return anySymbol
 }
 
 // stringToObjectType converts a string representation of a type (e.g., "Number")
