@@ -85,6 +85,9 @@ func (t *Tokenizer) readChar() {
 	t.Column++
 }
 
+// readString consumes characters until a closing double quote or EOF is
+// encountered, returning the enclosed string literal. It also consumes the
+// closing quote if present.
 func (t *Tokenizer) readString() string {
 	position := t.position + 1
 	for {
