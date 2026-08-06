@@ -5,10 +5,11 @@ import "caja-cli/internal/environment"
 // Symbol represents a semantic entity (like a variable or function) tracked during
 // analysis, containing its type information and function signature details if applicable.
 type Symbol struct {
-	Type       environment.ObjectType
-	Arity      int
-	ParamTypes []Symbol
-	ReturnType *Symbol
+	Type        environment.ObjectType
+	Arity       int
+	ParamTypes  []Symbol
+	ReturnType  *Symbol
+	ElementType *Symbol
 }
 
 var anySymbol = Symbol{Type: environment.ANY_OBJ, Arity: 0}
@@ -40,6 +41,14 @@ func (s Symbol) Equals(other Symbol) bool {
 		} else if s.ReturnType != other.ReturnType {
 			return false
 		}
+	} else if s.Type == environment.ARRAY_OBJ {
+		if s.ElementType == nil && other.ElementType == nil {
+			return true
+		}
+		if s.ElementType == nil || other.ElementType == nil {
+			return false
+		}
+		return s.ElementType.Equals(*other.ElementType)
 	}
 
 	return true

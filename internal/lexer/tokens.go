@@ -29,10 +29,12 @@ const (
 	NEQ      TokenType = "NEQ"
 
 	// Delimiters
-	LPAREN TokenType = "LPAREN"
-	RPAREN TokenType = "RPAREN"
-	LBRACE TokenType = "LBRACE"
-	RBRACE TokenType = "RBRACE"
+	LPAREN   TokenType = "LPAREN"
+	RPAREN   TokenType = "RPAREN"
+	LBRACE   TokenType = "LBRACE"
+	RBRACE   TokenType = "RBRACE"
+	LBRACKET TokenType = "lBRACKET"
+	RBRACKET TokenType = "RBRACKET"
 
 	// Keywords
 	RETURN TokenType = "RETURN"

@@ -146,6 +146,43 @@ func (b *BooleanLiteral) expressionNode()      {}
 func (b *BooleanLiteral) TokenLiteral() string { return b.Token.Literal }
 func (b *BooleanLiteral) String() string       { return b.Token.Literal }
 
+// ArrayLiteral is an expression node that represents a list of values.
+// Token carries the original tokenizer.Token (typically '['), and Elements
+// holds the ordered slice of expressions that make up the array's contents.
+type ArrayLiteral struct {
+	Token    lexer.Token
+	Elements []Expression
+}
+
+func (al *ArrayLiteral) expressionNode()      {}
+func (al *ArrayLiteral) TokenLiteral() string { return al.Token.Literal }
+func (al *ArrayLiteral) String() string {
+	out := "["
+	for i, el := range al.Elements {
+		out += el.String()
+		if i != len(al.Elements)-1 {
+			out += ", "
+		}
+	}
+	out += "]"
+	return out
+}
+
+// IndexExpression is an expression node that represents an array or bracket
+// notation lookup. Token carries the original tokenizer.Token (typically '['),
+// Left is the expression being indexed into, and Index is the expression evaluating to the index.
+type IndexExpression struct {
+	Token lexer.Token
+	Left  Expression
+	Index Expression
+}
+
+func (ie *IndexExpression) expressionNode()      {}
+func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IndexExpression) String() string {
+	return "(" + ie.Left.String() + "[" + ie.Index.String() + "])"
+}
+
 // InfixExpression is an expression node for binary operations such as
 // addition, subtraction, multiplication, and division. It stores the operator
 // token, the operator symbol as a string, and the left and right operands.

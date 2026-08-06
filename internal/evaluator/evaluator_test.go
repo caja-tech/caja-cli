@@ -55,9 +55,36 @@ func testEval(input string) (interface{}, error) {
 		return obj.Value, nil
 	case *environment.Date:
 		return obj.Value.Format("2006-01-02"), nil
+	case *environment.Array:
+		return obj.Inspect(), nil
 	default:
 		return obj, nil
 	}
+}
+
+// TestEvaluateArrays verifies the runtime execution of array literals and array indexing.
+func TestEvaluateArrays(t *testing.T) {
+	var tests = []testScenario{
+		{"Evaluate array literal", "return [1, 2 * 2, 3 + 3]", "[1, 4, 6]"},
+		{"Index array literal directly", "return [1, 2, 3][1]", 2.0},
+		{"Index array from variable", "let a = [10, 20, 30]\nreturn a[2]", 30.0},
+		{"Index array with expression", "let a = [10, 20, 30]\nreturn a[1 + 1]", 30.0},
+		{"Nested array literal", "return [[1, 2], [3, 4]]", "[[1, 2], [3, 4]]"},
+		{"Index nested array", "let a = [[1, 2], [3, 4]]\nreturn a[1][0]", 3.0},
+		{"Modify array element? No, variables are re-assigned, but let's just test indexing for now.", "let a = [1]\nreturn a[0]", 1.0},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestErrorArrays verifies runtime errors during array evaluation like out of bounds.
+func TestErrorArrays(t *testing.T) {
+	var tests = []testErrorScenario{
+		{"Index out of bounds positive", "let a = [1, 2]\nreturn a[2]", "runtime error: array index out of bounds"},
+		{"Index operator on non-array (caught by semantic)", "let a = 1\nreturn a[0]", "type error: index operator not supported for NUMBER"},
+	}
+
+	runTestErrorScenarios(t, tests)
 }
 
 // runTestScenarios iterates over a slice of testScenario entries, evaluating

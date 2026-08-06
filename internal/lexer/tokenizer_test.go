@@ -401,6 +401,30 @@ func TestTypeAliasTokenization(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestArrayTokenization tests the tokenization of array literals and indexing.
+func TestArrayTokenization(t *testing.T) {
+	input := "let arr = [1, 2]\narr[0]"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier arr", Token{IDENT, "arr", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 9}},
+		{"Left bracket", Token{LBRACKET, "[", 1, 11}},
+		{"Number 1", Token{NUMBER, "1", 1, 12}},
+		{"Comma", Token{COMMA, ",", 1, 13}},
+		{"Number 2", Token{NUMBER, "2", 1, 15}},
+		{"Right bracket", Token{RBRACKET, "]", 1, 16}},
+		{"Identifier arr", Token{IDENT, "arr", 2, 1}},
+		{"Left bracket", Token{LBRACKET, "[", 2, 4}},
+		{"Number 0", Token{NUMBER, "0", 2, 5}},
+		{"Right bracket", Token{RBRACKET, "]", 2, 6}},
+		{"End of file", Token{EOF, "", 2, 7}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 func runTestsOnTokens(tknzr *Tokenizer, tests []testScenario, t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

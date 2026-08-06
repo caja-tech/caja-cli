@@ -5,6 +5,7 @@ import (
 	"caja-cli/internal/lexer"
 	"caja-cli/internal/syntax"
 	"fmt"
+	"strings"
 )
 
 // Analyzer performs semantic analysis on an AST.
@@ -53,6 +54,10 @@ func (a *Analyzer) Analyze(node syntax.Node) Symbol {
 		return a.analyzeFunctionLiteral(n)
 	case *syntax.CallExpression:
 		return a.analyzeCallExpression(n)
+	case *syntax.ArrayLiteral:
+		return a.analyzeArrayLiteral(n)
+	case *syntax.IndexExpression:
+		return a.analyzeIndexExpression(n)
 	case *syntax.NumberLiteral:
 		return Symbol{Type: environment.NUMBER_OBJ}
 	case *syntax.StringLiteral:
@@ -228,6 +233,46 @@ func (a *Analyzer) analyzeInfixExpression(n *syntax.InfixExpression) Symbol {
 	return anySymbol
 }
 
+// analyzeArrayLiteral ensures all elements in the array match the type of the first element,
+// and returns an ARRAY_OBJ symbol with the inferred ElementType.
+func (a *Analyzer) analyzeArrayLiteral(n *syntax.ArrayLiteral) Symbol {
+	if len(n.Elements) == 0 {
+		return Symbol{Type: environment.ARRAY_OBJ}
+	}
+
+	firstType := a.Analyze(n.Elements[0])
+	for i := 1; i < len(n.Elements); i++ {
+		elType := a.Analyze(n.Elements[i])
+		if !firstType.Equals(elType) && firstType.Type != environment.ANY_OBJ && elType.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: array elements must have the same type, expected %s, got %s", firstType.Type, elType.Type))
+		}
+	}
+
+	return Symbol{
+		Type:        environment.ARRAY_OBJ,
+		ElementType: &firstType,
+	}
+}
+
+// analyzeIndexExpression ensures the left side is an array and the index is a number.
+func (a *Analyzer) analyzeIndexExpression(n *syntax.IndexExpression) Symbol {
+	leftType := a.Analyze(n.Left)
+	if leftType.Type != environment.ARRAY_OBJ && leftType.Type != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: index operator not supported for %s", leftType.Type))
+	}
+
+	indexType := a.Analyze(n.Index)
+	if indexType.Type != environment.NUMBER_OBJ && indexType.Type != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexType.Type))
+	}
+
+	if leftType.ElementType != nil {
+		return *leftType.ElementType
+	}
+
+	return anySymbol
+}
+
 // analyzeExpressionStatement wraps the analysis of the inner expression.
 func (a *Analyzer) analyzeExpressionStatement(n *syntax.ExpressionStatement) Symbol {
 	if n.Expression != nil {
@@ -367,6 +412,16 @@ func (a *Analyzer) resolveTypeName(typeName string, token lexer.Token) Symbol {
 		return anySymbol
 	}
 
+	if strings.HasPrefix(typeName, "[") && strings.HasSuffix(typeName, "]") {
+		innerTypeStr := typeName[1 : len(typeName)-1]
+		innerSymbol := a.resolveTypeName(innerTypeStr, token)
+
+		return Symbol{
+			Type:        environment.ARRAY_OBJ,
+			ElementType: &innerSymbol,
+		}
+	}
+
 	switch typeName {
 	case "Number":
 		return Symbol{Type: environment.NUMBER_OBJ}
@@ -462,14 +517,22 @@ func guaranteesRecursiveCall(node syntax.Node, targetName string) bool {
 	case *syntax.ExpressionStatement:
 		return guaranteesRecursiveCall(n.Expression, targetName)
 
-	case *syntax.InfixExpression: // e.g., targetName() + 5
+	case *syntax.InfixExpression:
 		return guaranteesRecursiveCall(n.Left, targetName) || guaranteesRecursiveCall(n.Right, targetName)
-
-	//case *syntax.PrefixExpression: // e.g., !targetName()
-	//	return guaranteesRecursiveCall(n.Right, targetName)
 
 	case *syntax.FunctionLiteral:
 		return false
+
+	case *syntax.ArrayLiteral:
+		for _, el := range n.Elements {
+			if guaranteesRecursiveCall(el, targetName) {
+				return true
+			}
+		}
+		return false
+
+	case *syntax.IndexExpression:
+		return guaranteesRecursiveCall(n.Left, targetName) || guaranteesRecursiveCall(n.Index, targetName)
 
 	default:
 		return false

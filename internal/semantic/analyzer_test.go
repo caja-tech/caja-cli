@@ -329,3 +329,62 @@ let getDate = fn(): Date { return 10 }
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticAnalysisArrays(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid array declaration and access",
+			input: `
+let a = [1, 2, 3]
+let b = a[0]
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Heterogeneous array (type mismatch)",
+			input: `
+let a = [1, "two", 3]
+`,
+			expectedErrors: []string{
+				"type error: array elements must have the same type, expected NUMBER, got STRING",
+			},
+		},
+		{
+			name: "Invalid index type",
+			input: `
+let a = [1, 2, 3]
+let b = a["zero"]
+`,
+			expectedErrors: []string{
+				"type error: array index expected NUMBER, got STRING",
+			},
+		},
+		{
+			name: "Index operator on non-array",
+			input: `
+let a = 10
+let b = a[0]
+`,
+			expectedErrors: []string{
+				"type error: index operator not supported for NUMBER",
+			},
+		},
+		{
+			name: "Valid nested array",
+			input: `
+let a = [[1, 2], [3, 4]]
+let b = a[0][1]
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Array in function signature",
+			input: `
+let sum = fn(arr: [Number]): Number { return arr[0] }
+let res = sum([1, 2, 3])
+`,
+			expectedErrors: []string{},
+		},
+	}
+	runTestScenarios(t, tests)
+}

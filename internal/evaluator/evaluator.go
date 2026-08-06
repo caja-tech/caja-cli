@@ -34,6 +34,10 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalDateLiteral(node)
 	case *syntax.BooleanLiteral:
 		return evalBooleanLiteral(node)
+	case *syntax.ArrayLiteral:
+		return evalArrayLiteral(node, env)
+	case *syntax.IndexExpression:
+		return evalIndexExpression(node, env)
 	case *syntax.Identifier:
 		return evalIdentifier(node, env)
 	case *syntax.ReturnStatement:
@@ -93,6 +97,44 @@ func evalDateLiteral(node *syntax.DateLiteral) (environment.Object, error) {
 // evalBooleanLiteral returns a Boolean object representing the literal's value.
 func evalBooleanLiteral(node *syntax.BooleanLiteral) (environment.Object, error) {
 	return nativeBoolToBooleanObject(node.Value), nil
+}
+
+// evalArrayLiteral evaluates all expressions within an array literal and returns
+// an Array object containing the evaluated elements.
+func evalArrayLiteral(node *syntax.ArrayLiteral, env *environment.Environment) (environment.Object, error) {
+	elements, err := evalExpressions(node.Elements, env)
+	if err != nil {
+		return nil, err
+	}
+	return &environment.Array{Elements: elements}, nil
+}
+
+// evalIndexExpression evaluates an array index operation, ensuring the left side
+// is an array and the index is a number within bounds, returning the requested element.
+func evalIndexExpression(node *syntax.IndexExpression, env *environment.Environment) (environment.Object, error) {
+	left, err := Eval(node.Left, env)
+	if err != nil {
+		return nil, err
+	}
+
+	index, err := Eval(node.Index, env)
+	if err != nil {
+		return nil, err
+	}
+
+	arrayObj, okLeft := left.(*environment.Array)
+	indexObj, okIndex := index.(*environment.Number)
+
+	if !okLeft || !okIndex {
+		return nil, fmt.Errorf("runtime error: index operator not supported")
+	}
+
+	idx := int(indexObj.Value)
+	if idx < 0 || idx >= len(arrayObj.Elements) {
+		return nil, fmt.Errorf("runtime error: array index out of bounds")
+	}
+
+	return arrayObj.Elements[idx], nil
 }
 
 // evalReturnStatement evaluates the returned expression and wraps it in a ReturnValue object.

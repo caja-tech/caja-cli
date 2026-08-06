@@ -26,6 +26,8 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideRightParenToken,
 	decideLeftBraceToken,
 	decideRightBraceToken,
+	decideLeftBracketToken,
+	decideRightBracketToken,
 	decideEOFToken,
 	decideLetterToken,
 	decideDigitToken,
@@ -193,6 +195,22 @@ func decideRightBraceToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+func decideLeftBracketToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '[' {
+		return deciderResult{true, Token{Type: LBRACKET, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+func decideRightBracketToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == ']' {
+		return deciderResult{true, Token{Type: RBRACKET, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
 // decideEOFToken matches the NUL byte (0) that signals end-of-input and
 // produces an EOF token.
 func decideEOFToken(t *Tokenizer, line int, column int) deciderResult {
@@ -246,7 +264,7 @@ func decideColonToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
-// decideStringToken matches the '"' character, reads the full string literal,
+// decideStringToken matches the " character, reads the full string literal,
 // and produces a STRING token.
 func decideStringToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '"' {
@@ -256,7 +274,7 @@ func decideStringToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
-// decideDateToken matches the '\'' character, reads the full date literal,
+// decideDateToken matches the '\ character, reads the full date literal,
 // and produces a DATE token.
 func decideDateToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '\'' {
