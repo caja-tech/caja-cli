@@ -423,6 +423,8 @@ func (a *Analyzer) resolveTypeName(typeName string, token lexer.Token) Symbol {
 	}
 
 	switch typeName {
+	case "Any":
+		return anySymbol
 	case "Number":
 		return Symbol{Type: environment.NUMBER_OBJ}
 	case "String":
