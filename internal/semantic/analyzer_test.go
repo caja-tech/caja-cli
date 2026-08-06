@@ -131,3 +131,93 @@ if (1 > 0) {
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticAnalysisFunctions(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid function declaration and call",
+			input: `
+let add = fn(a: Number, b: Number): Number { return a + b }
+let result = add(10, 20)
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Call non-function",
+			input: `
+let a = 10
+a()
+`,
+			expectedErrors: []string{
+				"type error: cannot call a non-function (got NUMBER)",
+			},
+		},
+		{
+			name: "Incorrect arity",
+			input: `
+let add = fn(a: Number, b: Number): Number { return a + b }
+add(10)
+`,
+			expectedErrors: []string{
+				"arity error: expected 2 arguments, got 1",
+			},
+		},
+		{
+			name: "Incorrect argument type",
+			input: `
+let check = fn(name: String): Boolean { return true }
+check(10)
+`,
+			expectedErrors: []string{
+				"type error: argument 1 expected STRING, got NUMBER",
+			},
+		},
+		{
+			name: "Incorrect return type",
+			input: `
+let add = fn(a: Number, b: Number): String { return a + b }
+`,
+			expectedErrors: []string{
+				"type error: function declared to return STRING, but body returns NUMBER",
+			},
+		},
+		{
+			name: "Missing return statement",
+			input: `
+let bad = fn(): Number {
+	let a = 10
+}
+`,
+			expectedErrors: []string{
+				"semantic error: function is missing a guaranteed return statement. All code paths must return a value.",
+			},
+		},
+		{
+			name: "Missing return in alternative path",
+			input: `
+let check = fn(a: Number): Boolean {
+	if (a > 0) {
+		return true
+	}
+}
+`,
+			expectedErrors: []string{
+				"semantic error: function is missing a guaranteed return statement. All code paths must return a value.",
+			},
+		},
+		{
+			name: "Valid return in all paths",
+			input: `
+let check = fn(a: Number): Boolean {
+	if (a > 0) {
+		return true
+	} else {
+		return false
+	}
+}
+`,
+			expectedErrors: []string{},
+		},
+	}
+	runTestScenarios(t, tests)
+}

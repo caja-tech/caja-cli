@@ -487,19 +487,22 @@ func TestIfExpression(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
-// TestReturnInsideBlockError validates the architectural rule that return
-// statements are prohibited inside block statements, ensuring that the parser
-// flags it as an error.
-func TestReturnInsideBlockError(t *testing.T) {
-	input := "if (x > y) { return x }"
-	tknzr := lexer.New(input)
-	p := New(tknzr)
-	p.Parse()
-
-	errors := p.Errors()
-	if len(errors) == 0 {
-		t.Fatal("expected parser error for return inside block statement, but got none")
+// TestReturnInsideBlockAllowed verifies that return statements are now
+// successfully parsed inside block statements, reflecting the updated rules.
+func TestReturnInsideBlockAllowed(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Return inside if block",
+			input:    "if (x > y) { return x }",
+			expected: "if (x > y) return x",
+		},
+		{
+			name:     "Return inside function block",
+			input:    "let f = fn(): Number { return 10 }",
+			expected: "let f = fn(): Number { ... }",
+		},
 	}
+	runTestScenarios(t, tests)
 }
 
 // TestLetStatements verifies that let statements with various assignments parse correctly.
@@ -545,6 +548,80 @@ func TestLetStatementErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFunctionParsing verifies that function literals with various parameter types and return types parse correctly.
+func TestFunctionParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Function with Number types",
+			input:    "let add = fn(a: Number, b: Number): Number { a + b }",
+			expected: "let add = fn(a: Number, b: Number): Number { ... }",
+		},
+		{
+			name:     "Function with String and Boolean types",
+			input:    "let check = fn(name: String, isValid: Boolean): Boolean { isValid }",
+			expected: "let check = fn(name: String, isValid: Boolean): Boolean { ... }",
+		},
+		{
+			name:     "Function with Date type and no return type",
+			input:    "let log = fn(date: Date) { date }",
+			expected: "let log = fn(date: Date) { ... }",
+		},
+		{
+			name:     "Function with no parameters",
+			input:    "let ping = fn(): String { \"pong\" }",
+			expected: "let ping = fn(): String { ... }",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestCallExpressionParsing verifies that function calls with different argument types parse correctly.
+func TestCallExpressionParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Call with number arguments",
+			input:    "add(1, 2)",
+			expected: "add(1, 2)",
+		},
+		{
+			name:     "Call with string and boolean",
+			input:    "check(\"John\", true)",
+			expected: "check(\"John\", true)",
+		},
+		{
+			name:     "Call with complex expressions",
+			input:    "add(1 + 2, 3 * 4)",
+			expected: "add((1 + 2), (3 * 4))",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestStringAndBooleanParsing verifies parsing of string and boolean literals.
+func TestStringAndBooleanParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "String literal in assignment",
+			input:    "let name = \"John Doe\"",
+			expected: "let name = \"John Doe\"",
+		},
+		{
+			name:     "Boolean literal true",
+			input:    "let isActive = true",
+			expected: "let isActive = true",
+		},
+		{
+			name:     "Boolean literal false",
+			input:    "let isFailed = false",
+			expected: "let isFailed = false",
+		},
+	}
+
+	runTestScenarios(t, tests)
 }
 
 // checkParseErrors is a test helper that fails the current test immediately if

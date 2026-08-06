@@ -85,6 +85,21 @@ func (t *Tokenizer) readChar() {
 	t.Column++
 }
 
+func (t *Tokenizer) readString() string {
+	position := t.position + 1
+	for {
+		t.readChar()
+		if t.ch == '"' || t.ch == 0 {
+			break
+		}
+	}
+	result := t.input[position:t.position]
+	if t.ch == '"' {
+		t.readChar() // consume the closing quote
+	}
+	return result
+}
+
 // skipWhitespace advances past any combination of spaces, tabs, newlines, and
 // carriage-returns, updating line and column tracking along the way.
 func (t *Tokenizer) skipWhitespace() {

@@ -98,8 +98,8 @@ func TestDecodeValidZlibInvalidScript(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected Decode to fail due to script syntax errors")
 	}
-	if !strings.Contains(err.Error(), "aborted") {
-		t.Errorf("Expected decoding aborted error, got: %v", err)
+	if !strings.Contains(err.Error(), "failed to parse the script") {
+		t.Errorf("Expected failed to parse error, got: %v", err)
 	}
 }
 

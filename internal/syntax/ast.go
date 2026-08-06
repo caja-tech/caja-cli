@@ -113,6 +113,24 @@ func (n *NumberLiteral) TokenLiteral() string {
 }
 func (n *NumberLiteral) String() string { return n.Token.Literal }
 
+type StringLiteral struct {
+	Token lexer.Token
+	Value string
+}
+
+func (sl *StringLiteral) expressionNode()      {}
+func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
+func (sl *StringLiteral) String() string       { return `"` + sl.Value + `"` }
+
+type Boolean struct {
+	Token lexer.Token
+	Value bool
+}
+
+func (b *Boolean) expressionNode()      {}
+func (b *Boolean) TokenLiteral() string { return b.Token.Literal }
+func (b *Boolean) String() string       { return b.Token.Literal }
+
 // InfixExpression is an expression node for binary operations such as
 // addition, subtraction, multiplication, and division. It stores the operator
 // token, the operator symbol as a string, and the left and right operands.
@@ -204,4 +222,69 @@ func (e *ExpressionStatement) TokenLiteral() string {
 }
 func (e *ExpressionStatement) String() string {
 	return e.Expression.String()
+}
+
+type Parameter struct {
+	Name string
+	Type string
+}
+
+func (p *Parameter) String() string {
+	return p.Name + ": " + p.Type
+}
+
+type FunctionLiteral struct {
+	Token      lexer.Token
+	Parameters []*Parameter
+	ReturnType string
+	Body       *BlockStatement
+}
+
+func (fl *FunctionLiteral) expressionNode()      {}
+func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
+func (fl *FunctionLiteral) String() string {
+	out := fl.Token.Literal
+	out += "("
+
+	if len(fl.Parameters) > 0 {
+		for i, param := range fl.Parameters {
+			out += param.String()
+			if i != len(fl.Parameters)-1 {
+				out += ", "
+			}
+		}
+	}
+
+	out += ")"
+	if fl.ReturnType != "" {
+		out += ": " + fl.ReturnType
+	}
+	out += " { ... }"
+	return out
+}
+
+type CallExpression struct {
+	Token     lexer.Token
+	Function  Expression
+	Arguments []Expression
+}
+
+func (ce *CallExpression) expressionNode()      {}
+func (ce *CallExpression) TokenLiteral() string { return ce.Token.Literal }
+func (ce *CallExpression) String() string {
+	out := ce.Function.String()
+	out += "("
+
+	if len(ce.Arguments) > 0 {
+		for i, arg := range ce.Arguments {
+			out += arg.String()
+			if i != len(ce.Arguments)-1 {
+				out += ", "
+			}
+		}
+	}
+
+	out += ")"
+
+	return out
 }
