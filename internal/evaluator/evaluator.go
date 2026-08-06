@@ -97,6 +97,28 @@ func evalBooleanLiteral(node *syntax.BooleanLiteral) (environment.Object, error)
 
 // evalReturnStatement evaluates the returned expression and wraps it in a ReturnValue object.
 func evalReturnStatement(node *syntax.ReturnStatement, env *environment.Environment) (environment.Object, error) {
+	currentFuncName := ""
+	if len(env.CallStack) > 0 {
+		currentFuncName = env.CallStack[len(env.CallStack)-1].FuncName
+	}
+
+	if callNode, ok := node.ReturnValue.(*syntax.CallExpression); ok {
+		if ident, ok := callNode.Function.(*syntax.Identifier); ok && ident.Value == currentFuncName && currentFuncName != "" {
+			args, err := evalExpressions(callNode.Arguments, env)
+			if err != nil {
+				return nil, err
+			}
+			fnObj, ok := env.Get(ident.Value)
+			if !ok {
+				return nil, fmt.Errorf("identifier not found: %s", ident.Value)
+			}
+			return &environment.TailCall{
+				Function:  fnObj.(*environment.Function),
+				Arguments: args,
+			}, nil
+		}
+	}
+
 	val, err := Eval(node.ReturnValue, env)
 	if err != nil {
 		return nil, err
@@ -143,61 +165,65 @@ func evalCallExpression(node *syntax.CallExpression, env *environment.Environmen
 		return nil, err
 	}
 
-	var args []environment.Object
-	for _, argNode := range node.Arguments {
-		evaluated, err := Eval(argNode, env)
-		if err != nil {
-			return nil, err
-		}
-		args = append(args, evaluated)
-	}
-
-	fn, ok := function.(*environment.Function)
-	if !ok {
-		return nil, fmt.Errorf("not a function")
-	}
-
-	funcName := ""
-	if ident, ok := node.Function.(*syntax.Identifier); ok {
-		funcName = ident.Value
-	}
-
-	var argContext []string
-	for _, arg := range args {
-		argContext = append(argContext, arg.Inspect())
-	}
-
-	frame := environment.StackFrame{
-		FuncName: funcName,
-		Line:     node.Token.Line,
-		Column:   node.Token.Column,
-		Args:     argContext,
-	}
-
-	extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
-	extendedEnv.CallStack = append(append([]environment.StackFrame(nil), env.CallStack...), frame)
-	if len(extendedEnv.CallStack) > stackTraceLimit {
-		return nil, fmt.Errorf("runtime error: stack overflow%s", extendedEnv.GetStackTrace())
-	}
-
-	for i, param := range fn.Parameters {
-		extendedEnv.Set(param.Name, args[i])
-	}
-
-	evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
+	args, err := evalExpressions(node.Arguments, env)
 	if err != nil {
-		if !strings.Contains(err.Error(), "Stack trace:") {
-			return nil, fmt.Errorf("%s%s", err.Error(), extendedEnv.GetStackTrace())
-		}
 		return nil, err
 	}
 
-	// Unwrap any early return values so the whole program doesn't halt
-	if retVal, ok := evaluated.(*environment.ReturnValue); ok {
-		return retVal.Value, nil
-	}
+	for {
+		fn, ok := function.(*environment.Function)
+		if !ok {
+			return nil, fmt.Errorf("not a function")
+		}
 
-	return evaluated, nil
+		funcName := ""
+		if ident, ok := node.Function.(*syntax.Identifier); ok {
+			funcName = ident.Value
+		}
+
+		var argContext []string
+		for _, arg := range args {
+			argContext = append(argContext, arg.Inspect())
+		}
+
+		frame := environment.StackFrame{
+			FuncName: funcName,
+			Line:     node.Token.Line,
+			Column:   node.Token.Column,
+			Args:     argContext,
+		}
+
+		extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+		extendedEnv.CallStack = append(append([]environment.StackFrame(nil), env.CallStack...), frame)
+		if len(extendedEnv.CallStack) > stackTraceLimit {
+			return nil, fmt.Errorf("runtime error: stack overflow%s", extendedEnv.GetStackTrace())
+		}
+
+		for i, param := range fn.Parameters {
+			extendedEnv.Set(param.Name, args[i])
+		}
+
+		evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
+		if err != nil {
+			if !strings.Contains(err.Error(), "Stack trace:") {
+				return nil, fmt.Errorf("%s%s", err.Error(), extendedEnv.GetStackTrace())
+			}
+			return nil, err
+		}
+
+		if tail, ok := evaluated.(*environment.TailCall); ok {
+			function = tail.Function
+			args = tail.Arguments
+			continue
+		}
+
+		// Unwrap any early return values so the whole program doesn't halt
+		if retVal, ok := evaluated.(*environment.ReturnValue); ok {
+			return retVal.Value, nil
+		}
+
+		return evaluated, nil
+	}
 }
 
 // evalProgram evaluates every statement in the program sequentially. When a
@@ -292,7 +318,7 @@ func evalBlockStatement(block *syntax.BlockStatement, env *environment.Environme
 			return nil, err
 		}
 
-		if result != nil && result.Type() == environment.RETURN_VALUE_OBJ {
+		if result != nil && (result.Type() == environment.RETURN_VALUE_OBJ || result.Type() == environment.TAIL_CALL_OBJ) {
 			return result, nil
 		}
 	}
@@ -318,6 +344,22 @@ func evalIfExpression(ie *syntax.IfExpression, env *environment.Environment) (en
 	}
 
 	return &environment.Number{Value: 0.0}, nil
+}
+
+// evalExpressions evaluates a list of expressions left-to-right and returns a slice
+// of their corresponding evaluated environment Objects.
+func evalExpressions(exps []syntax.Expression, env *environment.Environment) ([]environment.Object, error) {
+	var result []environment.Object
+
+	for _, e := range exps {
+		evaluated, err := Eval(e, env)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, evaluated)
+	}
+
+	return result, nil
 }
 
 // boolToPrimitive converts a boolean value to an environment.Object representation,
