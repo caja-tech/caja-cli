@@ -573,6 +573,77 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input:          "return strlen(10)",
 			expectedErrors: []string{"type error: first argument to 'strlen' must be STRING, got NUMBER"},
 		},
+		{
+			name:  "year() works with correct types",
+			input: "let d = '2023-10-25'\nreturn year(d)",
+		},
+		{
+			name:           "year() rejects mismatched types",
+			input:          "return year(\"2023\")",
+			expectedErrors: []string{"type error: first argument to 'year' must be DATE, got STRING"},
+		},
+		{
+			name:  "month() works with correct types",
+			input: "return month('2023-10-25')",
+		},
+		{
+			name:  "day() works with correct types",
+			input: "return day('2023-10-25')",
+		},
+		{
+			name:  "weekday() works with correct types",
+			input: "return weekday('2023-10-25')",
+		},
+		{
+			name:           "weekday() rejects missing arguments",
+			input:          "return weekday()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'weekday', got 0"},
+		},
+		{
+			name:  "today() works with correct types",
+			input: "return today()",
+		},
+		{
+			name:           "today() rejects unexpected arguments",
+			input:          "return today(1)",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'today', got 1"},
+		},
+		{
+			name:  "parseDate() works with correct types",
+			input: "return parseDate(\"2023-10-25\")",
+		},
+		{
+			name:           "parseDate() rejects mismatched types",
+			input:          "return parseDate(2023)",
+			expectedErrors: []string{"type error: first argument to 'parseDate' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "addDays() works with correct types",
+			input: "return addDays('2023-10-25', 5)",
+		},
+		{
+			name:           "addDays() rejects mismatched types",
+			input:          "return addDays('2023-10-25', \"5\")",
+			expectedErrors: []string{"type error: second argument to 'addDays' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "diffDays() works with correct types",
+			input: "return diffDays('2023-10-30', '2023-10-25')",
+		},
+		{
+			name:           "diffDays() rejects mismatched types",
+			input:          "return diffDays('2023-10-30', 5)",
+			expectedErrors: []string{"type error: second argument to 'diffDays' must be DATE, got NUMBER"},
+		},
+		{
+			name:  "newDate() works with correct types",
+			input: "return newDate(2023, 1, 1)",
+		},
+		{
+			name:           "newDate() rejects mismatched types",
+			input:          "return newDate(\"2023\", 1, 1)",
+			expectedErrors: []string{"type error: first argument to 'newDate' must be NUMBER, got STRING"},
+		},
 	}
 	runTestScenarios(t, tests)
 }

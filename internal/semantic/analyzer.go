@@ -45,6 +45,15 @@ func New() *Analyzer {
 	analyzer.declare("toLower", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
 	analyzer.declare("trim", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
 	analyzer.declare("strlen", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("year", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("month", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("day", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("weekday", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("today", Symbol{Type: environment.BUILTIN_OBJ, Arity: 0})
+	analyzer.declare("parseDate", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("addDays", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("diffDays", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("newDate", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
 
 	return analyzer
 }
@@ -627,6 +636,89 @@ func (a *Analyzer) analyzeBuiltinCall(name string, n *syntax.CallExpression) (Sy
 			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'strlen' must be STRING, got %s", strSymbol.Type))
 		}
 		return Symbol{Type: environment.NUMBER_OBJ}, true
+
+	case "year", "month", "day", "weekday":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", name, len(n.Arguments)))
+			return anySymbol, true
+		}
+		dateSymbol := a.Analyze(n.Arguments[0])
+
+		if dateSymbol.Type != environment.DATE_OBJ && dateSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be DATE, got %s", name, dateSymbol.Type))
+		}
+		return Symbol{Type: environment.NUMBER_OBJ}, true
+
+	case "today":
+		if len(n.Arguments) != 0 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 0 arguments for 'today', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		return Symbol{Type: environment.DATE_OBJ}, true
+
+	case "parseDate":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'parseDate', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'parseDate' must be STRING, got %s", strSymbol.Type))
+		}
+		return Symbol{Type: environment.DATE_OBJ}, true
+
+	case "addDays":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'addDays', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		dateSymbol := a.Analyze(n.Arguments[0])
+		numSymbol := a.Analyze(n.Arguments[1])
+
+		if dateSymbol.Type != environment.DATE_OBJ && dateSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'addDays' must be DATE, got %s", dateSymbol.Type))
+		}
+		if numSymbol.Type != environment.NUMBER_OBJ && numSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'addDays' must be NUMBER, got %s", numSymbol.Type))
+		}
+		return Symbol{Type: environment.DATE_OBJ}, true
+
+	case "diffDays":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'diffDays', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		date1Symbol := a.Analyze(n.Arguments[0])
+		date2Symbol := a.Analyze(n.Arguments[1])
+
+		if date1Symbol.Type != environment.DATE_OBJ && date1Symbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'diffDays' must be DATE, got %s", date1Symbol.Type))
+		}
+		if date2Symbol.Type != environment.DATE_OBJ && date2Symbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'diffDays' must be DATE, got %s", date2Symbol.Type))
+		}
+		return Symbol{Type: environment.NUMBER_OBJ}, true
+
+	case "newDate":
+		if len(n.Arguments) != 3 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'newDate', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		yearSymbol := a.Analyze(n.Arguments[0])
+		monthSymbol := a.Analyze(n.Arguments[1])
+		daySymbol := a.Analyze(n.Arguments[2])
+
+		if yearSymbol.Type != environment.NUMBER_OBJ && yearSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'newDate' must be NUMBER, got %s", yearSymbol.Type))
+		}
+		if monthSymbol.Type != environment.NUMBER_OBJ && monthSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'newDate' must be NUMBER, got %s", monthSymbol.Type))
+		}
+		if daySymbol.Type != environment.NUMBER_OBJ && daySymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'newDate' must be NUMBER, got %s", daySymbol.Type))
+		}
+		return Symbol{Type: environment.DATE_OBJ}, true
 
 	default:
 		return Symbol{}, false
