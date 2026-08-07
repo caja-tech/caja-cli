@@ -757,6 +757,32 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"copy of array", "let arr = [1, 2]\nlet c = copy(arr)\nappend(c, 3)\nreturn len(arr)", 2.0},
 		{"slice of array", "let s = slice([1, 2, 3, 4], 1, 3)\nreturn s[1]", 3.0},
 		{"join of arrays", "let j = join([1, 2], [3, 4])\nreturn j[2]", 3.0},
+		{"charAt string", "return charAt(\"hello\", 1)", "e"},
+		{"substring of string", "return substring(\"hello\", 1, 4)", "ell"},
+		{"concat of strings", "return concat(\"hello\", \" world\")", "hello world"},
+		{"split string by comma", "return split(\"a,b,c\", \",\")[1]", "b"},
+		{"contains returns true", "return contains(\"hello\", \"ell\")", true},
+		{"contains returns false", "return contains(\"hello\", \"world\")", false},
+		{"startsWith true", "return startsWith(\"hello\", \"he\")", true},
+		{"endsWith true", "return endsWith(\"hello\", \"lo\")", true},
+		{"replace string", "return replace(\"hello world\", \"world\", \"caja\")", "hello caja"},
+		{"toUpper", "return toUpper(\"hello\")", "HELLO"},
+		{"toLower", "return toLower(\"HELLO\")", "hello"},
+		{"trim", "return trim(\"   hello \")", "hello"},
+		{"strlen", "return strlen(\"hello\")", 5.0},
 	}
 	runTestScenarios(t, tests)
+}
+
+func TestErrorBuiltins(t *testing.T) {
+	var tests = []testErrorScenario{
+		{"charAt index out of bounds (negative)", "return charAt(\"hello\", 0 - 1)", "runtime error: charAt index -1 out of bounds"},
+		{"charAt index out of bounds (too large)", "return charAt(\"hello\", 5)", "runtime error: charAt index 5 out of bounds"},
+		{"substring start out of bounds", "return substring(\"hello\", 0 - 1, 4)", "runtime error: substring start index -1 out of bounds"},
+		{"substring end out of bounds", "return substring(\"hello\", 0, 6)", "runtime error: substring end index 6 out of bounds"},
+		{"substring start > end", "return substring(\"hello\", 4, 1)", "runtime error: substring start index 4 is greater than end index 1"},
+		{"split delimiter empty", "return split(\"hello\", \"\")", "runtime error: split delimiter must be a single character string"},
+		{"split delimiter too long", "return split(\"hello\", \"ll\")", "runtime error: split delimiter must be a single character string"},
+	}
+	runTestErrorScenarios(t, tests)
 }

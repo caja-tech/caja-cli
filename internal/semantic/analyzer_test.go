@@ -465,6 +465,114 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input:          "let arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = join(arrOne, arrTwo)",
 			expectedErrors: []string{"type error: cannot join array of NUMBER with array of STRING"},
 		},
+		{
+			name:  "charAt() works with correct types",
+			input: "return charAt(\"hello\", 1)",
+		},
+		{
+			name:           "charAt() rejects mismatched types",
+			input:          "return charAt(10, \"hello\")",
+			expectedErrors: []string{"type error: first argument to 'charAt' must be STRING, got NUMBER", "type error: second argument to 'charAt' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "substring() works with correct types",
+			input: "return substring(\"hello\", 1, 4)",
+		},
+		{
+			name:           "substring() rejects mismatched types",
+			input:          "return substring(10, \"start\", \"end\")",
+			expectedErrors: []string{"type error: first argument to 'substring' must be STRING, got NUMBER", "type error: second argument to 'substring' must be NUMBER, got STRING", "type error: third argument to 'substring' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "concat() works with correct types",
+			input: "return concat(\"hello\", \" world\")",
+		},
+		{
+			name:           "concat() rejects mismatched types",
+			input:          "return concat(10, 20)",
+			expectedErrors: []string{"type error: first argument to 'concat' must be STRING, got NUMBER", "type error: second argument to 'concat' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "split() works with correct types",
+			input: "return split(\"hello\", \"e\")",
+		},
+		{
+			name:           "split() rejects mismatched types",
+			input:          "return split(10, 20)",
+			expectedErrors: []string{"type error: first argument to 'split' must be STRING, got NUMBER", "type error: second argument to 'split' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "contains() works with correct types",
+			input: "return contains(\"hello\", \"e\")",
+		},
+		{
+			name:           "contains() rejects mismatched types",
+			input:          "return contains(10, 20)",
+			expectedErrors: []string{"type error: first argument to 'contains' must be STRING, got NUMBER", "type error: second argument to 'contains' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "startsWith() works with correct types",
+			input: "return startsWith(\"hello\", \"h\")",
+		},
+		{
+			name:           "startsWith() rejects mismatched types",
+			input:          "return startsWith(10, 20)",
+			expectedErrors: []string{"type error: first argument to 'startsWith' must be STRING, got NUMBER", "type error: second argument to 'startsWith' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "endsWith() works with correct types",
+			input: "return endsWith(\"hello\", \"o\")",
+		},
+		{
+			name:           "endsWith() rejects mismatched types",
+			input:          "return endsWith(10, 20)",
+			expectedErrors: []string{"type error: first argument to 'endsWith' must be STRING, got NUMBER", "type error: second argument to 'endsWith' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "replace() works with correct types",
+			input: "return replace(\"hello\", \"e\", \"a\")",
+		},
+		{
+			name:           "replace() rejects mismatched types",
+			input:          "return replace(10, 20, 30)",
+			expectedErrors: []string{"type error: first argument to 'replace' must be STRING, got NUMBER", "type error: second argument to 'replace' must be STRING, got NUMBER", "type error: third argument to 'replace' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "toUpper() works with correct types",
+			input: "return toUpper(\"hello\")",
+		},
+		{
+			name:           "toUpper() rejects mismatched types",
+			input:          "return toUpper(10)",
+			expectedErrors: []string{"type error: first argument to 'toUpper' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "toLower() works with correct types",
+			input: "return toLower(\"HELLO\")",
+		},
+		{
+			name:           "toLower() rejects mismatched types",
+			input:          "return toLower(10)",
+			expectedErrors: []string{"type error: first argument to 'toLower' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "trim() works with correct types",
+			input: "return trim(\"  hello  \")",
+		},
+		{
+			name:           "trim() rejects mismatched types",
+			input:          "return trim(10)",
+			expectedErrors: []string{"type error: first argument to 'trim' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "strlen() works with correct types",
+			input: "return strlen(\"hello\")",
+		},
+		{
+			name:           "strlen() rejects mismatched types",
+			input:          "return strlen(10)",
+			expectedErrors: []string{"type error: first argument to 'strlen' must be STRING, got NUMBER"},
+		},
 	}
 	runTestScenarios(t, tests)
 }

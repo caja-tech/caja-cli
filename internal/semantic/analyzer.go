@@ -33,6 +33,18 @@ func New() *Analyzer {
 	analyzer.declare("copy", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
 	analyzer.declare("slice", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
 	analyzer.declare("join", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("charAt", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("substring", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
+	analyzer.declare("concat", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("split", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("contains", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("startsWith", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("endsWith", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("replace", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
+	analyzer.declare("toUpper", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("toLower", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("trim", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("strlen", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
 
 	return analyzer
 }
@@ -485,6 +497,136 @@ func (a *Analyzer) analyzeBuiltinCall(name string, n *syntax.CallExpression) (Sy
 			}
 		}
 		return arr1Symbol, true
+
+	case "charAt":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'charAt', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+		idxSymbol := a.Analyze(n.Arguments[1])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'charAt' must be STRING, got %s", strSymbol.Type))
+		}
+		if idxSymbol.Type != environment.NUMBER_OBJ && idxSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'charAt' must be NUMBER, got %s", idxSymbol.Type))
+		}
+		return Symbol{Type: environment.STRING_OBJ}, true
+
+	case "substring":
+		if len(n.Arguments) != 3 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'substring', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+		startSymbol := a.Analyze(n.Arguments[1])
+		endSymbol := a.Analyze(n.Arguments[2])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'substring' must be STRING, got %s", strSymbol.Type))
+		}
+		if startSymbol.Type != environment.NUMBER_OBJ && startSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'substring' must be NUMBER, got %s", startSymbol.Type))
+		}
+		if endSymbol.Type != environment.NUMBER_OBJ && endSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'substring' must be NUMBER, got %s", endSymbol.Type))
+		}
+		return Symbol{Type: environment.STRING_OBJ}, true
+
+	case "concat":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'concat', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		str1Symbol := a.Analyze(n.Arguments[0])
+		str2Symbol := a.Analyze(n.Arguments[1])
+
+		if str1Symbol.Type != environment.STRING_OBJ && str1Symbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'concat' must be STRING, got %s", str1Symbol.Type))
+		}
+		if str2Symbol.Type != environment.STRING_OBJ && str2Symbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'concat' must be STRING, got %s", str2Symbol.Type))
+		}
+		return Symbol{Type: environment.STRING_OBJ}, true
+
+	case "split":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'split', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+		delimSymbol := a.Analyze(n.Arguments[1])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'split' must be STRING, got %s", strSymbol.Type))
+		}
+		if delimSymbol.Type != environment.STRING_OBJ && delimSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'split' must be STRING, got %s", delimSymbol.Type))
+		}
+		
+		stringType := Symbol{Type: environment.STRING_OBJ}
+		return Symbol{Type: environment.ARRAY_OBJ, ElementType: &stringType}, true
+
+	case "contains", "startsWith", "endsWith":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", name, len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+		subSymbol := a.Analyze(n.Arguments[1])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", name, strSymbol.Type))
+		}
+		if subSymbol.Type != environment.STRING_OBJ && subSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be STRING, got %s", name, subSymbol.Type))
+		}
+		return Symbol{Type: environment.BOOLEAN_OBJ}, true
+
+	case "replace":
+		if len(n.Arguments) != 3 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'replace', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+		oldSymbol := a.Analyze(n.Arguments[1])
+		newSymbol := a.Analyze(n.Arguments[2])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'replace' must be STRING, got %s", strSymbol.Type))
+		}
+		if oldSymbol.Type != environment.STRING_OBJ && oldSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'replace' must be STRING, got %s", oldSymbol.Type))
+		}
+		if newSymbol.Type != environment.STRING_OBJ && newSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'replace' must be STRING, got %s", newSymbol.Type))
+		}
+		return Symbol{Type: environment.STRING_OBJ}, true
+
+	case "toUpper", "toLower", "trim":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", name, len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", name, strSymbol.Type))
+		}
+		return Symbol{Type: environment.STRING_OBJ}, true
+
+	case "strlen":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'strlen', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		strSymbol := a.Analyze(n.Arguments[0])
+
+		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'strlen' must be STRING, got %s", strSymbol.Type))
+		}
+		return Symbol{Type: environment.NUMBER_OBJ}, true
 
 	default:
 		return Symbol{}, false
