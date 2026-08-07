@@ -411,3 +411,60 @@ func TestSemanticAnalysisAnyType(t *testing.T) {
 
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticAnalysisBuiltins(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "len() works on array of Numbers",
+			input: "let arr = [1, 2, 3]\nlen(arr)",
+		},
+		{
+			name:  "len() works on array of Strings",
+			input: "let arr = [\"a\", \"b\"]\nlen(arr)",
+		},
+		{
+			name:  "append() works with matching types",
+			input: "let arr = [1, 2]\nlet newArr = append(arr, 3)",
+		},
+		{
+			name:           "append() rejects mismatched types",
+			input:          "let arr = [1, 2]\nlet newArr = append(arr, \"string\")",
+			expectedErrors: []string{"type error: cannot append STRING to array of NUMBER"},
+		},
+		{
+			name:  "head() works and infers type",
+			input: "let arr = [1, 2]\nlet h = head(arr)\nlet n = h", 
+		},
+		{
+			name:  "tail() returns array",
+			input: "let arr = [1, 2]\nlet t = tail(arr)\nlet res = append(t, 3)",
+		},
+		{
+			name:  "last() works and infers type",
+			input: "let arr = [1, 2]\nlet l = last(arr)\nlet n = l",
+		},
+		{
+			name:  "copy() returns array",
+			input: "let arr = [1, 2]\nlet c = copy(arr)\nlet res = append(c, 3)",
+		},
+		{
+			name:  "slice() works",
+			input: "let arr = [1, 2, 3]\nlet s = slice(arr, 0, 2)\nlet res = append(s, 4)",
+		},
+		{
+			name:           "slice() rejects non-number index",
+			input:          "let arr = [1, 2]\nlet s = slice(arr, \"0\", 2)",
+			expectedErrors: []string{"type error: second argument to 'slice' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "concat() works with matching types",
+			input: "let arrOne = [1, 2]\nlet arrTwo = [3, 4]\nlet res = concat(arrOne, arrTwo)",
+		},
+		{
+			name:           "concat() rejects mismatched types",
+			input:          "let arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = concat(arrOne, arrTwo)",
+			expectedErrors: []string{"type error: cannot concat array of NUMBER with array of STRING"},
+		},
+	}
+	runTestScenarios(t, tests)
+}

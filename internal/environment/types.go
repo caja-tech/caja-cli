@@ -15,6 +15,7 @@ const (
 	BOOLEAN_OBJ      ObjectType = "BOOLEAN"
 	DATE_OBJ         ObjectType = "DATE"
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
+	BUILTIN_OBJ      ObjectType = "BUILTIN"
 	ARRAY_OBJ        ObjectType = "ARRAY"
 	RETURN_VALUE_OBJ ObjectType = "RETURN_VALUE"
 	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
@@ -69,6 +70,20 @@ func (f *Function) Inspect() string {
 	out += ") {\n" + f.Body.String() + "\n}"
 	return out
 }
+
+// BuiltinFunction represents a native Go function wrapped for use in the Caja language.
+// It accepts a slice of evaluated objects and returns an evaluated object or an error.
+type BuiltinFunction func(args ...Object) (Object, error)
+
+// Builtin represents a built-in function provided by the Caja runtime.
+// It implements the Object interface, allowing it to be assigned to variables
+// and passed as arguments just like user-defined functions.
+type Builtin struct {
+	Fn BuiltinFunction
+}
+
+func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }
+func (b *Builtin) Inspect() string  { return "built-in function" }
 
 // Array represents an ordered collection of evaluated Objects.
 // Elements holds the slice of objects contained within the array.
