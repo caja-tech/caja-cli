@@ -131,18 +131,18 @@ var builtins = map[string]*Builtin{
 			return &Array{Elements: newElements}, nil
 		},
 	},
-	"concat": {
+	"join": {
 		Fn: func(args ...Object) (Object, error) {
 			if len(args) != 2 {
-				return nil, fmt.Errorf("semantic error: wrong number of arguments for concat. got=%d, want=2", len(args))
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'join'. got=%d, want=2", len(args))
 			}
 			arr1, ok := args[0].(*Array)
 			if !ok {
-				return nil, fmt.Errorf("semantic error: first argument to 'concat' must be ARRAY, got %s", args[0].Type())
+				return nil, fmt.Errorf("semantic error: first argument to 'join' must be ARRAY, got %s", args[0].Type())
 			}
 			arr2, ok := args[1].(*Array)
 			if !ok {
-				return nil, fmt.Errorf("semantic error: second argument to 'concat' must be ARRAY, got %s", args[1].Type())
+				return nil, fmt.Errorf("semantic error: second argument to 'join' must be ARRAY, got %s", args[1].Type())
 			}
 
 			newElements := make([]Object, len(arr1.Elements)+len(arr2.Elements))

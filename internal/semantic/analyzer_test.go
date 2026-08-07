@@ -405,7 +405,7 @@ func TestSemanticAnalysisAnyType(t *testing.T) {
 		},
 		{
 			name:  "Assigning Any to concrete type is allowed statically",
-			input: "let f = fn(): Any { return 10 }\nlet n = f()\nlet x = 1\nx = n", 
+			input: "let f = fn(): Any { return 10 }\nlet n = f()\nlet x = 1\nx = n",
 		},
 	}
 
@@ -433,7 +433,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		},
 		{
 			name:  "head() works and infers type",
-			input: "let arr = [1, 2]\nlet h = head(arr)\nlet n = h", 
+			input: "let arr = [1, 2]\nlet h = head(arr)\nlet n = h",
 		},
 		{
 			name:  "tail() returns array",
@@ -457,13 +457,13 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: second argument to 'slice' must be NUMBER, got STRING"},
 		},
 		{
-			name:  "concat() works with matching types",
-			input: "let arrOne = [1, 2]\nlet arrTwo = [3, 4]\nlet res = concat(arrOne, arrTwo)",
+			name:  "join() works with matching types",
+			input: "let arrOne = [1, 2]\nlet arrTwo = [3, 4]\nlet res = join(arrOne, arrTwo)",
 		},
 		{
-			name:           "concat() rejects mismatched types",
-			input:          "let arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = concat(arrOne, arrTwo)",
-			expectedErrors: []string{"type error: cannot concat array of NUMBER with array of STRING"},
+			name:           "join() rejects mismatched types",
+			input:          "let arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = join(arrOne, arrTwo)",
+			expectedErrors: []string{"type error: cannot join array of NUMBER with array of STRING"},
 		},
 	}
 	runTestScenarios(t, tests)
