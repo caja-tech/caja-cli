@@ -141,6 +141,12 @@ func TestEvaluateMath(t *testing.T) {
 		{"Order of Operations with Exponent", "return 2 * 3 ^ 2", 18.0},
 		{"Parentheses", "return (5 + 5) * 2", 20.0},
 		{"Complex Math", "return 100 / (10 + 10) * 5", 25.0},
+		{"Comparison >", "return 10 > 5", true},
+		{"Comparison <", "return 10 < 5", false},
+		{"Comparison >=", "return 10 >= 10", true},
+		{"Comparison <=", "return 10 <= 5", false},
+		{"Comparison ==", "return 10 == 10", true},
+		{"Comparison !=", "return 10 != 10", false},
 	}
 
 	runTestScenarios(t, tests)
@@ -779,7 +785,7 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"addDays negative", "return addDays('2023-10-25', 0 - 5)", "2023-10-20"},
 		{"diffDays", "return diffDays('2023-10-30', '2023-10-25')", 5.0},
 		{"newDate", "return newDate(2023, 10, 25)", "2023-10-25"},
-		{"today is recent", "return year(today()) >= 2024", 1.0},
+		{"today is recent", "return year(today()) >= 2024", true},
 	}
 	runTestScenarios(t, tests)
 }

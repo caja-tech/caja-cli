@@ -342,17 +342,17 @@ func evalInfixExpression(operator string, left, right environment.Object) (envir
 	case "^":
 		return &environment.Number{Value: math.Pow(leftVal, rightVal)}, nil
 	case "<":
-		return boolToPrimitive(leftVal < rightVal), nil
+		return nativeBoolToBooleanObject(leftVal < rightVal), nil
 	case ">":
-		return boolToPrimitive(leftVal > rightVal), nil
+		return nativeBoolToBooleanObject(leftVal > rightVal), nil
 	case "<=":
-		return boolToPrimitive(leftVal <= rightVal), nil
+		return nativeBoolToBooleanObject(leftVal <= rightVal), nil
 	case ">=":
-		return boolToPrimitive(leftVal >= rightVal), nil
+		return nativeBoolToBooleanObject(leftVal >= rightVal), nil
 	case "==":
-		return boolToPrimitive(leftVal == rightVal), nil
+		return nativeBoolToBooleanObject(leftVal == rightVal), nil
 	case "!=":
-		return boolToPrimitive(leftVal != rightVal), nil
+		return nativeBoolToBooleanObject(leftVal != rightVal), nil
 	default:
 		return nil, fmt.Errorf("unknown operator: %s", operator)
 	}
@@ -416,15 +416,6 @@ func evalExpressions(exps []syntax.Expression, env *environment.Environment) ([]
 	return result, nil
 }
 
-// boolToPrimitive converts a boolean value to an environment.Object representation,
-// mapping true to 1.0 and false to 0.0.
-func boolToPrimitive(b bool) environment.Object {
-	if b {
-		return &environment.Number{Value: 1.0}
-	}
-	return &environment.Number{Value: 0.0}
-}
-
 // nativeBoolToBooleanObject converts a native Go boolean into its corresponding
 // environment.Boolean object wrapper, returning either the TRUE or FALSE singleton.
 func nativeBoolToBooleanObject(input bool) *environment.Boolean {
@@ -435,10 +426,10 @@ func nativeBoolToBooleanObject(input bool) *environment.Boolean {
 }
 
 // isTruthy determines if a types.Object value is considered true,
-// which is any non-zero value.
+// which is any non-zero value or true boolean.
 func isTruthy(val environment.Object) bool {
-	if val.Type() == environment.NUMBER_OBJ {
-		return val.(*environment.Number).Value != 0.0
+	if val.Type() == environment.BOOLEAN_OBJ {
+		return val.(*environment.Boolean).Value
 	}
 	return false
 }

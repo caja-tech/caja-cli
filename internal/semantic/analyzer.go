@@ -207,7 +207,10 @@ func (a *Analyzer) analyzeIdentifier(n *syntax.Identifier) Symbol {
 // analyzeIfExpression recursively analyzes its condition and both branches.
 // It returns the type of the consequence branch.
 func (a *Analyzer) analyzeIfExpression(n *syntax.IfExpression) Symbol {
-	a.Analyze(n.Condition)
+	condType := a.Analyze(n.Condition)
+	if condType.Type != environment.BOOLEAN_OBJ && condType.Type != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a BOOLEAN, got %s", condType.Type))
+	}
 	trueType := a.Analyze(n.Consequence)
 	if n.Alternative != nil {
 		a.Analyze(n.Alternative)
