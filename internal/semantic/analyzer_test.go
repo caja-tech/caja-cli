@@ -333,6 +333,17 @@ let getDate = fn(): Date { return 10 }
 func TestSemanticAnalysisArrays(t *testing.T) {
 	tests := []testScenario{
 		{
+			name: "if condition requires boolean",
+			input: `
+if (1) {
+	let a = 10
+}
+`,
+			expectedErrors: []string{
+				"type error: condition must be a BOOLEAN, got NUMBER",
+			},
+		},
+		{
 			name: "Valid array declaration and access",
 			input: `
 let a = [1, 2, 3]
