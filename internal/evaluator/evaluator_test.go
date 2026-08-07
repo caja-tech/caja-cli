@@ -770,6 +770,16 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"toLower", "return toLower(\"HELLO\")", "hello"},
 		{"trim", "return trim(\"   hello \")", "hello"},
 		{"strlen", "return strlen(\"hello\")", 5.0},
+		{"year", "return year('2023-10-25')", 2023.0},
+		{"month", "return month('2023-10-25')", 10.0},
+		{"day", "return day('2023-10-25')", 25.0},
+		{"weekday", "return weekday('2023-10-25')", 3.0},
+		{"parseDate", "return parseDate(\"2023-10-25\")", "2023-10-25"},
+		{"addDays", "return addDays('2023-10-25', 5)", "2023-10-30"},
+		{"addDays negative", "return addDays('2023-10-25', 0 - 5)", "2023-10-20"},
+		{"diffDays", "return diffDays('2023-10-30', '2023-10-25')", 5.0},
+		{"newDate", "return newDate(2023, 10, 25)", "2023-10-25"},
+		{"today is recent", "return year(today()) >= 2024", 1.0},
 	}
 	runTestScenarios(t, tests)
 }
@@ -783,6 +793,10 @@ func TestErrorBuiltins(t *testing.T) {
 		{"substring start > end", "return substring(\"hello\", 4, 1)", "runtime error: substring start index 4 is greater than end index 1"},
 		{"split delimiter empty", "return split(\"hello\", \"\")", "runtime error: split delimiter must be a single character string"},
 		{"split delimiter too long", "return split(\"hello\", \"ll\")", "runtime error: split delimiter must be a single character string"},
+		{"parseDate invalid format", "return parseDate(\"invalid\")", "runtime error: invalid date format for 'parseDate'"},
+		{"newDate invalid month", "return newDate(2023, 13, 1)", "runtime error: invalid date boundaries for 'newDate'"},
+		{"newDate invalid leap year", "return newDate(2023, 2, 29)", "runtime error: invalid date boundaries for 'newDate'"},
+		{"newDate negative year", "return newDate(0 - 1, 1, 1)", "runtime error: invalid date boundaries for 'newDate'"},
 	}
 	runTestErrorScenarios(t, tests)
 }
