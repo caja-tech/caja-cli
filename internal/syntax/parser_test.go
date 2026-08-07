@@ -505,6 +505,23 @@ func TestReturnInsideBlockAllowed(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
+// TestPrefixExpressionParsing verifies parsing of prefix operators.
+func TestPrefixExpressionParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Bang prefix",
+			input:    "!true",
+			expected: "(!true)",
+		},
+		{
+			name:     "Minus prefix",
+			input:    "-15",
+			expected: "(-15)",
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
 // TestLetStatements verifies that let statements with various assignments parse correctly.
 func TestLetStatements(t *testing.T) {
 	tests := []testScenario{

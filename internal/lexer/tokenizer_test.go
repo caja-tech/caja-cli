@@ -7,6 +7,21 @@ type testScenario struct {
 	Token
 }
 
+// TestPrefixOperators ensures that prefix operators are correctly identified.
+func TestPrefixOperators(t *testing.T) {
+	input := "!-5"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Bang operator", Token{BANG, "!", 1, 1}},
+		{"Minus operator", Token{MINUS, "-", 1, 2}},
+		{"Number value", Token{NUMBER, "5", 1, 3}},
+		{"End of file", Token{EOF, "", 1, 4}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestBaseScenario verifies that the tokenizer correctly sequences through a
 // script with an assignment and a return statement ("rate = 15.5\nreturn rate + 5"),
 // producing the right token types, literals, and accurate line/column positions.

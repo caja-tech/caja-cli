@@ -423,6 +423,30 @@ func TestSemanticAnalysisAnyType(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
+func TestSemanticAnalysisPrefix(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "Valid Bang",
+			input: "return !true",
+		},
+		{
+			name:           "Invalid Bang",
+			input:          "return !5",
+			expectedErrors: []string{"type error: operator '!' requires a BOOLEAN, got NUMBER"},
+		},
+		{
+			name:  "Valid Minus",
+			input: "return -5",
+		},
+		{
+			name:           "Invalid Minus",
+			input:          "return -true",
+			expectedErrors: []string{"type error: operator '-' requires a NUMBER, got BOOLEAN"},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
 func TestSemanticAnalysisBuiltins(t *testing.T) {
 	tests := []testScenario{
 		{

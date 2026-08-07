@@ -21,7 +21,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideModuloToken,
 	decideLessThanToken,
 	decideGreaterThanToken,
-	decideNotEqualToken,
+	decideBangToken,
 	decideLeftParenToken,
 	decideRightParenToken,
 	decideLeftBraceToken,
@@ -143,9 +143,9 @@ func decideGreaterThanToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
-// decideNotEqualToken matches the '!' character and produces an NEQ token
-// if it is followed by an '=' character.
-func decideNotEqualToken(t *Tokenizer, line int, column int) deciderResult {
+// decideBangToken matches the '!' character and produces an NEQ token
+// if it is followed by an '=' character, otherwise it produces a BANG token.
+func decideBangToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '!' {
 		if t.peekChar() == '=' {
 			ch := t.ch
@@ -154,6 +154,8 @@ func decideNotEqualToken(t *Tokenizer, line int, column int) deciderResult {
 			t.readChar()
 			return deciderResult{true, Token{Type: NEQ, Literal: literal, Line: line, Column: column}}
 		}
+		t.readChar()
+		return deciderResult{true, Token{Type: BANG, Literal: "!", Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
