@@ -147,6 +147,11 @@ func TestEvaluateMath(t *testing.T) {
 		{"Comparison <=", "return 10 <= 5", false},
 		{"Comparison ==", "return 10 == 10", true},
 		{"Comparison !=", "return 10 != 10", false},
+		{"Prefix Minus", "return -5", -5.0},
+		{"Prefix Minus Double", "return --5", 5.0},
+		{"Prefix Bang True", "return !true", false},
+		{"Prefix Bang False", "return !false", true},
+		{"Prefix Bang Double", "return !!true", true},
 	}
 
 	runTestScenarios(t, tests)

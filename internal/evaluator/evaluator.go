@@ -50,6 +50,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalBlockStatement(node, env)
 	case *syntax.InfixExpression:
 		return evalInfixExpressionNode(node, env)
+	case *syntax.PrefixExpression:
+		return evalPrefixExpressionNode(node, env)
 	case *syntax.TypeAliasStatement:
 		return nil, nil
 	case *syntax.FunctionLiteral:
@@ -191,6 +193,47 @@ func evalInfixExpressionNode(node *syntax.InfixExpression, env *environment.Envi
 	}
 
 	return evalInfixExpression(node.Operator, left, right)
+}
+
+// evalPrefixExpressionNode evaluates the right operand and applies the prefix operator.
+func evalPrefixExpressionNode(node *syntax.PrefixExpression, env *environment.Environment) (environment.Object, error) {
+	right, err := Eval(node.Right, env)
+	if err != nil {
+		return nil, err
+	}
+
+	return evalPrefixExpression(node.Operator, right)
+}
+
+// evalPrefixExpression applies a prefix operator (!, -) to the right operand.
+func evalPrefixExpression(operator string, right environment.Object) (environment.Object, error) {
+	switch operator {
+	case "!":
+		return evalBangOperatorExpression(right)
+	case "-":
+		return evalMinusPrefixOperatorExpression(right)
+	default:
+		return nil, fmt.Errorf("unknown operator: %s", operator)
+	}
+}
+
+func evalBangOperatorExpression(right environment.Object) (environment.Object, error) {
+	if right == TRUE {
+		return FALSE, nil
+	}
+	if right == FALSE {
+		return TRUE, nil
+	}
+	return nil, fmt.Errorf("type mismatch")
+}
+
+func evalMinusPrefixOperatorExpression(right environment.Object) (environment.Object, error) {
+	if right.Type() != environment.NUMBER_OBJ {
+		return nil, fmt.Errorf("type mismatch")
+	}
+
+	value := right.(*environment.Number).Value
+	return &environment.Number{Value: -value}, nil
 }
 
 // evalFunctionLiteral returns a Function object capturing its parameters, body, and the current environment.

@@ -90,6 +90,8 @@ func (a *Analyzer) Analyze(node syntax.Node) Symbol {
 		return a.analyzeArrayLiteral(n)
 	case *syntax.IndexExpression:
 		return a.analyzeIndexExpression(n)
+	case *syntax.PrefixExpression:
+		return a.analyzePrefixExpression(n)
 	case *syntax.NumberLiteral:
 		return Symbol{Type: environment.NUMBER_OBJ}
 	case *syntax.StringLiteral:
@@ -216,6 +218,30 @@ func (a *Analyzer) analyzeIfExpression(n *syntax.IfExpression) Symbol {
 		a.Analyze(n.Alternative)
 	}
 	return trueType
+}
+
+// analyzePrefixExpression ensures the right side of a prefix operator
+// matches the operator's expected type.
+func (a *Analyzer) analyzePrefixExpression(n *syntax.PrefixExpression) Symbol {
+	rightType := a.Analyze(n.Right)
+	if rightType.Type == environment.ANY_OBJ {
+		return Symbol{Type: environment.ANY_OBJ}
+	}
+	switch n.Operator {
+	case "!":
+		if rightType.Type != environment.BOOLEAN_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a BOOLEAN, got %s", rightType.Type))
+		}
+		return Symbol{Type: environment.BOOLEAN_OBJ}
+	case "-":
+		if rightType.Type != environment.NUMBER_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a NUMBER, got %s", rightType.Type))
+		}
+		return Symbol{Type: environment.NUMBER_OBJ}
+	default:
+		a.reportError(n.Token, fmt.Sprintf("semantic error: unknown prefix operator '%s'", n.Operator))
+		return anySymbol
+	}
 }
 
 // analyzeReturnStatement recursively analyzes the return value expression, if any.

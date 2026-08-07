@@ -27,13 +27,14 @@ const (
 	GTEQ     TokenType = "GTEQ"
 	EQ       TokenType = "EQ"
 	NEQ      TokenType = "NEQ"
+	BANG     TokenType = "BANG"
 
 	// Delimiters
 	LPAREN   TokenType = "LPAREN"
 	RPAREN   TokenType = "RPAREN"
 	LBRACE   TokenType = "LBRACE"
 	RBRACE   TokenType = "RBRACE"
-	LBRACKET TokenType = "lBRACKET"
+	LBRACKET TokenType = "LBRACKET"
 	RBRACKET TokenType = "RBRACKET"
 
 	// Keywords

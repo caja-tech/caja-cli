@@ -15,6 +15,7 @@ const (
 	SUM
 	PRODUCT
 	EXPONENT
+	PREFIX
 	CALL
 	INDEX
 )
@@ -92,6 +93,9 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.prefixParseFuncs[lexer.FALSE] = p.parseBooleanLiteral
 	p.prefixParseFuncs[lexer.FN] = p.parseFunctionLiteral
 	p.prefixParseFuncs[lexer.LBRACKET] = p.parseArrayLiteral
+
+	p.prefixParseFuncs[lexer.BANG] = p.parsePrefixExpression
+	p.prefixParseFuncs[lexer.MINUS] = p.parsePrefixExpression
 
 	p.infixParseFuncs = make(map[lexer.TokenType]infixParseFunc)
 	p.infixParseFuncs[lexer.PLUS] = p.parseInfixExpression
@@ -293,6 +297,16 @@ func (p *Parser) nextToken() {
 // parseIdentifier returns an Identifier expression node for the current token.
 func (p *Parser) parseIdentifier() Expression {
 	return &Identifier{Token: p.currToken, Value: p.currToken.Literal}
+}
+
+func (p *Parser) parsePrefixExpression() Expression {
+	expression := &PrefixExpression{
+		Token:    p.currToken,
+		Operator: p.currToken.Literal,
+	}
+	p.nextToken()
+	expression.Right = p.parseExpression(PREFIX)
+	return expression
 }
 
 // parseNumberLiteral converts the current token's literal into a float64 and

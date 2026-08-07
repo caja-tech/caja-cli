@@ -201,6 +201,19 @@ func (i *InfixExpression) String() string {
 	return "(" + i.Left.String() + " " + i.Operator + " " + i.Right.String() + ")"
 }
 
+// PrefixExpression represents a prefix operator and its operand expression.
+type PrefixExpression struct {
+	Token    lexer.Token // The prefix token, e.g., ! or -
+	Operator string
+	Right    Expression
+}
+
+func (p *PrefixExpression) expressionNode()      {}
+func (p *PrefixExpression) TokenLiteral() string { return p.Token.Literal }
+func (p *PrefixExpression) String() string {
+	return "(" + p.Operator + p.Right.String() + ")"
+}
+
 // IfExpression is an expression node that represents a conditional branching
 // construct. Token holds the 'if' token, Condition is the expression to be
 // evaluated, Consequence is the block of statements to execute if the condition
