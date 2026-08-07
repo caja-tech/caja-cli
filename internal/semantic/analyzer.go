@@ -32,7 +32,7 @@ func New() *Analyzer {
 	analyzer.declare("last", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
 	analyzer.declare("copy", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
 	analyzer.declare("slice", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
-	analyzer.declare("concat", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("join", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
 
 	return analyzer
 }
@@ -355,7 +355,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) Symbol {
 	}
 }
 
-// analyzeBuiltinCall intercepts calls to builtin functions (like len, append, head, tail) 
+// analyzeBuiltinCall intercepts calls to builtin functions (like len, append, head, tail)
 // to provide custom, compile-time polymorphic type-checking and inference.
 func (a *Analyzer) analyzeBuiltinCall(name string, n *syntax.CallExpression) (Symbol, bool) {
 	switch name {
@@ -462,26 +462,26 @@ func (a *Analyzer) analyzeBuiltinCall(name string, n *syntax.CallExpression) (Sy
 		}
 		return arrSymbol, true
 
-	case "concat":
+	case "join":
 		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'concat', got %d", len(n.Arguments)))
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'join', got %d", len(n.Arguments)))
 			return anySymbol, true
 		}
 		arr1Symbol := a.Analyze(n.Arguments[0])
 		arr2Symbol := a.Analyze(n.Arguments[1])
 
 		if arr1Symbol.Type != environment.ARRAY_OBJ && arr1Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'concat' must be an ARRAY, got %s", arr1Symbol.Type))
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'join' must be an ARRAY, got %s", arr1Symbol.Type))
 			return anySymbol, true
 		}
 		if arr2Symbol.Type != environment.ARRAY_OBJ && arr2Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'concat' must be an ARRAY, got %s", arr2Symbol.Type))
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'join' must be an ARRAY, got %s", arr2Symbol.Type))
 			return anySymbol, true
 		}
 
 		if arr1Symbol.Type == environment.ARRAY_OBJ && arr2Symbol.Type == environment.ARRAY_OBJ {
 			if arr1Symbol.ElementType != nil && arr2Symbol.ElementType != nil && !arr1Symbol.ElementType.Equals(*arr2Symbol.ElementType) && arr1Symbol.ElementType.Type != environment.ANY_OBJ && arr2Symbol.ElementType.Type != environment.ANY_OBJ {
-				a.reportError(n.Token, fmt.Sprintf("type error: cannot concat array of %s with array of %s", arr1Symbol.ElementType.Type, arr2Symbol.ElementType.Type))
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot join array of %s with array of %s", arr1Symbol.ElementType.Type, arr2Symbol.ElementType.Type))
 			}
 		}
 		return arr1Symbol, true
