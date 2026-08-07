@@ -213,58 +213,65 @@ func evalCallExpression(node *syntax.CallExpression, env *environment.Environmen
 	}
 
 	for {
-		fn, ok := function.(*environment.Function)
-		if !ok {
-			return nil, fmt.Errorf("not a function")
-		}
-
-		funcName := ""
-		if ident, ok := node.Function.(*syntax.Identifier); ok {
-			funcName = ident.Value
-		}
-
-		var argContext []string
-		for _, arg := range args {
-			argContext = append(argContext, arg.Inspect())
-		}
-
-		frame := environment.StackFrame{
-			FuncName: funcName,
-			Line:     node.Token.Line,
-			Column:   node.Token.Column,
-			Args:     argContext,
-		}
-
-		extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
-		extendedEnv.CallStack = append(append([]environment.StackFrame(nil), env.CallStack...), frame)
-		if len(extendedEnv.CallStack) > stackTraceLimit {
-			return nil, fmt.Errorf("runtime error: stack overflow%s", extendedEnv.GetStackTrace())
-		}
-
-		for i, param := range fn.Parameters {
-			extendedEnv.Set(param.Name, args[i])
-		}
-
-		evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
-		if err != nil {
-			if !strings.Contains(err.Error(), "Stack trace:") {
-				return nil, fmt.Errorf("%s%s", err.Error(), extendedEnv.GetStackTrace())
+		switch fn := function.(type) {
+		case *environment.Function:
+			funcName := ""
+			if ident, ok := node.Function.(*syntax.Identifier); ok {
+				funcName = ident.Value
 			}
-			return nil, err
-		}
 
-		if tail, ok := evaluated.(*environment.TailCall); ok {
-			function = tail.Function
-			args = tail.Arguments
-			continue
-		}
+			var argContext []string
+			for _, arg := range args {
+				argContext = append(argContext, arg.Inspect())
+			}
 
-		// Unwrap any early return values so the whole program doesn't halt
-		if retVal, ok := evaluated.(*environment.ReturnValue); ok {
-			return retVal.Value, nil
-		}
+			frame := environment.StackFrame{
+				FuncName: funcName,
+				Line:     node.Token.Line,
+				Column:   node.Token.Column,
+				Args:     argContext,
+			}
 
-		return evaluated, nil
+			extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+			extendedEnv.CallStack = append(append([]environment.StackFrame(nil), env.CallStack...), frame)
+			if len(extendedEnv.CallStack) > stackTraceLimit {
+				return nil, fmt.Errorf("runtime error: stack overflow%s", extendedEnv.GetStackTrace())
+			}
+
+			for i, param := range fn.Parameters {
+				extendedEnv.Set(param.Name, args[i])
+			}
+
+			evaluated, err := evalBlockStatement(fn.Body, extendedEnv)
+			if err != nil {
+				if !strings.Contains(err.Error(), "Stack trace:") {
+					return nil, fmt.Errorf("%s%s", err.Error(), extendedEnv.GetStackTrace())
+				}
+				return nil, err
+			}
+
+			if tail, ok := evaluated.(*environment.TailCall); ok {
+				function = tail.Function
+				args = tail.Arguments
+				continue
+			}
+
+			// Unwrap any early return values so the whole program doesn't halt
+			if retVal, ok := evaluated.(*environment.ReturnValue); ok {
+				return retVal.Value, nil
+			}
+
+			return evaluated, nil
+		case *environment.Builtin:
+			result, err := fn.Fn(args...)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+
+		default:
+			return nil, fmt.Errorf("runtime error: not a function")
+		}
 	}
 }
 
@@ -293,11 +300,16 @@ func evalProgram(program *syntax.Program, env *environment.Environment) (environ
 // evalIdentifier resolves an identifier to its value in the current
 // environment. An error is returned if the identifier has not been assigned.
 func evalIdentifier(node *syntax.Identifier, env *environment.Environment) (environment.Object, error) {
-	val, ok := env.Get(node.Value)
-	if !ok {
-		return nil, fmt.Errorf("identifier not found: %s", node.Value)
+	if val, ok := env.Get(node.Value); ok {
+		return val, nil
 	}
-	return val, nil
+
+	if builtin, ok := environment.GetBuiltinFn(node.Value); ok {
+		return builtin, nil
+	}
+
+	return nil, fmt.Errorf("runtime error: identifier not found: %s", node.Value)
+
 }
 
 // evalInfixExpression applies a binary arithmetic operator (+, -, *, /) to

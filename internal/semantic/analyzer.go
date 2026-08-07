@@ -20,10 +20,21 @@ type Analyzer struct {
 // New creates and returns a new Analyzer with an initial global scope.
 func New() *Analyzer {
 	globalScope := make(map[string]Symbol)
-	return &Analyzer{
+	analyzer := &Analyzer{
 		scopes: []map[string]Symbol{globalScope},
 		types:  make(map[string]Symbol),
 	}
+
+	analyzer.declare("len", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("append", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+	analyzer.declare("head", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("tail", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("last", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("copy", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
+	analyzer.declare("slice", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
+	analyzer.declare("concat", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
+
+	return analyzer
 }
 
 // Analyze traverses the AST starting from the given node and performs
@@ -344,13 +355,157 @@ func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) Symbol {
 	}
 }
 
+// analyzeBuiltinCall intercepts calls to builtin functions (like len, append, head, tail) 
+// to provide custom, compile-time polymorphic type-checking and inference.
+func (a *Analyzer) analyzeBuiltinCall(name string, n *syntax.CallExpression) (Symbol, bool) {
+	switch name {
+	case "len":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'len', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		argSymbol := a.Analyze(n.Arguments[0])
+		if argSymbol.Type != environment.ARRAY_OBJ && argSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'len' must be an ARRAY, got %s", argSymbol.Type))
+		}
+		return Symbol{Type: environment.NUMBER_OBJ}, true
+
+	case "append":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'append', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arrSymbol := a.Analyze(n.Arguments[0])
+		elSymbol := a.Analyze(n.Arguments[1])
+
+		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'append' must be an ARRAY, got %s", arrSymbol.Type))
+			return anySymbol, true
+		}
+
+		if arrSymbol.Type == environment.ARRAY_OBJ && arrSymbol.ElementType != nil && !arrSymbol.ElementType.Equals(elSymbol) && arrSymbol.ElementType.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot append %s to array of %s", elSymbol.Type, arrSymbol.ElementType.Type))
+		}
+		return arrSymbol, true
+
+	case "head":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'head', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arrSymbol := a.Analyze(n.Arguments[0])
+		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'head' must be an ARRAY, got %s", arrSymbol.Type))
+			return anySymbol, true
+		}
+		if arrSymbol.ElementType != nil {
+			return *arrSymbol.ElementType, true
+		}
+		return anySymbol, true
+
+	case "tail":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'tail', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arrSymbol := a.Analyze(n.Arguments[0])
+		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'tail' must be an ARRAY, got %s", arrSymbol.Type))
+			return anySymbol, true
+		}
+		return arrSymbol, true
+
+	case "last":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'last', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arrSymbol := a.Analyze(n.Arguments[0])
+		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'last' must be an ARRAY, got %s", arrSymbol.Type))
+			return anySymbol, true
+		}
+		if arrSymbol.ElementType != nil {
+			return *arrSymbol.ElementType, true
+		}
+		return anySymbol, true
+
+	case "copy":
+		if len(n.Arguments) != 1 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'copy', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arrSymbol := a.Analyze(n.Arguments[0])
+		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'copy' must be an ARRAY, got %s", arrSymbol.Type))
+			return anySymbol, true
+		}
+		return arrSymbol, true
+
+	case "slice":
+		if len(n.Arguments) != 3 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'slice', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arrSymbol := a.Analyze(n.Arguments[0])
+		startSymbol := a.Analyze(n.Arguments[1])
+		endSymbol := a.Analyze(n.Arguments[2])
+
+		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'slice' must be an ARRAY, got %s", arrSymbol.Type))
+		}
+		if startSymbol.Type != environment.NUMBER_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'slice' must be NUMBER, got %s", startSymbol.Type))
+		}
+		if endSymbol.Type != environment.NUMBER_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'slice' must be NUMBER, got %s", endSymbol.Type))
+		}
+		return arrSymbol, true
+
+	case "concat":
+		if len(n.Arguments) != 2 {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'concat', got %d", len(n.Arguments)))
+			return anySymbol, true
+		}
+		arr1Symbol := a.Analyze(n.Arguments[0])
+		arr2Symbol := a.Analyze(n.Arguments[1])
+
+		if arr1Symbol.Type != environment.ARRAY_OBJ && arr1Symbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'concat' must be an ARRAY, got %s", arr1Symbol.Type))
+			return anySymbol, true
+		}
+		if arr2Symbol.Type != environment.ARRAY_OBJ && arr2Symbol.Type != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'concat' must be an ARRAY, got %s", arr2Symbol.Type))
+			return anySymbol, true
+		}
+
+		if arr1Symbol.Type == environment.ARRAY_OBJ && arr2Symbol.Type == environment.ARRAY_OBJ {
+			if arr1Symbol.ElementType != nil && arr2Symbol.ElementType != nil && !arr1Symbol.ElementType.Equals(*arr2Symbol.ElementType) && arr1Symbol.ElementType.Type != environment.ANY_OBJ && arr2Symbol.ElementType.Type != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot concat array of %s with array of %s", arr1Symbol.ElementType.Type, arr2Symbol.ElementType.Type))
+			}
+		}
+		return arr1Symbol, true
+
+	default:
+		return Symbol{}, false
+	}
+}
+
 // analyzeCallExpression analyzes a function call to ensure the target is callable,
 // verifies the number of arguments matches the function's arity, and checks
 // the types of the provided arguments against the function's parameters.
 func (a *Analyzer) analyzeCallExpression(n *syntax.CallExpression) Symbol {
 	fnSymbol := a.Analyze(n.Function)
 
-	if fnSymbol.Type != environment.FUNCTION_OBJ && fnSymbol.Type != environment.ANY_OBJ {
+	if ident, ok := n.Function.(*syntax.Identifier); ok {
+		if fnSymbol.Type == environment.BUILTIN_OBJ {
+			if sym, handled := a.analyzeBuiltinCall(ident.Value, n); handled {
+				return sym
+			}
+		}
+	}
+
+	if fnSymbol.Type != environment.FUNCTION_OBJ && fnSymbol.Type != environment.ANY_OBJ && fnSymbol.Type != environment.BUILTIN_OBJ {
 		a.reportError(n.Token, fmt.Sprintf("type error: cannot call a non-function (got %s)", fnSymbol.Type))
 	}
 

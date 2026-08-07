@@ -742,3 +742,21 @@ func TestEvaluateTypes(t *testing.T) {
 
 	runTestScenarios(t, tests)
 }
+
+	func TestEvaluateBuiltins(t *testing.T) {
+	var tests = []testScenario{
+		{"len on number array", "return len([1, 2, 3])", 3.0},
+		{"len on string array", "return len([\"a\", \"b\"])", 2.0},
+		{"len on empty array", "return len([])", 0.0},
+		{"append to array", "let arr = [1, 2]\nlet new = append(arr, 3)\nreturn new[2]", 3.0},
+		{"append does not modify original", "let arr = [1, 2]\nappend(arr, 3)\nreturn len(arr)", 2.0},
+		{"head of array", "return head([5, 6, 7])", 5.0},
+		{"tail of array", "let t = tail([1, 2, 3])\nreturn t[0]", 2.0},
+		{"tail of empty array", "return len(tail([]))", 0.0},
+		{"last of array", "return last([5, 6, 7])", 7.0},
+		{"copy of array", "let arr = [1, 2]\nlet c = copy(arr)\nappend(c, 3)\nreturn len(arr)", 2.0},
+		{"slice of array", "let s = slice([1, 2, 3, 4], 1, 3)\nreturn s[1]", 3.0},
+		{"concat of arrays", "let c = concat([1, 2], [3, 4])\nreturn c[2]", 3.0},
+	}
+	runTestScenarios(t, tests)
+}
