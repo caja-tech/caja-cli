@@ -24,6 +24,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalExpressionStatement(node, env)
 	case *syntax.AssignStatement:
 		return evalAssignStatement(node, env)
+	case *syntax.IndexAssignmentStatement:
+		return evalIndexAssignmentStatement(node, env)
 	case *syntax.NumberLiteral:
 		return evalNumberLiteral(node)
 	case *syntax.StringLiteral:
@@ -68,6 +70,42 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 // evalExpressionStatement evaluates the inner expression of an expression statement.
 func evalExpressionStatement(node *syntax.ExpressionStatement, env *environment.Environment) (environment.Object, error) {
 	return Eval(node.Expression, env)
+}
+
+// evalIndexAssignmentStatement evaluates the index, validates bounds, and updates the array element.
+func evalIndexAssignmentStatement(node *syntax.IndexAssignmentStatement, env *environment.Environment) (environment.Object, error) {
+	left, err := Eval(node.Left, env)
+	if err != nil {
+		return nil, err
+	}
+
+	arr, ok := left.(*environment.Array)
+	if !ok {
+		return nil, fmt.Errorf("type error: index assignment not supported for %s", left.Type())
+	}
+
+	indexObj, err := Eval(node.Index, env)
+	if err != nil {
+		return nil, err
+	}
+
+	indexNum, ok := indexObj.(*environment.Number)
+	if !ok {
+		return nil, fmt.Errorf("type error: array index must be NUMBER, got %s", indexObj.Type())
+	}
+
+	idx := int(indexNum.Value)
+	if idx < 0 || idx >= len(arr.Elements) {
+		return nil, fmt.Errorf("runtime error: array index out of bounds")
+	}
+
+	valObj, err := Eval(node.Value, env)
+	if err != nil {
+		return nil, err
+	}
+
+	arr.Elements[idx] = valObj
+	return valObj, nil
 }
 
 // evalAssignStatement evaluates the assigned value and updates the existing variable in the environment.

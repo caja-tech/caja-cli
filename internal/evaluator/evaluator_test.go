@@ -71,7 +71,10 @@ func TestEvaluateArrays(t *testing.T) {
 		{"Index array with expression", "let a = [10, 20, 30]\nreturn a[1 + 1]", 30.0},
 		{"Nested array literal", "return [[1, 2], [3, 4]]", "[[1, 2], [3, 4]]"},
 		{"Index nested array", "let a = [[1, 2], [3, 4]]\nreturn a[1][0]", 3.0},
-		{"Modify array element? No, variables are re-assigned, but let's just test indexing for now.", "let a = [1]\nreturn a[0]", 1.0},
+		{"Modify array element", "let a = [1]\na[0] = 5\nreturn a[0]", 5.0},
+		{"Modify nested array element", "let a = [[1, 2]]\na[0][1] = 5\nreturn a[0][1]", 5.0},
+		{"Modify array element using expression", "let a = [1]\na[0] = a[0] + 9\nreturn a[0]", 10.0},
+		{"Modify array element using variable as index", "let a = [1, 2]\nlet i = 1\na[i] = 10\nreturn a[1]", 10.0},
 	}
 
 	runTestScenarios(t, tests)
@@ -82,6 +85,8 @@ func TestErrorArrays(t *testing.T) {
 	var tests = []testErrorScenario{
 		{"Index out of bounds positive", "let a = [1, 2]\nreturn a[2]", "runtime error: array index out of bounds"},
 		{"Index operator on non-array (caught by semantic)", "let a = 1\nreturn a[0]", "type error: index operator not supported for NUMBER"},
+		{"Assign index out of bounds", "let a = [1, 2]\na[2] = 5", "runtime error: array index out of bounds"},
+		{"Assign index out of bounds negative", "let a = [1, 2]\na[-1] = 5", "runtime error: array index out of bounds"},
 	}
 
 	runTestErrorScenarios(t, tests)

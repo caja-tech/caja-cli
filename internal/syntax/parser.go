@@ -146,11 +146,32 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseTypeAliasStatement()
 	}
 
-	if p.peekToken.Type == lexer.ASSIGN {
-		return p.parseAssignStatement()
+	if p.peekToken.Type == lexer.ASSIGN && lexer.IsKeyword(p.currToken.Type) {
+		p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.currToken.Literal))
+		return nil
 	}
 
-	return p.parseExpressionStatement()
+	exprStmt := p.parseExpressionStatement()
+	if p.peekToken.Type == lexer.ASSIGN {
+		p.nextToken() // move to '='
+		assignToken := p.currToken
+		p.nextToken() // move to RHS
+		rhs := p.parseExpression(LOWEST)
+
+		if ident, ok := exprStmt.Expression.(*Identifier); ok {
+			if lexer.IsKeyword(ident.Token.Type) {
+				p.reportError(ident.Token, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", ident.Token.Literal))
+				return nil
+			}
+			return &AssignStatement{Token: assignToken, Name: ident, Value: rhs}
+		}
+		if idxExpr, ok := exprStmt.Expression.(*IndexExpression); ok {
+			return &IndexAssignmentStatement{Token: assignToken, Left: idxExpr.Left, Index: idxExpr.Index, Value: rhs}
+		}
+		p.reportError(assignToken, "invalid assignment target")
+		return nil
+	}
+	return exprStmt
 }
 
 // parseReturnStatement parses a return statement of the form "return expr".
@@ -291,27 +312,7 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 	return statement
 }
 
-// parseAssignStatement parses an assignment of the form "identifier = expr".
-// It captures the left-hand identifier, consumes the '=' token, and parses
-// the right-hand expression with the lowest precedence.
-func (p *Parser) parseAssignStatement() *AssignStatement {
-	if lexer.IsKeyword(p.currToken.Type) {
-		p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.currToken.Literal))
-		return nil
-	}
 
-	statement := &AssignStatement{
-		Name: &Identifier{Token: p.currToken, Value: p.currToken.Literal},
-	}
-
-	p.nextToken()
-	statement.Token = p.currToken
-
-	p.nextToken()
-	statement.Value = p.parseExpression(LOWEST)
-
-	return statement
-}
 
 // parseExpressionStatement wraps a standalone expression (one that is not part
 // of an assignment) into an ExpressionStatement node.
