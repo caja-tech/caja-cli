@@ -791,6 +791,15 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"diffDays", "import date\nreturn date.diffDays('2023-10-30', '2023-10-25')", 5.0},
 		{"newDate", "import date\nreturn date.newDate(2023, 10, 25)", "2023-10-25"},
 		{"today is recent", "import date\nreturn date.year(date.today()) >= 2024", true},
+		{"math abs", "import math\nreturn math.abs(0 - 5.5)", 5.5},
+		{"math sqrt", "import math\nreturn math.sqrt(16)", 4.0},
+		{"math pow", "import math\nreturn math.pow(2, 3)", 8.0},
+		{"math floor", "import math\nreturn math.floor(4.9)", 4.0},
+		{"math ceil", "import math\nreturn math.ceil(4.1)", 5.0},
+		{"math round", "import math\nreturn math.round(4.5)", 5.0},
+		{"math min", "import math\nreturn math.min(10, 5)", 5.0},
+		{"math max", "import math\nreturn math.max(10, 5)", 10.0},
+		{"math log", "import math\nreturn math.log(100, 10)", 2.0},
 	}
 	runTestScenarios(t, tests)
 }
@@ -808,6 +817,10 @@ func TestErrorBuiltins(t *testing.T) {
 		{"newDate invalid month", "import date\nreturn date.newDate(2023, 13, 1)", "runtime error: invalid date boundaries for 'newDate'"},
 		{"newDate invalid leap year", "import date\nreturn date.newDate(2023, 2, 29)", "runtime error: invalid date boundaries for 'newDate'"},
 		{"newDate negative year", "import date\nreturn date.newDate(0 - 1, 1, 1)", "runtime error: invalid date boundaries for 'newDate'"},
+		{"math sqrt negative", "import math\nreturn math.sqrt(0 - 16)", "runtime error: sqrt of negative number is undefined"},
+		{"math log non-positive", "import math\nreturn math.log(0, 10)", "runtime error: log of non-positive number is undefined"},
+		{"math log base <= 0", "import math\nreturn math.log(100, 0)", "runtime error: log base must be positive and not equal to 1"},
+		{"math log base 1", "import math\nreturn math.log(100, 1)", "runtime error: log base must be positive and not equal to 1"},
 	}
 	runTestErrorScenarios(t, tests)
 }

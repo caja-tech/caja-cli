@@ -456,3 +456,37 @@ func (a *Analyzer) analyzeDateNewDateFunction(n *syntax.CallExpression) symbol.S
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
 }
+
+// analyzeMathOneArgFunction checks the arity and type for 1-argument math functions, returning a NUMBER.
+func (a *Analyzer) analyzeMathOneArgFunction(functionName string, n *syntax.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	argSymbol := a.analyze(n.Arguments[0])
+	if argSymbol.Type() != environment.NUMBER_OBJ && argSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be NUMBER, got %s", functionName, argSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
+}
+
+// analyzeMathTwoArgFunction checks the arity and type for 2-argument math functions, returning a NUMBER.
+func (a *Analyzer) analyzeMathTwoArgFunction(functionName string, n *syntax.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	arg1Symbol := a.analyze(n.Arguments[0])
+	if arg1Symbol.Type() != environment.NUMBER_OBJ && arg1Symbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be NUMBER, got %s", functionName, arg1Symbol.Type()))
+	}
+	arg2Symbol := a.analyze(n.Arguments[1])
+	if arg2Symbol.Type() != environment.NUMBER_OBJ && arg2Symbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be NUMBER, got %s", functionName, arg2Symbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
+}

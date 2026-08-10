@@ -78,6 +78,12 @@ func TestModules(t *testing.T) {
 			expectError: true,
 			errorMsg:    "failed to import 'utils'",
 		},
+		{
+			name:        "Math Module Tests",
+			file:        "test_math.caja",
+			expectError: false,
+			expectVal:   48.5,
+		},
 	}
 
 	for _, tc := range testCases {
