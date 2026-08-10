@@ -6,6 +6,7 @@ const (
 	_ int = iota
 	LOWEST
 	ASSIGN
+	LOGICAL
 	COMPARISON
 	SUM
 	PRODUCT
@@ -32,6 +33,9 @@ var precedences = map[lexer.TokenType]int{
 	lexer.LPAREN:   CALL,
 	lexer.LBRACKET: INDEX,
 	lexer.DOT:      INDEX,
+	lexer.AND:      LOGICAL,
+	lexer.OR:       LOGICAL,
+	lexer.XOR:      LOGICAL,
 }
 
 // verifyPrecedenceLevel returns the precedence level associated with the given

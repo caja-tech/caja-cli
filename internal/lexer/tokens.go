@@ -51,6 +51,9 @@ const (
 	TYPE   TokenType = "TYPE"
 	IMPORT TokenType = "IMPORT"
 	AS     TokenType = "AS"
+	AND    TokenType = "AND"
+	OR     TokenType = "OR"
+	XOR    TokenType = "XOR"
 )
 
 type Token struct {
@@ -74,6 +77,9 @@ var keywords = map[string]TokenType{
 	"type":   TYPE,
 	"import": IMPORT,
 	"as":     AS,
+	"and":    AND,
+	"or":     OR,
+	"xor":    XOR,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the
@@ -84,4 +90,13 @@ func lookupIdent(ident string) TokenType {
 	}
 
 	return IDENT
+}
+
+// isKeyword checks if the given token type is a reserved keyword in the language.
+func IsKeyword(tokenType TokenType) bool {
+	switch tokenType {
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR:
+		return true
+	}
+	return false
 }

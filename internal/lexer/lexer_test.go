@@ -818,3 +818,22 @@ return a
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+// TestBooleanOperatorKeywords verifies that 'and', 'or', and 'xor' are tokenized as keywords.
+func TestBooleanOperatorKeywords(t *testing.T) {
+	input := `true and false or true xor false`
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Boolean true", Token{TRUE, "true", 1, 1}},
+		{"AND operator", Token{AND, "and", 1, 6}},
+		{"Boolean false", Token{FALSE, "false", 1, 10}},
+		{"OR operator", Token{OR, "or", 1, 16}},
+		{"Boolean true", Token{TRUE, "true", 1, 19}},
+		{"XOR operator", Token{XOR, "xor", 1, 24}},
+		{"Boolean false", Token{FALSE, "false", 1, 28}},
+		{"End of file", Token{EOF, "", 1, 33}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
