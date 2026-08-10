@@ -548,9 +548,9 @@ func TestLetStatements(t *testing.T) {
 // TestLetStatementErrors validates that malformed let statements are caught by the parser.
 func TestLetStatementErrors(t *testing.T) {
 	tests := []string{
-		"let = 5",      // Missing identifier
-		"let 5 = 10",   // Identifier is a number
-		"let x 10",     // Missing assign operator
+		"let = 5",    // Missing identifier
+		"let 5 = 10", // Identifier is a number
+		"let x 10",   // Missing assign operator
 	}
 
 	for _, input := range tests {
@@ -598,9 +598,9 @@ func TestFunctionParsing(t *testing.T) {
 // TestFunctionErrors verifies that invalid function literals (like missing return type) result in parse errors.
 func TestFunctionErrors(t *testing.T) {
 	tests := []string{
-		"let f = fn() { 10 }",                // Missing return type completely
-		"let f = fn(a: Number) { a }",        // Missing return type with parameters
-		"let f = fn(a: Number): { a }",       // Missing return type identifier
+		"let f = fn() { 10 }",          // Missing return type completely
+		"let f = fn(a: Number) { a }",  // Missing return type with parameters
+		"let f = fn(a: Number): { a }", // Missing return type identifier
 	}
 
 	for _, input := range tests {
@@ -666,10 +666,10 @@ func TestTypeAliasParsing(t *testing.T) {
 // TestTypeAliasErrors verifies that malformed type aliases produce syntax errors.
 func TestTypeAliasErrors(t *testing.T) {
 	tests := []string{
-		"type fn(Number): Number",               // Missing alias name
-		"type BinaryOp (Number, Number): Number",// Missing fn keyword
-		"type BinaryOp fn(Number, Number) Number",// Missing colon
-		"type BinaryOp fn(Number, Number):",      // Missing return type
+		"type fn(Number): Number",                 // Missing alias name
+		"type BinaryOp (Number, Number): Number",  // Missing fn keyword
+		"type BinaryOp fn(Number, Number) Number", // Missing colon
+		"type BinaryOp fn(Number, Number):",       // Missing return type
 	}
 
 	for _, input := range tests {
@@ -780,8 +780,8 @@ func TestArrayParsing(t *testing.T) {
 // TestArrayParsingErrors verifies that malformed arrays or index expressions produce parse errors.
 func TestArrayParsingErrors(t *testing.T) {
 	tests := []string{
-		"[1, 2",       // Missing closing bracket
-		"myArray[1",   // Missing closing bracket in index
+		"[1, 2",     // Missing closing bracket
+		"myArray[1", // Missing closing bracket in index
 	}
 
 	for _, input := range tests {
@@ -825,6 +825,79 @@ func runTestScenarios(t *testing.T, tests []testScenario) {
 			testResult := program.String()
 			if testResult != test.expected {
 				t.Errorf("expected: %s, got: %s", test.expected, testResult)
+			}
+		})
+	}
+}
+
+// TestKeywordVariableErrors validates that using a keyword as a variable or parameter name produces a parse error.
+func TestKeywordVariableErrors(t *testing.T) {
+	tests := []string{
+		"let if = 10",                    // Let declaration with keyword
+		"if = 5",                         // Assignment to keyword
+		"let f = fn(let: Number) { 10 }", // Function parameter as keyword
+		"let as = 10",                    // Let declaration with 'as' keyword
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for keyword usage %q, but got none", input)
+			}
+
+			// Validate the specific error message is present
+			found := false
+			for _, err := range errors {
+				if text.ContainsSubstring(err, "cannot use keyword") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected error mentioning 'cannot use keyword', got: %v", errors)
+			}
+		})
+	}
+}
+
+func TestImportStatement(t *testing.T) {
+	tests := []struct {
+		input        string
+		expectedName string
+		expectedPath string
+	}{
+		{"import math", "math", "math"},
+		{"import \"utils/math\"", "math", "utils/math"},
+		{"import \"core/net/http\"", "http", "core/net/http"},
+		{"import math as m", "m", "math"},
+		{"import \"utils/math\" as m", "m", "utils/math"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			program := p.Parse()
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+			if len(program.Statements) != 1 {
+				t.Fatalf("expected 1 statement, got %d", len(program.Statements))
+			}
+			stmt, ok := program.Statements[0].(*ImportStatement)
+			if !ok {
+				t.Fatalf("expected ImportStatement, got %T", program.Statements[0])
+			}
+			if stmt.Name.Value != tt.expectedName {
+				t.Errorf("expected Name %q, got %q", tt.expectedName, stmt.Name.Value)
+			}
+			if stmt.Path != tt.expectedPath {
+				t.Errorf("expected Path %q, got %q", tt.expectedPath, stmt.Path)
 			}
 		})
 	}

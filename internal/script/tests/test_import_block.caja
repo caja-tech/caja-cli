@@ -1,0 +1,4 @@
+if (true) {
+	import second
+}
+return 10

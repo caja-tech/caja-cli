@@ -3,64 +3,54 @@ package semantic
 import (
 	"caja-cli/internal/environment"
 	"caja-cli/internal/lexer"
+	"caja-cli/internal/modules"
+	"caja-cli/internal/semantic/symbol"
 	"caja-cli/internal/syntax"
 	"fmt"
-	"strings"
 )
 
 // Analyzer performs semantic analysis on an AST.
 // It manages variable scopes and tracks semantic errors such as
 // undeclared variables and variable redeclarations.
 type Analyzer struct {
-	scopes []map[string]Symbol
-	types  map[string]Symbol
-	errors []string
+	scopes        []map[string]symbol.Symbol
+	types         map[string]symbol.Symbol
+	errors        []string
+	functionDepth int
+	globalEnv     *environment.Environment
+	cache         map[string]*Analyzer
+	loading       map[string]bool
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
-func New() *Analyzer {
-	globalScope := make(map[string]Symbol)
+func New(globalEnv *environment.Environment) *Analyzer {
+	globalScope := make(map[string]symbol.Symbol)
 	analyzer := &Analyzer{
-		scopes: []map[string]Symbol{globalScope},
-		types:  make(map[string]Symbol),
+		scopes:    []map[string]symbol.Symbol{globalScope},
+		types:     make(map[string]symbol.Symbol),
+		errors:    make([]string, 0),
+		globalEnv: globalEnv,
+		cache:     make(map[string]*Analyzer),
+		loading:   make(map[string]bool),
 	}
-
-	analyzer.declare("len", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("append", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("head", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("tail", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("last", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("copy", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("slice", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
-	analyzer.declare("join", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("charAt", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("substring", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
-	analyzer.declare("concat", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("split", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("contains", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("startsWith", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("endsWith", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("replace", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
-	analyzer.declare("toUpper", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("toLower", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("trim", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("strlen", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("year", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("month", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("day", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("weekday", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("today", Symbol{Type: environment.BUILTIN_OBJ, Arity: 0})
-	analyzer.declare("parseDate", Symbol{Type: environment.BUILTIN_OBJ, Arity: 1})
-	analyzer.declare("addDays", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("diffDays", Symbol{Type: environment.BUILTIN_OBJ, Arity: 2})
-	analyzer.declare("newDate", Symbol{Type: environment.BUILTIN_OBJ, Arity: 3})
 
 	return analyzer
 }
 
-// Analyze traverses the AST starting from the given node and performs
+// New creates a new Analyzer with a default environment for standalone usage.
+//func New() *Analyzer {
+//	defaultEnv := environment.NewEnvironment("", "", false)
+//	return New(defaultEnv)
+//}
+
+// Run initiates the semantic analysis process starting from the given AST node.
+func (a *Analyzer) Run(node syntax.Node) {
+	a.analyze(node)
+}
+
+// analyze traverses the AST starting from the given node and performs
 // semantic checks, populating the errors slice if any issues are found.
-func (a *Analyzer) Analyze(node syntax.Node) Symbol {
+func (a *Analyzer) analyze(node syntax.Node) symbol.Symbol {
 	switch n := node.(type) {
 	case *syntax.Program:
 		return a.analyzeProgram(n)
@@ -93,74 +83,100 @@ func (a *Analyzer) Analyze(node syntax.Node) Symbol {
 	case *syntax.PrefixExpression:
 		return a.analyzePrefixExpression(n)
 	case *syntax.NumberLiteral:
-		return Symbol{Type: environment.NUMBER_OBJ}
+		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 	case *syntax.StringLiteral:
-		return Symbol{Type: environment.STRING_OBJ}
+		return symbol.NewBasicSymbol(environment.STRING_OBJ)
 	case *syntax.DateLiteral:
-		return Symbol{Type: environment.DATE_OBJ}
+		return symbol.NewBasicSymbol(environment.DATE_OBJ)
 	case *syntax.BooleanLiteral:
-		return Symbol{Type: environment.BOOLEAN_OBJ}
+		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+	case *syntax.ImportStatement:
+		return a.analyzeImportStatement(n)
+	case *syntax.PropertyExpression:
+		return a.analyzePropertyExpression(n)
 	}
 
-	return anySymbol
+	return symbol.AnySymbol()
 }
 
-// reportError formats and appends a semantic error with the token's line and column.
-func (a *Analyzer) reportError(token lexer.Token, msg string) {
-	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+// PrintErrors prints all encountered semantic errors to standard output.
+func (a *Analyzer) PrintErrors() {
+	if a.HasErrors() {
+		fmt.Println("Semantic errors found:")
+		for _, msg := range a.Errors() {
+			fmt.Printf("\t- %s\n", msg)
+		}
+	}
 }
 
-// Errors returns the list of semantic errors encountered during analysis.
+// Errors returns the list of semantic errors found during analysis.
 func (a *Analyzer) Errors() []string {
 	return a.errors
 }
 
+// HasErrors returns true if any semantic errors were found.
+func (a *Analyzer) HasErrors() bool {
+	return len(a.errors) > 0
+}
+
 // analyzeProgram iterates over all statements in the program and analyzes them.
-func (a *Analyzer) analyzeProgram(n *syntax.Program) Symbol {
+func (a *Analyzer) analyzeProgram(n *syntax.Program) symbol.Symbol {
+	seenNonImport := false
 	for _, s := range n.Statements {
-		a.Analyze(s)
+		if importStmt, isImport := s.(*syntax.ImportStatement); isImport {
+			if seenNonImport {
+				a.reportError(importStmt.Token, "semantic error: import statements must appear at the beginning of the file")
+			}
+		} else {
+			seenNonImport = true
+		}
+		a.analyze(s)
 	}
-	return anySymbol
+	return symbol.AnySymbol()
 }
 
 // analyzeBlockStatement analyzes a block of statements within a new scope,
 // returning the type of the last statement in the block.
-func (a *Analyzer) analyzeBlockStatement(n *syntax.BlockStatement) Symbol {
+func (a *Analyzer) analyzeBlockStatement(n *syntax.BlockStatement) symbol.Symbol {
 	a.pushScope()
 	var lastType = environment.ANY_OBJ
 	for _, s := range n.Statements {
-		lastType = a.Analyze(s).Type
+		if importStmt, isImport := s.(*syntax.ImportStatement); isImport {
+			a.reportError(importStmt.Token, "semantic error: import statements are only allowed at the top-level of a file")
+		}
+		lastType = a.analyze(s).Type()
 	}
 	a.popScope()
-	return Symbol{Type: lastType}
+	return symbol.NewBasicSymbol(lastType)
 }
 
 // analyzeLetStatement checks for variable redeclarations and registers the
 // newly declared variable in the current scope with its analyzed type.
-func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) Symbol {
-	if _, exists := a.resolve(n.Name.Value); exists {
+func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) symbol.Symbol {
+	if _, exists := a.findVarSymbolInScope(n.Name.Value); exists {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
 	}
 
 	if fnNode, ok := n.Value.(*syntax.FunctionLiteral); ok {
-		var paramTypes []Symbol
+		var paramTypes []symbol.Symbol
 		for _, param := range fnNode.Parameters {
-			paramTypes = append(paramTypes, a.resolveTypeName(param.Type, n.Token))
+			typeName, ok := a.findTypeSymbolInTypes(param.Type)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+			}
+			paramTypes = append(paramTypes, typeName)
 		}
 
-		var retType *Symbol
+		var returnType symbol.Symbol
 		if fnNode.ReturnType != "" {
-			resolved := a.resolveTypeName(fnNode.ReturnType, n.Token)
-			retType = &resolved
+			resolvedReturnType, ok := a.findTypeSymbolInTypes(fnNode.ReturnType)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
+			}
+			returnType = resolvedReturnType
 		}
 
-		fnSymbol := Symbol{
-			Type:       environment.FUNCTION_OBJ,
-			Arity:      len(fnNode.Parameters),
-			ParamTypes: paramTypes,
-			ReturnType: retType,
-		}
-
+		fnSymbol := symbol.NewFunctionSymbol(len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol)
 
 		if guaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
@@ -168,9 +184,10 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) Symbol {
 		}
 	}
 
-	valType := anySymbol
+	var valType symbol.Symbol
+	valType = symbol.AnySymbol()
 	if n.Value != nil {
-		valType = a.Analyze(n.Value)
+		valType = a.analyze(n.Value)
 	}
 
 	a.declare(n.Name.Value, valType)
@@ -179,782 +196,435 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) Symbol {
 
 // analyzeAssignStatement ensures the assigned variable has been declared
 // and that the type of the assigned value matches the declared type.
-func (a *Analyzer) analyzeAssignStatement(n *syntax.AssignStatement) Symbol {
-	sym := anySymbol
+func (a *Analyzer) analyzeAssignStatement(n *syntax.AssignStatement) symbol.Symbol {
+	var sym symbol.Symbol
+	sym = symbol.AnySymbol()
 	if n.Value != nil {
-		sym = a.Analyze(n.Value)
+		sym = a.analyze(n.Value)
 	}
 
-	expectedType, exists := a.resolve(n.Name.Value)
+	expectedType, exists := a.findVarSymbolInScope(n.Name.Value)
 	if !exists {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'. Use 'let' to declare it.", n.Name.Value))
 	} else {
-		if expectedType.Type != sym.Type && expectedType.Type != environment.ANY_OBJ && sym.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type, n.Name.Value, expectedType.Type))
+		if expectedType.Type() != sym.Type() && expectedType.Type() != environment.ANY_OBJ && sym.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type(), n.Name.Value, expectedType.Type()))
 		}
 	}
+
 	return sym
 }
 
 // analyzeIdentifier resolves the identifier in the current and outer scopes,
 // logging an error if it has not been declared.
-func (a *Analyzer) analyzeIdentifier(n *syntax.Identifier) Symbol {
-	if sym, ok := a.resolve(n.Value); ok {
+func (a *Analyzer) analyzeIdentifier(n *syntax.Identifier) symbol.Symbol {
+	if sym, ok := a.findVarSymbolInScope(n.Value); ok {
 		return sym
 	}
-	a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'", n.Value))
-	return anySymbol
+
+	a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'. Use 'let' to declare it.", n.Value))
+	return symbol.AnySymbol()
 }
 
 // analyzeIfExpression recursively analyzes its condition and both branches.
 // It returns the type of the consequence branch.
-func (a *Analyzer) analyzeIfExpression(n *syntax.IfExpression) Symbol {
-	condType := a.Analyze(n.Condition)
-	if condType.Type != environment.BOOLEAN_OBJ && condType.Type != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a BOOLEAN, got %s", condType.Type))
+func (a *Analyzer) analyzeIfExpression(n *syntax.IfExpression) symbol.Symbol {
+	condSymbol := a.analyze(n.Condition)
+	if condSymbol.Type() != environment.BOOLEAN_OBJ && condSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a BOOLEAN, got %s", condSymbol.Type()))
 	}
-	trueType := a.Analyze(n.Consequence)
+
+	trueType := a.analyze(n.Consequence)
 	if n.Alternative != nil {
-		a.Analyze(n.Alternative)
+		a.analyze(n.Alternative)
 	}
 	return trueType
 }
 
 // analyzePrefixExpression ensures the right side of a prefix operator
 // matches the operator's expected type.
-func (a *Analyzer) analyzePrefixExpression(n *syntax.PrefixExpression) Symbol {
-	rightType := a.Analyze(n.Right)
-	if rightType.Type == environment.ANY_OBJ {
-		return Symbol{Type: environment.ANY_OBJ}
-	}
+func (a *Analyzer) analyzePrefixExpression(n *syntax.PrefixExpression) symbol.Symbol {
+	rightSymbol := a.analyze(n.Right)
 	switch n.Operator {
 	case "!":
-		if rightType.Type != environment.BOOLEAN_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a BOOLEAN, got %s", rightType.Type))
+		if rightSymbol.Type() != environment.BOOLEAN_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a BOOLEAN, got %s", rightSymbol.Type()))
 		}
-		return Symbol{Type: environment.BOOLEAN_OBJ}
+		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	case "-":
-		if rightType.Type != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a NUMBER, got %s", rightType.Type))
+		if rightSymbol.Type() != environment.NUMBER_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a NUMBER, got %s", rightSymbol.Type()))
 		}
-		return Symbol{Type: environment.NUMBER_OBJ}
+		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 	default:
 		a.reportError(n.Token, fmt.Sprintf("semantic error: unknown prefix operator '%s'", n.Operator))
-		return anySymbol
+		return symbol.AnySymbol()
 	}
 }
 
 // analyzeReturnStatement recursively analyzes the return value expression, if any.
-func (a *Analyzer) analyzeReturnStatement(n *syntax.ReturnStatement) Symbol {
-	if n.ReturnValue != nil {
-		return a.Analyze(n.ReturnValue)
+func (a *Analyzer) analyzeReturnStatement(n *syntax.ReturnStatement) symbol.Symbol {
+	if a.globalEnv.IsModule && a.functionDepth == 0 {
+		a.reportError(n.Token, "semantic error: top-level return statements are forbidden inside modules")
 	}
-	return anySymbol
+
+	if n.ReturnValue != nil {
+		return a.analyze(n.ReturnValue)
+	}
+	return symbol.AnySymbol()
 }
 
 // analyzeInfixExpression ensures that both the left and right operands
 // are of appropriate types for the given operator.
-func (a *Analyzer) analyzeInfixExpression(n *syntax.InfixExpression) Symbol {
-	leftType := a.Analyze(n.Left)
-	rightType := a.Analyze(n.Right)
+func (a *Analyzer) analyzeInfixExpression(n *syntax.InfixExpression) symbol.Symbol {
+	leftSymbol := a.analyze(n.Left)
+	rightSymbol := a.analyze(n.Right)
 
-	if leftType.Type == environment.ANY_OBJ || rightType.Type == environment.ANY_OBJ {
-		return Symbol{Type: environment.ANY_OBJ}
+	if leftSymbol.Type() == environment.ANY_OBJ || rightSymbol.Type() == environment.ANY_OBJ {
+		return symbol.NewBasicSymbol(environment.ANY_OBJ)
 	}
 
 	switch n.Operator {
 	case "+":
-		if leftType.Type == environment.NUMBER_OBJ && rightType.Type == environment.NUMBER_OBJ {
-			return Symbol{Type: environment.NUMBER_OBJ}
+		if leftSymbol.Type() == environment.NUMBER_OBJ && rightSymbol.Type() == environment.NUMBER_OBJ {
+			return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 		}
-		if leftType.Type == environment.STRING_OBJ && rightType.Type == environment.STRING_OBJ {
-			return Symbol{Type: environment.STRING_OBJ}
+		if leftSymbol.Type() == environment.STRING_OBJ && rightSymbol.Type() == environment.STRING_OBJ {
+			return symbol.NewBasicSymbol(environment.STRING_OBJ)
 		}
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot add %s and %s", leftType.Type, rightType.Type))
-		return Symbol{Type: environment.ANY_OBJ}
+		a.reportError(n.Token, fmt.Sprintf("type error: cannot add %s and %s", leftSymbol.Type(), rightSymbol.Type()))
+		return symbol.NewBasicSymbol(environment.ANY_OBJ)
 
 	case "-", "*", "/", "%", "^":
-		if leftType.Type != environment.NUMBER_OBJ || rightType.Type != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftType.Type, rightType.Type))
-			return Symbol{Type: environment.ANY_OBJ}
+		if leftSymbol.Type() != environment.NUMBER_OBJ || rightSymbol.Type() != environment.NUMBER_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			return symbol.NewBasicSymbol(environment.ANY_OBJ)
 		}
-		return Symbol{Type: environment.NUMBER_OBJ}
+		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
+
 	case "<", ">", "<=", ">=":
-		if leftType.Type != environment.NUMBER_OBJ || rightType.Type != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftType.Type, rightType.Type))
+		if leftSymbol.Type() != environment.NUMBER_OBJ || rightSymbol.Type() != environment.NUMBER_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 		}
-		return Symbol{Type: environment.BOOLEAN_OBJ}
+		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+
 	case "==", "!=":
-		if leftType.Type != rightType.Type {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot compare %s and %s using '%s'", leftType.Type, rightType.Type, n.Operator))
+		if leftSymbol.Type() != rightSymbol.Type() {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot compare %s and %s using '%s'", leftSymbol.Type(), rightSymbol.Type(), n.Operator))
 		}
-		return Symbol{Type: environment.BOOLEAN_OBJ}
+		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	}
 
-	return anySymbol
+	return symbol.AnySymbol()
 }
 
 // analyzeArrayLiteral ensures all elements in the array match the type of the first element,
 // and returns an ARRAY_OBJ symbol with the inferred ElementType.
-func (a *Analyzer) analyzeArrayLiteral(n *syntax.ArrayLiteral) Symbol {
+func (a *Analyzer) analyzeArrayLiteral(n *syntax.ArrayLiteral) symbol.Symbol {
 	if len(n.Elements) == 0 {
-		return Symbol{Type: environment.ARRAY_OBJ}
+		return symbol.NewArraySymbol(symbol.AnySymbol())
 	}
 
-	firstType := a.Analyze(n.Elements[0])
+	firstElSymbol := a.analyze(n.Elements[0])
 	for i := 1; i < len(n.Elements); i++ {
-		elType := a.Analyze(n.Elements[i])
-		if !firstType.Equals(elType) && firstType.Type != environment.ANY_OBJ && elType.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: array elements must have the same type, expected %s, got %s", firstType.Type, elType.Type))
+		elSymbol := a.analyze(n.Elements[i])
+		if !firstElSymbol.Equals(elSymbol) && firstElSymbol.Type() != environment.ANY_OBJ && elSymbol.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: array elements must have the same type, expected %s, got %s", firstElSymbol.Type(), elSymbol.Type()))
 		}
 	}
 
-	return Symbol{
-		Type:        environment.ARRAY_OBJ,
-		ElementType: &firstType,
-	}
+	return symbol.NewArraySymbol(firstElSymbol)
 }
 
 // analyzeIndexExpression ensures the left side is an array and the index is a number.
-func (a *Analyzer) analyzeIndexExpression(n *syntax.IndexExpression) Symbol {
-	leftType := a.Analyze(n.Left)
-	if leftType.Type != environment.ARRAY_OBJ && leftType.Type != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: index operator not supported for %s", leftType.Type))
+func (a *Analyzer) analyzeIndexExpression(n *syntax.IndexExpression) symbol.Symbol {
+	leftSymbol := a.analyze(n.Left)
+
+	if leftSymbol.Type() != environment.ARRAY_OBJ && leftSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: index operator not supported for %s", leftSymbol.Type()))
 	}
 
-	indexType := a.Analyze(n.Index)
-	if indexType.Type != environment.NUMBER_OBJ && indexType.Type != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexType.Type))
+	indexSymbol := a.analyze(n.Index)
+	if indexSymbol.Type() != environment.NUMBER_OBJ && indexSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexSymbol.Type()))
 	}
 
-	if leftType.ElementType != nil {
-		return *leftType.ElementType
+	leftSymbolArray, ok := leftSymbol.(*symbol.ArraySymbol)
+	if !ok {
+		return symbol.AnySymbol()
 	}
 
-	return anySymbol
+	if leftSymbolArray.ElementSymbol() != nil {
+		return leftSymbolArray.ElementSymbol()
+	}
+
+	return symbol.AnySymbol()
 }
 
 // analyzeExpressionStatement wraps the analysis of the inner expression.
-func (a *Analyzer) analyzeExpressionStatement(n *syntax.ExpressionStatement) Symbol {
+func (a *Analyzer) analyzeExpressionStatement(n *syntax.ExpressionStatement) symbol.Symbol {
 	if n.Expression != nil {
-		return a.Analyze(n.Expression)
+		return a.analyze(n.Expression)
 	}
-	return anySymbol
+	return symbol.AnySymbol()
 }
 
 // analyzeTypeAliasStatement resolves the parameter and return types for a type alias
 // and registers the resulting function signature in the analyzer's type registry.
-func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) Symbol {
-	var paramTypes []Symbol
+func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) symbol.Symbol {
+	var paramTypes []symbol.Symbol
 	for _, pt := range n.Signature.ParamTypes {
-		paramTypes = append(paramTypes, a.resolveTypeName(pt, n.Token))
+		paramSymbol, ok := a.findTypeSymbolInTypes(pt)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", pt))
+		}
+		paramTypes = append(paramTypes, paramSymbol)
 	}
 
-	var retType *Symbol
+	var returnType symbol.Symbol
 	if n.Signature.ReturnType != "" {
-		resolved := a.resolveTypeName(n.Signature.ReturnType, n.Token)
-		retType = &resolved
+		resolvedReturn, ok := a.findTypeSymbolInTypes(n.Signature.ReturnType)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.Signature.ReturnType))
+		}
+		returnType = resolvedReturn
 	}
 
-	a.types[n.Name.Value] = Symbol{
-		Type:       environment.FUNCTION_OBJ,
-		Arity:      len(n.Signature.ParamTypes),
-		ParamTypes: paramTypes,
-		ReturnType: retType,
-	}
+	a.types[n.Name.Value] = symbol.NewFunctionSymbol(len(n.Signature.ParamTypes), paramTypes, returnType)
 
-	return anySymbol
+	return symbol.AnySymbol()
 }
 
 // analyzeFunctionLiteral analyzes a function definition within a new scope,
 // registers its parameters, checks its body's return type against the declared
 // return type, and verifies that the function guarantees a return if needed.
-func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) Symbol {
+func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) symbol.Symbol {
 	a.pushScope()
+	a.functionDepth++
 
-	var paramTypes []Symbol
+	var paramTypes []symbol.Symbol
 
 	for _, param := range n.Parameters {
-		sym := a.resolveTypeName(param.Type, n.Token)
-		paramTypes = append(paramTypes, sym)
-		a.declare(param.Name, sym)
+		paramSymbol, ok := a.findTypeSymbolInTypes(param.Type)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
+		}
+		paramTypes = append(paramTypes, paramSymbol)
+		a.declare(param.Name, paramSymbol)
 	}
 
-	actualReturnSymbol := a.Analyze(n.Body)
+	actualReturnSymbol := a.analyze(n.Body)
+	a.functionDepth--
 	a.popScope()
 
-	var expectedReturnSymbol *Symbol
+	var expectedReturnSymbol symbol.Symbol
 	if n.ReturnType != "" {
 		if !guaranteesReturn(n.Body) {
 			a.reportError(n.Token, "semantic error: function is missing a guaranteed return statement. All code paths must return a value.")
 		}
 
-		resolved := a.resolveTypeName(n.ReturnType, n.Token)
-		expectedReturnSymbol = &resolved
+		resolvedReturn, ok := a.findTypeSymbolInTypes(n.ReturnType)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.ReturnType))
+		}
+		expectedReturnSymbol = resolvedReturn
 
 		if !expectedReturnSymbol.Equals(actualReturnSymbol) {
-			a.reportError(n.Token, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnSymbol.Type, actualReturnSymbol.Type))
+			a.reportError(n.Token, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnSymbol.Type(), actualReturnSymbol.Type()))
 		}
 	}
 
-	return Symbol{
-		Type:       environment.FUNCTION_OBJ,
-		Arity:      len(n.Parameters),
-		ParamTypes: paramTypes,
-		ReturnType: expectedReturnSymbol,
-	}
+	return symbol.NewFunctionSymbol(len(n.Parameters), paramTypes, expectedReturnSymbol)
 }
 
 // analyzeBuiltinCall intercepts calls to builtin functions (like len, append, head, tail)
 // to provide custom, compile-time polymorphic type-checking and inference.
-func (a *Analyzer) analyzeBuiltinCall(name string, n *syntax.CallExpression) (Symbol, bool) {
-	switch name {
-	case "len":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'len', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		argSymbol := a.Analyze(n.Arguments[0])
-		if argSymbol.Type != environment.ARRAY_OBJ && argSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'len' must be an ARRAY, got %s", argSymbol.Type))
-		}
-		return Symbol{Type: environment.NUMBER_OBJ}, true
+func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n *syntax.CallExpression) (symbol.Symbol, bool) {
+	fullName := functionName
+	if moduleName != "" {
+		fullName = moduleName + "." + functionName
+	}
 
-	case "append":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'append', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arrSymbol := a.Analyze(n.Arguments[0])
-		elSymbol := a.Analyze(n.Arguments[1])
-
-		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'append' must be an ARRAY, got %s", arrSymbol.Type))
-			return anySymbol, true
-		}
-
-		if arrSymbol.Type == environment.ARRAY_OBJ && arrSymbol.ElementType != nil && !arrSymbol.ElementType.Equals(elSymbol) && arrSymbol.ElementType.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot append %s to array of %s", elSymbol.Type, arrSymbol.ElementType.Type))
-		}
-		return arrSymbol, true
-
-	case "head":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'head', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arrSymbol := a.Analyze(n.Arguments[0])
-		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'head' must be an ARRAY, got %s", arrSymbol.Type))
-			return anySymbol, true
-		}
-		if arrSymbol.ElementType != nil {
-			return *arrSymbol.ElementType, true
-		}
-		return anySymbol, true
-
-	case "tail":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'tail', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arrSymbol := a.Analyze(n.Arguments[0])
-		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'tail' must be an ARRAY, got %s", arrSymbol.Type))
-			return anySymbol, true
-		}
-		return arrSymbol, true
-
-	case "last":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'last', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arrSymbol := a.Analyze(n.Arguments[0])
-		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'last' must be an ARRAY, got %s", arrSymbol.Type))
-			return anySymbol, true
-		}
-		if arrSymbol.ElementType != nil {
-			return *arrSymbol.ElementType, true
-		}
-		return anySymbol, true
-
-	case "copy":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'copy', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arrSymbol := a.Analyze(n.Arguments[0])
-		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'copy' must be an ARRAY, got %s", arrSymbol.Type))
-			return anySymbol, true
-		}
-		return arrSymbol, true
-
-	case "slice":
-		if len(n.Arguments) != 3 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'slice', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arrSymbol := a.Analyze(n.Arguments[0])
-		startSymbol := a.Analyze(n.Arguments[1])
-		endSymbol := a.Analyze(n.Arguments[2])
-
-		if arrSymbol.Type != environment.ARRAY_OBJ && arrSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'slice' must be an ARRAY, got %s", arrSymbol.Type))
-		}
-		if startSymbol.Type != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'slice' must be NUMBER, got %s", startSymbol.Type))
-		}
-		if endSymbol.Type != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'slice' must be NUMBER, got %s", endSymbol.Type))
-		}
-		return arrSymbol, true
-
-	case "join":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'join', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		arr1Symbol := a.Analyze(n.Arguments[0])
-		arr2Symbol := a.Analyze(n.Arguments[1])
-
-		if arr1Symbol.Type != environment.ARRAY_OBJ && arr1Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'join' must be an ARRAY, got %s", arr1Symbol.Type))
-			return anySymbol, true
-		}
-		if arr2Symbol.Type != environment.ARRAY_OBJ && arr2Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'join' must be an ARRAY, got %s", arr2Symbol.Type))
-			return anySymbol, true
-		}
-
-		if arr1Symbol.Type == environment.ARRAY_OBJ && arr2Symbol.Type == environment.ARRAY_OBJ {
-			if arr1Symbol.ElementType != nil && arr2Symbol.ElementType != nil && !arr1Symbol.ElementType.Equals(*arr2Symbol.ElementType) && arr1Symbol.ElementType.Type != environment.ANY_OBJ && arr2Symbol.ElementType.Type != environment.ANY_OBJ {
-				a.reportError(n.Token, fmt.Sprintf("type error: cannot join array of %s with array of %s", arr1Symbol.ElementType.Type, arr2Symbol.ElementType.Type))
-			}
-		}
-		return arr1Symbol, true
-
-	case "charAt":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'charAt', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-		idxSymbol := a.Analyze(n.Arguments[1])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'charAt' must be STRING, got %s", strSymbol.Type))
-		}
-		if idxSymbol.Type != environment.NUMBER_OBJ && idxSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'charAt' must be NUMBER, got %s", idxSymbol.Type))
-		}
-		return Symbol{Type: environment.STRING_OBJ}, true
-
-	case "substring":
-		if len(n.Arguments) != 3 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'substring', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-		startSymbol := a.Analyze(n.Arguments[1])
-		endSymbol := a.Analyze(n.Arguments[2])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'substring' must be STRING, got %s", strSymbol.Type))
-		}
-		if startSymbol.Type != environment.NUMBER_OBJ && startSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'substring' must be NUMBER, got %s", startSymbol.Type))
-		}
-		if endSymbol.Type != environment.NUMBER_OBJ && endSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'substring' must be NUMBER, got %s", endSymbol.Type))
-		}
-		return Symbol{Type: environment.STRING_OBJ}, true
-
-	case "concat":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'concat', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		str1Symbol := a.Analyze(n.Arguments[0])
-		str2Symbol := a.Analyze(n.Arguments[1])
-
-		if str1Symbol.Type != environment.STRING_OBJ && str1Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'concat' must be STRING, got %s", str1Symbol.Type))
-		}
-		if str2Symbol.Type != environment.STRING_OBJ && str2Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'concat' must be STRING, got %s", str2Symbol.Type))
-		}
-		return Symbol{Type: environment.STRING_OBJ}, true
-
-	case "split":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'split', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-		delimSymbol := a.Analyze(n.Arguments[1])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'split' must be STRING, got %s", strSymbol.Type))
-		}
-		if delimSymbol.Type != environment.STRING_OBJ && delimSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'split' must be STRING, got %s", delimSymbol.Type))
-		}
-		
-		stringType := Symbol{Type: environment.STRING_OBJ}
-		return Symbol{Type: environment.ARRAY_OBJ, ElementType: &stringType}, true
-
-	case "contains", "startsWith", "endsWith":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", name, len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-		subSymbol := a.Analyze(n.Arguments[1])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", name, strSymbol.Type))
-		}
-		if subSymbol.Type != environment.STRING_OBJ && subSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be STRING, got %s", name, subSymbol.Type))
-		}
-		return Symbol{Type: environment.BOOLEAN_OBJ}, true
-
-	case "replace":
-		if len(n.Arguments) != 3 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'replace', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-		oldSymbol := a.Analyze(n.Arguments[1])
-		newSymbol := a.Analyze(n.Arguments[2])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'replace' must be STRING, got %s", strSymbol.Type))
-		}
-		if oldSymbol.Type != environment.STRING_OBJ && oldSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'replace' must be STRING, got %s", oldSymbol.Type))
-		}
-		if newSymbol.Type != environment.STRING_OBJ && newSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'replace' must be STRING, got %s", newSymbol.Type))
-		}
-		return Symbol{Type: environment.STRING_OBJ}, true
-
-	case "toUpper", "toLower", "trim":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", name, len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", name, strSymbol.Type))
-		}
-		return Symbol{Type: environment.STRING_OBJ}, true
-
-	case "strlen":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'strlen', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'strlen' must be STRING, got %s", strSymbol.Type))
-		}
-		return Symbol{Type: environment.NUMBER_OBJ}, true
-
-	case "year", "month", "day", "weekday":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", name, len(n.Arguments)))
-			return anySymbol, true
-		}
-		dateSymbol := a.Analyze(n.Arguments[0])
-
-		if dateSymbol.Type != environment.DATE_OBJ && dateSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be DATE, got %s", name, dateSymbol.Type))
-		}
-		return Symbol{Type: environment.NUMBER_OBJ}, true
-
-	case "today":
-		if len(n.Arguments) != 0 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 0 arguments for 'today', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		return Symbol{Type: environment.DATE_OBJ}, true
-
-	case "parseDate":
-		if len(n.Arguments) != 1 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'parseDate', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		strSymbol := a.Analyze(n.Arguments[0])
-
-		if strSymbol.Type != environment.STRING_OBJ && strSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'parseDate' must be STRING, got %s", strSymbol.Type))
-		}
-		return Symbol{Type: environment.DATE_OBJ}, true
-
-	case "addDays":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'addDays', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		dateSymbol := a.Analyze(n.Arguments[0])
-		numSymbol := a.Analyze(n.Arguments[1])
-
-		if dateSymbol.Type != environment.DATE_OBJ && dateSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'addDays' must be DATE, got %s", dateSymbol.Type))
-		}
-		if numSymbol.Type != environment.NUMBER_OBJ && numSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'addDays' must be NUMBER, got %s", numSymbol.Type))
-		}
-		return Symbol{Type: environment.DATE_OBJ}, true
-
-	case "diffDays":
-		if len(n.Arguments) != 2 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'diffDays', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		date1Symbol := a.Analyze(n.Arguments[0])
-		date2Symbol := a.Analyze(n.Arguments[1])
-
-		if date1Symbol.Type != environment.DATE_OBJ && date1Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'diffDays' must be DATE, got %s", date1Symbol.Type))
-		}
-		if date2Symbol.Type != environment.DATE_OBJ && date2Symbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'diffDays' must be DATE, got %s", date2Symbol.Type))
-		}
-		return Symbol{Type: environment.NUMBER_OBJ}, true
-
-	case "newDate":
-		if len(n.Arguments) != 3 {
-			a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'newDate', got %d", len(n.Arguments)))
-			return anySymbol, true
-		}
-		yearSymbol := a.Analyze(n.Arguments[0])
-		monthSymbol := a.Analyze(n.Arguments[1])
-		daySymbol := a.Analyze(n.Arguments[2])
-
-		if yearSymbol.Type != environment.NUMBER_OBJ && yearSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'newDate' must be NUMBER, got %s", yearSymbol.Type))
-		}
-		if monthSymbol.Type != environment.NUMBER_OBJ && monthSymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'newDate' must be NUMBER, got %s", monthSymbol.Type))
-		}
-		if daySymbol.Type != environment.NUMBER_OBJ && daySymbol.Type != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'newDate' must be NUMBER, got %s", daySymbol.Type))
-		}
-		return Symbol{Type: environment.DATE_OBJ}, true
-
+	switch fullName {
+	case "array.len":
+		return a.analyzeArrayLenFunction(n), true
+	case "array.append":
+		return a.analyzeArrayAppendFunction(n), true
+	case "array.head":
+		return a.analyzeArrayHeadFunction(n), true
+	case "array.tail":
+		return a.analyzeArrayTailFunction(n), true
+	case "array.last":
+		return a.analyzeArrayLastFunction(n), true
+	case "array.copy":
+		return a.analyzeArrayCopyFunction(n), true
+	case "array.slice":
+		return a.analyzeArraySliceFunction(n), true
+	case "array.join":
+		return a.analyzeArrayJoinFunction(n), true
+	case "string.charAt":
+		return a.analyzeStringCharAtFunction(n), true
+	case "string.substring":
+		return a.analyzeStringSubstringFunction(n), true
+	case "string.concat":
+		return a.analyzeStringConcatFunction(n), true
+	case "string.split":
+		return a.analyzeStringSplitFunction(n), true
+	case "string.contains", "string.startsWith", "string.endsWith":
+		return a.analyzeStringMatchFunction(functionName, n), true
+	case "string.replace":
+		return a.analyzeStringReplaceFunction(n), true
+	case "string.toUpper", "string.toLower", "string.trim":
+		return a.analyzeStringTransformFunction(functionName, n), true
+	case "string.len":
+		return a.analyzeStringLenFunction(n), true
+	case "date.year", "date.month", "date.day", "date.weekday":
+		return a.analyzeDateComponentFunction(functionName, n), true
+	case "date.today":
+		return a.analyzeDateTodayFunction(n), true
+	case "date.parseDate":
+		return a.analyzeDateParseDateFunction(n), true
+	case "date.addDays":
+		return a.analyzeDateAddDaysFunction(n), true
+	case "date.diffDays":
+		return a.analyzeDateDiffDaysFunction(n), true
+	case "date.newDate":
+		return a.analyzeDateNewDateFunction(n), true
 	default:
-		return Symbol{}, false
+		return symbol.AnySymbol(), false
 	}
 }
 
 // analyzeCallExpression analyzes a function call to ensure the target is callable,
 // verifies the number of arguments matches the function's arity, and checks
 // the types of the provided arguments against the function's parameters.
-func (a *Analyzer) analyzeCallExpression(n *syntax.CallExpression) Symbol {
-	fnSymbol := a.Analyze(n.Function)
+func (a *Analyzer) analyzeCallExpression(n *syntax.CallExpression) symbol.Symbol {
+	sym := a.analyze(n.Function)
 
-	if ident, ok := n.Function.(*syntax.Identifier); ok {
-		if fnSymbol.Type == environment.BUILTIN_OBJ {
-			if sym, handled := a.analyzeBuiltinCall(ident.Value, n); handled {
-				return sym
+	_, isBuiltin := sym.(*symbol.BuiltinSymbol)
+	if isBuiltin {
+		if ident, ok := n.Function.(*syntax.Identifier); ok {
+			if builtinSym, handled := a.analyzeBuiltinCall("", ident.Value, n); handled {
+				return builtinSym
+			}
+		}
+
+		if prop, ok := n.Function.(*syntax.PropertyExpression); ok {
+			var modName string
+			if objIdent, ok := prop.Object.(*syntax.Identifier); ok {
+				modName = objIdent.Value
+			}
+			if builtinSym, handled := a.analyzeBuiltinCall(modName, prop.Property.Value, n); handled {
+				return builtinSym
 			}
 		}
 	}
 
-	if fnSymbol.Type != environment.FUNCTION_OBJ && fnSymbol.Type != environment.ANY_OBJ && fnSymbol.Type != environment.BUILTIN_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot call a non-function (got %s)", fnSymbol.Type))
+	fnSymbol, isFunction := sym.(*symbol.FunctionSymbol)
+	if !isFunction {
+		if sym.Type() != environment.ANY_OBJ && sym.Type() != environment.BUILTIN_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot call a non-function (got %s)", sym.Type()))
+		}
+		return symbol.AnySymbol()
 	}
 
-	if fnSymbol.Type != environment.ANY_OBJ && len(n.Arguments) != fnSymbol.Arity {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity, len(n.Arguments)))
+	if fnSymbol.Type() != environment.ANY_OBJ && len(n.Arguments) != fnSymbol.Arity() {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity(), len(n.Arguments)))
 	}
 
 	for i, arg := range n.Arguments {
-		argSymbol := a.Analyze(arg)
+		argSymbol := a.analyze(arg)
 
-		if i < len(fnSymbol.ParamTypes) {
-			expectedType := fnSymbol.ParamTypes[i]
+		if i < len(fnSymbol.ParamTypes()) {
+			expectedType := fnSymbol.ParamTypes()[i]
 
 			if !expectedType.Equals(argSymbol) {
-				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.Type, argSymbol.Type))
+				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.Type(), argSymbol.Type()))
 			}
 		}
 	}
 
-	if fnSymbol.ReturnType != nil {
-		return *fnSymbol.ReturnType
+	if fnSymbol.ReturnType() != nil {
+		return fnSymbol.ReturnType()
 	}
 
-	return anySymbol
+	return symbol.AnySymbol()
 }
 
-// pushScope creates a new inner scope and pushes it onto the scope stack.
-func (a *Analyzer) pushScope() {
-	a.scopes = append(a.scopes, make(map[string]Symbol))
+// analyzeImportStatement uses the ImportLoader to statically analyze the imported module
+func (a *Analyzer) analyzeImportStatement(n *syntax.ImportStatement) symbol.Symbol {
+	modPath := n.Path
+	modName := n.Name.Value
+
+	if symbols, ok := symbol.GetStandardModule(modPath); ok {
+		modSymbol := symbol.NewModuleSymbol(modName, symbols)
+		a.declare(modName, modSymbol)
+		return modSymbol
+	}
+
+	// Check circular dependencies
+	if a.loading[modPath] {
+		a.reportError(n.Token, fmt.Sprintf("circular import detected: '%s'", modPath))
+		return symbol.AnySymbol()
+	}
+
+	a.loading[modPath] = true
+	defer func() { a.loading[modPath] = false }()
+
+	modProgram, err := modules.Load(a.globalEnv.BaseDir, modPath)
+	if err != nil {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: failed to import '%s': %v", modPath, err))
+		return symbol.AnySymbol()
+	}
+
+	// Cache the parsed AST for the evaluator to reuse
+	if a.globalEnv != nil {
+		a.globalEnv.ModuleASTs[modPath] = modProgram
+	}
+
+	modEnv := environment.NewEnvironment(a.globalEnv.BaseDir, modPath, true)
+	modEnv.ModuleASTs = a.globalEnv.ModuleASTs
+	modAnalyzer := New(modEnv)
+	modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
+	modSymbol := modAnalyzer.analyze(modProgram)
+	if len(modAnalyzer.errors) > 0 {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: failed to analyze module %s", modPath))
+		a.errors = append(a.errors, modAnalyzer.errors...)
+		return symbol.AnySymbol()
+	}
+
+	a.declare(modName, modSymbol)
+	return modSymbol
 }
 
-// popScope removes the most recently added inner scope from the scope stack.
-func (a *Analyzer) popScope() {
-	a.scopes = a.scopes[:len(a.scopes)-1]
+// analyzePropertyExpression ensures the left side is a module and retrieves the property type
+func (a *Analyzer) analyzePropertyExpression(n *syntax.PropertyExpression) symbol.Symbol {
+	leftSymbol := a.analyze(n.Object)
+
+	if leftSymbol.Type() == environment.ANY_OBJ {
+		return symbol.AnySymbol()
+	}
+
+	if leftSymbol.Type() != environment.MODULE_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: property access not supported for %s", leftSymbol.Type()))
+		return symbol.AnySymbol()
+	}
+
+	modSymbol, ok := leftSymbol.(*symbol.ModuleSymbol)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("type error: could not parse symbol as module %s", leftSymbol.Type()))
+		return symbol.AnySymbol()
+	}
+
+	if propertySymbol, ok := modSymbol.GetSymbol(n.Property.Value); ok {
+		return propertySymbol
+	}
+
+	a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on module", n.Property.Value))
+	return symbol.AnySymbol()
 }
 
-// declare registers a variable name in the current (innermost) scope.
-func (a *Analyzer) declare(name string, sym Symbol) {
-	last := len(a.scopes) - 1
-	a.scopes[last][name] = sym
-}
-
-// resolve checks if a variable name has been declared in the current or
-// any outer scope. It returns true if the variable is found, false otherwise.
-func (a *Analyzer) resolve(name string) (Symbol, bool) {
-	for i := len(a.scopes) - 1; i >= 0; i-- {
-		if sym, ok := a.scopes[i][name]; ok {
-			return sym, true
-		}
-	}
-
-	return anySymbol, false
-}
-
-// resolveTypeName converts a type name string into its corresponding Symbol representation,
-// checking built-in types first, and then looking up custom types in the registry.
-func (a *Analyzer) resolveTypeName(typeName string, token lexer.Token) Symbol {
-	if typeName == "" {
-		return anySymbol
-	}
-
-	if strings.HasPrefix(typeName, "[") && strings.HasSuffix(typeName, "]") {
-		innerTypeStr := typeName[1 : len(typeName)-1]
-		innerSymbol := a.resolveTypeName(innerTypeStr, token)
-
-		return Symbol{
-			Type:        environment.ARRAY_OBJ,
-			ElementType: &innerSymbol,
-		}
-	}
-
-	switch typeName {
-	case "Any":
-		return anySymbol
-	case "Number":
-		return Symbol{Type: environment.NUMBER_OBJ}
-	case "String":
-		return Symbol{Type: environment.STRING_OBJ}
-	case "Boolean":
-		return Symbol{Type: environment.BOOLEAN_OBJ}
-	case "Date":
-		return Symbol{Type: environment.DATE_OBJ}
-	}
-
-	if sym, ok := a.types[typeName]; ok {
-		return sym
-	}
-
-	a.reportError(token, fmt.Sprintf("unknown type '%s'", typeName))
-	return anySymbol
-}
-
-// guaranteesReturn checks if a given AST node is guaranteed to execute a return
-// statement on all of its code paths.
-func guaranteesReturn(node syntax.Node) bool {
-	switch n := node.(type) {
-	case *syntax.ReturnStatement:
-		return true
-
-	case *syntax.BlockStatement:
-		if len(n.Statements) == 0 {
-			return false
-		}
-		lastStatement := n.Statements[len(n.Statements)-1]
-		return guaranteesReturn(lastStatement)
-
-	case *syntax.ExpressionStatement:
-		return guaranteesReturn(n.Expression)
-
-	case *syntax.IfExpression:
-		if n.Alternative != nil {
-			return guaranteesReturn(n.Consequence) && guaranteesReturn(n.Alternative)
-		}
-		return false
-
-	default:
-		return false
-	}
-}
-
-// guaranteesRecursiveCall determines if evaluating the given AST node guarantees
-// that the function named targetName will be recursively called unconditionally
-// on all of its code execution paths.
-func guaranteesRecursiveCall(node syntax.Node, targetName string) bool {
-	if node == nil {
-		return false
-	}
-
-	switch n := node.(type) {
-	case *syntax.BlockStatement:
-		for _, stmt := range n.Statements {
-			if guaranteesRecursiveCall(stmt, targetName) {
-				return true
-			}
-		}
-		return false
-
-	case *syntax.CallExpression:
-		if ident, ok := n.Function.(*syntax.Identifier); ok && ident.Value == targetName {
-			return true
-		}
-
-		for _, arg := range n.Arguments {
-			if guaranteesRecursiveCall(arg, targetName) {
-				return true
-			}
-		}
-		return guaranteesRecursiveCall(n.Function, targetName)
-
-	case *syntax.IfExpression:
-		if guaranteesRecursiveCall(n.Condition, targetName) {
-			return true
-		}
-		if n.Alternative == nil {
-			return false
-		}
-		return guaranteesRecursiveCall(n.Consequence, targetName) &&
-			guaranteesRecursiveCall(n.Alternative, targetName)
-
-	case *syntax.ReturnStatement:
-		return guaranteesRecursiveCall(n.ReturnValue, targetName)
-
-	case *syntax.LetStatement:
-		return guaranteesRecursiveCall(n.Value, targetName)
-
-	case *syntax.ExpressionStatement:
-		return guaranteesRecursiveCall(n.Expression, targetName)
-
-	case *syntax.InfixExpression:
-		return guaranteesRecursiveCall(n.Left, targetName) || guaranteesRecursiveCall(n.Right, targetName)
-
-	case *syntax.FunctionLiteral:
-		return false
-
-	case *syntax.ArrayLiteral:
-		for _, el := range n.Elements {
-			if guaranteesRecursiveCall(el, targetName) {
-				return true
-			}
-		}
-		return false
-
-	case *syntax.IndexExpression:
-		return guaranteesRecursiveCall(n.Left, targetName) || guaranteesRecursiveCall(n.Index, targetName)
-
-	default:
-		return false
-	}
+// reportError formats and appends a semantic error with the token's line and column.
+func (a *Analyzer) reportError(token lexer.Token, msg string) {
+	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
 }

@@ -203,7 +203,7 @@ func (i *InfixExpression) String() string {
 
 // PrefixExpression represents a prefix operator and its operand expression.
 type PrefixExpression struct {
-	Token    lexer.Token // The prefix token, e.g., ! or -
+	Token    lexer.Token // The prefix token, e.g.: ! or -
 	Operator string
 	Right    Expression
 }
@@ -400,4 +400,51 @@ func (ts *TypeAliasStatement) statementNode()       {}
 func (ts *TypeAliasStatement) TokenLiteral() string { return ts.Token.Literal }
 func (ts *TypeAliasStatement) String() string {
 	return "type " + ts.Name.Value + " " + ts.Signature.String()
+}
+
+// ImportStatement represents an import declaration (e.g. "import second").
+// Token holds the "import" keyword token, and Name is the module identifier.
+type ImportStatement struct {
+	Token lexer.Token
+	Name  *Identifier
+	Path  string
+}
+
+func (is *ImportStatement) statementNode()       {}
+func (is *ImportStatement) TokenLiteral() string { return is.Token.Literal }
+func (is *ImportStatement) String() string {
+	if is.Path != "" && is.Path != is.Name.Value {
+		// If path is a string literal and basename is not the bound name, we might have an alias or just standard string behavior.
+		// A reliable way to format: if alias is used, it should print `import "path" as alias`
+		basename := is.Path
+		for i := len(basename) - 1; i >= 0; i-- {
+			if basename[i] == '/' {
+				basename = basename[i+1:]
+				break
+			}
+		}
+		if is.Name.Value != basename {
+			return is.TokenLiteral() + " \"" + is.Path + "\" as " + is.Name.Value
+		}
+		return is.TokenLiteral() + " \"" + is.Path + "\""
+	}
+	if is.Path != is.Name.Value {
+		// Ident alias: import mod as alias
+		return is.TokenLiteral() + " " + is.Path + " as " + is.Name.Value
+	}
+	return is.TokenLiteral() + " " + is.Name.String()
+}
+
+// PropertyExpression represents a property access via dot notation (e.g. "second.myFunc").
+// Token holds the "." token, Object is the expression being accessed, and Property is the identifier.
+type PropertyExpression struct {
+	Token    lexer.Token
+	Object   Expression
+	Property *Identifier
+}
+
+func (pe *PropertyExpression) expressionNode()      {}
+func (pe *PropertyExpression) TokenLiteral() string { return pe.Token.Literal }
+func (pe *PropertyExpression) String() string {
+	return "(" + pe.Object.String() + "." + pe.Property.String() + ")"
 }

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"caja-cli/internal/environment"
 	"caja-cli/internal/lexer"
 	"caja-cli/internal/syntax"
 	"strings"
@@ -20,12 +21,13 @@ func runTestScenarios(t *testing.T, tests []testScenario) {
 			parser := syntax.New(tknzr)
 			program := parser.Parse()
 
-			if len(parser.Errors()) != 0 {
+			if parser.HasErrors() {
 				t.Fatalf("parser errors occurred during setup: %v", parser.Errors())
 			}
 
-			analyzer := New()
-			analyzer.Analyze(program)
+			env := environment.NewEnvironment("", "", false)
+			analyzer := New(env)
+			analyzer.analyze(program)
 
 			errors := analyzer.Errors()
 
@@ -451,232 +453,232 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:  "len() works on array of Numbers",
-			input: "let arr = [1, 2, 3]\nlen(arr)",
+			input: "import array\nlet arr = [1, 2, 3]\narray.len(arr)",
 		},
 		{
 			name:  "len() works on array of Strings",
-			input: "let arr = [\"a\", \"b\"]\nlen(arr)",
+			input: "import array\nlet arr = [\"a\", \"b\"]\narray.len(arr)",
 		},
 		{
 			name:  "append() works with matching types",
-			input: "let arr = [1, 2]\nlet newArr = append(arr, 3)",
+			input: "import array\nlet arr = [1, 2]\nlet newArr = array.append(arr, 3)",
 		},
 		{
 			name:           "append() rejects mismatched types",
-			input:          "let arr = [1, 2]\nlet newArr = append(arr, \"string\")",
+			input:          "import array\nlet arr = [1, 2]\nlet newArr = array.append(arr, \"string\")",
 			expectedErrors: []string{"type error: cannot append STRING to array of NUMBER"},
 		},
 		{
 			name:  "head() works and infers type",
-			input: "let arr = [1, 2]\nlet h = head(arr)\nlet n = h",
+			input: "import array\nlet arr = [1, 2]\nlet h = array.head(arr)\nlet n = h",
 		},
 		{
 			name:  "tail() returns array",
-			input: "let arr = [1, 2]\nlet t = tail(arr)\nlet res = append(t, 3)",
+			input: "import array\nlet arr = [1, 2]\nlet t = array.tail(arr)\nlet res = array.append(t, 3)",
 		},
 		{
 			name:  "last() works and infers type",
-			input: "let arr = [1, 2]\nlet l = last(arr)\nlet n = l",
+			input: "import array\nlet arr = [1, 2]\nlet l = array.last(arr)\nlet n = l",
 		},
 		{
 			name:  "copy() returns array",
-			input: "let arr = [1, 2]\nlet c = copy(arr)\nlet res = append(c, 3)",
+			input: "import array\nlet arr = [1, 2]\nlet c = array.copy(arr)\nlet res = array.append(c, 3)",
 		},
 		{
 			name:  "slice() works",
-			input: "let arr = [1, 2, 3]\nlet s = slice(arr, 0, 2)\nlet res = append(s, 4)",
+			input: "import array\nlet arr = [1, 2, 3]\nlet s = array.slice(arr, 0, 2)\nlet res = array.append(s, 4)",
 		},
 		{
 			name:           "slice() rejects non-number index",
-			input:          "let arr = [1, 2]\nlet s = slice(arr, \"0\", 2)",
+			input:          "import array\nlet arr = [1, 2]\nlet s = array.slice(arr, \"0\", 2)",
 			expectedErrors: []string{"type error: second argument to 'slice' must be NUMBER, got STRING"},
 		},
 		{
 			name:  "join() works with matching types",
-			input: "let arrOne = [1, 2]\nlet arrTwo = [3, 4]\nlet res = join(arrOne, arrTwo)",
+			input: "import array\nlet arrOne = [1, 2]\nlet arrTwo = [3, 4]\nlet res = array.join(arrOne, arrTwo)",
 		},
 		{
 			name:           "join() rejects mismatched types",
-			input:          "let arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = join(arrOne, arrTwo)",
+			input:          "import array\nlet arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = array.join(arrOne, arrTwo)",
 			expectedErrors: []string{"type error: cannot join array of NUMBER with array of STRING"},
 		},
 		{
 			name:  "charAt() works with correct types",
-			input: "return charAt(\"hello\", 1)",
+			input: "import string\nreturn string.charAt(\"hello\", 1)",
 		},
 		{
 			name:           "charAt() rejects mismatched types",
-			input:          "return charAt(10, \"hello\")",
+			input:          "import string\nreturn string.charAt(10, \"hello\")",
 			expectedErrors: []string{"type error: first argument to 'charAt' must be STRING, got NUMBER", "type error: second argument to 'charAt' must be NUMBER, got STRING"},
 		},
 		{
 			name:  "substring() works with correct types",
-			input: "return substring(\"hello\", 1, 4)",
+			input: "import string\nreturn string.substring(\"hello\", 1, 4)",
 		},
 		{
 			name:           "substring() rejects mismatched types",
-			input:          "return substring(10, \"start\", \"end\")",
+			input:          "import string\nreturn string.substring(10, \"start\", \"end\")",
 			expectedErrors: []string{"type error: first argument to 'substring' must be STRING, got NUMBER", "type error: second argument to 'substring' must be NUMBER, got STRING", "type error: third argument to 'substring' must be NUMBER, got STRING"},
 		},
 		{
 			name:  "concat() works with correct types",
-			input: "return concat(\"hello\", \" world\")",
+			input: "import string\nreturn string.concat(\"hello\", \" world\")",
 		},
 		{
 			name:           "concat() rejects mismatched types",
-			input:          "return concat(10, 20)",
+			input:          "import string\nreturn string.concat(10, 20)",
 			expectedErrors: []string{"type error: first argument to 'concat' must be STRING, got NUMBER", "type error: second argument to 'concat' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "split() works with correct types",
-			input: "return split(\"hello\", \"e\")",
+			input: "import string\nreturn string.split(\"hello\", \"e\")",
 		},
 		{
 			name:           "split() rejects mismatched types",
-			input:          "return split(10, 20)",
+			input:          "import string\nreturn string.split(10, 20)",
 			expectedErrors: []string{"type error: first argument to 'split' must be STRING, got NUMBER", "type error: second argument to 'split' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "contains() works with correct types",
-			input: "return contains(\"hello\", \"e\")",
+			input: "import string\nreturn string.contains(\"hello\", \"e\")",
 		},
 		{
 			name:           "contains() rejects mismatched types",
-			input:          "return contains(10, 20)",
+			input:          "import string\nreturn string.contains(10, 20)",
 			expectedErrors: []string{"type error: first argument to 'contains' must be STRING, got NUMBER", "type error: second argument to 'contains' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "startsWith() works with correct types",
-			input: "return startsWith(\"hello\", \"h\")",
+			input: "import string\nreturn string.startsWith(\"hello\", \"h\")",
 		},
 		{
 			name:           "startsWith() rejects mismatched types",
-			input:          "return startsWith(10, 20)",
+			input:          "import string\nreturn string.startsWith(10, 20)",
 			expectedErrors: []string{"type error: first argument to 'startsWith' must be STRING, got NUMBER", "type error: second argument to 'startsWith' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "endsWith() works with correct types",
-			input: "return endsWith(\"hello\", \"o\")",
+			input: "import string\nreturn string.endsWith(\"hello\", \"o\")",
 		},
 		{
 			name:           "endsWith() rejects mismatched types",
-			input:          "return endsWith(10, 20)",
+			input:          "import string\nreturn string.endsWith(10, 20)",
 			expectedErrors: []string{"type error: first argument to 'endsWith' must be STRING, got NUMBER", "type error: second argument to 'endsWith' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "replace() works with correct types",
-			input: "return replace(\"hello\", \"e\", \"a\")",
+			input: "import string\nreturn string.replace(\"hello\", \"e\", \"a\")",
 		},
 		{
 			name:           "replace() rejects mismatched types",
-			input:          "return replace(10, 20, 30)",
+			input:          "import string\nreturn string.replace(10, 20, 30)",
 			expectedErrors: []string{"type error: first argument to 'replace' must be STRING, got NUMBER", "type error: second argument to 'replace' must be STRING, got NUMBER", "type error: third argument to 'replace' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "toUpper() works with correct types",
-			input: "return toUpper(\"hello\")",
+			input: "import string\nreturn string.toUpper(\"hello\")",
 		},
 		{
 			name:           "toUpper() rejects mismatched types",
-			input:          "return toUpper(10)",
+			input:          "import string\nreturn string.toUpper(10)",
 			expectedErrors: []string{"type error: first argument to 'toUpper' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "toLower() works with correct types",
-			input: "return toLower(\"HELLO\")",
+			input: "import string\nreturn string.toLower(\"HELLO\")",
 		},
 		{
 			name:           "toLower() rejects mismatched types",
-			input:          "return toLower(10)",
+			input:          "import string\nreturn string.toLower(10)",
 			expectedErrors: []string{"type error: first argument to 'toLower' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "trim() works with correct types",
-			input: "return trim(\"  hello  \")",
+			input: "import string\nreturn string.trim(\"  hello  \")",
 		},
 		{
 			name:           "trim() rejects mismatched types",
-			input:          "return trim(10)",
+			input:          "import string\nreturn string.trim(10)",
 			expectedErrors: []string{"type error: first argument to 'trim' must be STRING, got NUMBER"},
 		},
 		{
-			name:  "strlen() works with correct types",
-			input: "return strlen(\"hello\")",
+			name:  "string len() works with correct types",
+			input: "import string\nreturn string.len(\"hello\")",
 		},
 		{
 			name:           "strlen() rejects mismatched types",
-			input:          "return strlen(10)",
-			expectedErrors: []string{"type error: first argument to 'strlen' must be STRING, got NUMBER"},
+			input:          "import string\nreturn string.len(10)",
+			expectedErrors: []string{"type error: first argument to 'len' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "year() works with correct types",
-			input: "let d = '2023-10-25'\nreturn year(d)",
+			input: "import date\nlet d = '2023-10-25'\nreturn date.year(d)",
 		},
 		{
 			name:           "year() rejects mismatched types",
-			input:          "return year(\"2023\")",
+			input:          "import date\nreturn date.year(\"2023\")",
 			expectedErrors: []string{"type error: first argument to 'year' must be DATE, got STRING"},
 		},
 		{
 			name:  "month() works with correct types",
-			input: "return month('2023-10-25')",
+			input: "import date\nreturn date.month('2023-10-25')",
 		},
 		{
 			name:  "day() works with correct types",
-			input: "return day('2023-10-25')",
+			input: "import date\nreturn date.day('2023-10-25')",
 		},
 		{
 			name:  "weekday() works with correct types",
-			input: "return weekday('2023-10-25')",
+			input: "import date\nreturn date.weekday('2023-10-25')",
 		},
 		{
 			name:           "weekday() rejects missing arguments",
-			input:          "return weekday()",
+			input:          "import date\nreturn date.weekday()",
 			expectedErrors: []string{"arity error: expected 1 arguments for 'weekday', got 0"},
 		},
 		{
 			name:  "today() works with correct types",
-			input: "return today()",
+			input: "import date\nreturn date.today()",
 		},
 		{
 			name:           "today() rejects unexpected arguments",
-			input:          "return today(1)",
+			input:          "import date\nreturn date.today(1)",
 			expectedErrors: []string{"arity error: expected 0 arguments for 'today', got 1"},
 		},
 		{
 			name:  "parseDate() works with correct types",
-			input: "return parseDate(\"2023-10-25\")",
+			input: "import date\nreturn date.parseDate(\"2023-10-25\")",
 		},
 		{
 			name:           "parseDate() rejects mismatched types",
-			input:          "return parseDate(2023)",
+			input:          "import date\nreturn date.parseDate(2023)",
 			expectedErrors: []string{"type error: first argument to 'parseDate' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "addDays() works with correct types",
-			input: "return addDays('2023-10-25', 5)",
+			input: "import date\nreturn date.addDays('2023-10-25', 5)",
 		},
 		{
 			name:           "addDays() rejects mismatched types",
-			input:          "return addDays('2023-10-25', \"5\")",
+			input:          "import date\nreturn date.addDays('2023-10-25', \"5\")",
 			expectedErrors: []string{"type error: second argument to 'addDays' must be NUMBER, got STRING"},
 		},
 		{
 			name:  "diffDays() works with correct types",
-			input: "return diffDays('2023-10-30', '2023-10-25')",
+			input: "import date\nreturn date.diffDays('2023-10-30', '2023-10-25')",
 		},
 		{
 			name:           "diffDays() rejects mismatched types",
-			input:          "return diffDays('2023-10-30', 5)",
+			input:          "import date\nreturn date.diffDays('2023-10-30', 5)",
 			expectedErrors: []string{"type error: second argument to 'diffDays' must be DATE, got NUMBER"},
 		},
 		{
 			name:  "newDate() works with correct types",
-			input: "return newDate(2023, 1, 1)",
+			input: "import date\nreturn date.newDate(2023, 1, 1)",
 		},
 		{
 			name:           "newDate() rejects mismatched types",
-			input:          "return newDate(\"2023\", 1, 1)",
+			input:          "import date\nreturn date.newDate(\"2023\", 1, 1)",
 			expectedErrors: []string{"type error: first argument to 'newDate' must be NUMBER, got STRING"},
 		},
 	}

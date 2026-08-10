@@ -1,0 +1,39 @@
+package symbol
+
+import "caja-cli/internal/environment"
+
+// BasicSymbol represents a primitive type in the semantic analysis (e.g., NUMBER, STRING, BOOLEAN).
+type BasicSymbol struct {
+	symbolType environment.ObjectType
+}
+
+// NewBasicSymbol creates and returns a new BasicSymbol of the specified type.
+func NewBasicSymbol(symbolType environment.ObjectType) *BasicSymbol {
+	return &BasicSymbol{
+		symbolType: symbolType,
+	}
+}
+
+// Equals compares this BasicSymbol with another Symbol to determine if they represent the same type.
+// It returns true if their types match exactly, or if either symbol is of type ANY_OBJ.
+func (bs *BasicSymbol) Equals(other Symbol) bool {
+	otherSymbol, ok := other.(*BasicSymbol)
+	if !ok {
+		return false
+	}
+
+	if bs.symbolType == environment.ANY_OBJ || otherSymbol.symbolType == environment.ANY_OBJ {
+		return true
+	}
+
+	if bs.symbolType != otherSymbol.symbolType {
+		return false
+	}
+
+	return true
+}
+
+// Type returns the underlying environment.ObjectType of this symbol.
+func (bs *BasicSymbol) Type() environment.ObjectType {
+	return bs.symbolType
+}

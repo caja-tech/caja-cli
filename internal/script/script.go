@@ -9,42 +9,34 @@ import (
 	"fmt"
 )
 
-// Parse parses the given script input string into an abstract syntax tree and performs semantic analysis.
-// It returns the parsed program or an error if any syntax or semantic errors are found.
-func Parse(input string) (*syntax.Program, error) {
+// ParseWithDir parses a script and performs semantic analysis,
+// returning the AST and the global environment with cached module ASTs.
+func ParseWithDir(input string, baseDir string, filePath string) (*syntax.Program, *environment.Environment, error) {
 	tknzr := lexer.New(input)
 	parser := syntax.New(tknzr)
-	program := parser.Parse()
-
-	if len(parser.Errors()) > 0 {
-		fmt.Println("Parser errors found:")
-		for _, msg := range parser.Errors() {
-			fmt.Printf("\t- %s\n", msg)
-		}
-		return nil, fmt.Errorf("failed to parse the script")
+	prog := parser.Parse()
+	parser.PrintErrors()
+	if parser.HasErrors() {
+		return nil, nil, fmt.Errorf("errors found while parsing input")
 	}
 
-	analyzer := semantic.New()
-	analyzer.Analyze(program)
-	if len(analyzer.Errors()) > 0 {
-		fmt.Println("Semantic errors found:")
-		for _, msg := range analyzer.Errors() {
-			fmt.Printf("\t- %s\n", msg)
-		}
-		return nil, fmt.Errorf("failed to parse the script")
+	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
+	analyzer := semantic.New(globalEnv)
+	analyzer.Run(prog)
+	analyzer.PrintErrors()
+	if analyzer.HasErrors() {
+		return nil, nil, fmt.Errorf("errors found while performing semantical analysis on input")
 	}
 
-	return program, nil
+	return prog, globalEnv, nil
 }
 
-// Run evaluates the given syntax program in a new environment and returns its computed result.
-// It returns the result as an environment.Object or an error if the evaluation fails.
-func Run(program *syntax.Program) (environment.Object, error) {
-	env := environment.NewEnvironment()
-	eval, err := evaluator.Eval(program, env)
+// Run evaluates a program using the global environment from semantic analysis.
+// Returns the result, the global environment, and any error.
+func Run(program *syntax.Program, globalEnv *environment.Environment) (environment.Object, error) {
+	result, err := evaluator.Eval(program, globalEnv)
 	if err != nil {
-		return nil, fmt.Errorf("evaluation error: %w", err)
+		return nil, err
 	}
-
-	return eval, nil
+	return result, nil
 }

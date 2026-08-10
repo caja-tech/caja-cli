@@ -1,0 +1,3 @@
+let add = fn(a: Number, b: Number): Number {
+	return a + b
+}

@@ -7,47 +7,6 @@ import (
 	"time"
 )
 
-const (
-	_ int = iota
-	LOWEST
-	ASSIGN
-	COMPARISON
-	SUM
-	PRODUCT
-	EXPONENT
-	PREFIX
-	CALL
-	INDEX
-)
-
-var precedences = map[lexer.TokenType]int{
-	lexer.ASSIGN:   ASSIGN,
-	lexer.LT:       COMPARISON,
-	lexer.GT:       COMPARISON,
-	lexer.LTEQ:     COMPARISON,
-	lexer.GTEQ:     COMPARISON,
-	lexer.EQ:       COMPARISON,
-	lexer.NEQ:      COMPARISON,
-	lexer.PLUS:     SUM,
-	lexer.MINUS:    SUM,
-	lexer.ASTERISK: PRODUCT,
-	lexer.SLASH:    PRODUCT,
-	lexer.MODULO:   PRODUCT,
-	lexer.POWER:    EXPONENT,
-	lexer.LPAREN:   CALL,
-	lexer.LBRACKET: INDEX,
-}
-
-// verifyPrecedenceLevel returns the precedence level associated with the given
-// token type. If the token type has no registered precedence, LOWEST is returned.
-func verifyPrecedenceLevel(t lexer.TokenType) int {
-	if p, ok := precedences[t]; ok {
-		return p
-	}
-
-	return LOWEST
-}
-
 // prefixParseFunc is a parsing function invoked when a token appears in prefix
 // position (i.e. at the start of an expression). It returns the parsed
 // Expression node.
@@ -74,7 +33,7 @@ type Parser struct {
 	errors []string
 }
 
-// New creates a Parser for the given Tokenizer, registers the built-in prefix
+// newParser creates a Parser for the given Tokenizer, registers the built-in prefix
 // and infix parse functions for identifiers, numbers, grouped expressions, and
 // arithmetic operators, and primes the two-token lookahead by reading twice.
 func New(t *lexer.Tokenizer) *Parser {
@@ -112,6 +71,7 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.infixParseFuncs[lexer.NEQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.LPAREN] = p.parseFunctionCallExpression
 	p.infixParseFuncs[lexer.LBRACKET] = p.parseIndexExpression
+	p.infixParseFuncs[lexer.DOT] = p.parsePropertyExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -119,7 +79,7 @@ func New(t *lexer.Tokenizer) *Parser {
 	return p
 }
 
-// Parse consumes all tokens from the Tokenizer and returns a Program AST.
+// parse consumes all tokens from the Tokenizer and returns a Program AST.
 // Each iteration parses one statement; if parsing fails, synchronize is called
 // to skip ahead to the next likely statement boundary before continuing.
 func (p *Parser) Parse() *Program {
@@ -139,6 +99,16 @@ func (p *Parser) Parse() *Program {
 	return program
 }
 
+// PrintErrors prints all encountered parser errors to standard output.
+func (p *Parser) PrintErrors() {
+	if p.HasErrors() {
+		fmt.Println("Parser errors found:")
+		for _, msg := range p.Errors() {
+			fmt.Printf("\t- %s\n", msg)
+		}
+	}
+}
+
 // Errors returns the combined list of errors from both the tokenizer and the
 // parser, in the order they were encountered.
 func (p *Parser) Errors() []string {
@@ -146,6 +116,11 @@ func (p *Parser) Errors() []string {
 	allErrors = append(allErrors, p.errors...)
 
 	return allErrors
+}
+
+// HasErrors returns true if the parser or tokenizer encountered any errors.
+func (p *Parser) HasErrors() bool {
+	return len(p.Errors()) > 0
 }
 
 // parseStatement determines the kind of statement to parse by peeking at the
@@ -158,6 +133,10 @@ func (p *Parser) parseStatement() Statement {
 
 	if p.currToken.Type == lexer.LET {
 		return p.parseLetStatement()
+	}
+
+	if p.currToken.Type == lexer.IMPORT {
+		return p.parseImportStatement()
 	}
 
 	if p.currToken.Type == lexer.TYPE {
@@ -182,11 +161,72 @@ func (p *Parser) parseReturnStatement() *ReturnStatement {
 	return statement
 }
 
+// parseImportStatement parses an import statement of the form "import module" or "import \"path/to/module\"".
+func (p *Parser) parseImportStatement() *ImportStatement {
+	statement := &ImportStatement{Token: p.currToken}
+
+	if p.peekToken.Type == lexer.STRING {
+		p.nextToken()
+		statement.Path = p.currToken.Literal
+		// Extract basename from path for the identifier
+		// Using standard path.Base to handle forward slashes
+		basename := p.currToken.Literal
+		for i := len(basename) - 1; i >= 0; i-- {
+			if basename[i] == '/' {
+				basename = basename[i+1:]
+				break
+			}
+		}
+		statement.Name = &Identifier{Token: p.currToken, Value: basename}
+	} else if p.peekToken.Type == lexer.IDENT {
+		p.nextToken()
+		if isKeyword(p.currToken.Type) {
+			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a module name", p.currToken.Literal))
+			return nil
+		}
+		statement.Path = p.currToken.Literal
+		statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
+	} else {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier or string for module name, got %s", p.peekToken.Type))
+		return nil
+	}
+
+	if p.peekToken.Type == lexer.AS {
+		p.nextToken() // move to 'as'
+		if !p.expectPeek(lexer.IDENT) {
+			return nil
+		}
+
+		if isKeyword(p.currToken.Type) {
+			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a module alias", p.currToken.Literal))
+			return nil
+		}
+
+		statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
+	}
+
+	return statement
+}
+
+// isKeyword checks if the given token type is a reserved keyword in the language.
+func isKeyword(tokenType lexer.TokenType) bool {
+	switch tokenType {
+	case lexer.RETURN, lexer.IF, lexer.ELSE, lexer.LET, lexer.FN, lexer.TRUE, lexer.FALSE, lexer.TYPE, lexer.IMPORT, lexer.AS:
+		return true
+	}
+	return false
+}
+
 // parseLetStatement parses a variable declaration of the form "let ident = expr".
 // It captures the "let" keyword token, ensures the next token is an identifier,
 // expects an assignment operator, and then parses the initialization expression.
 func (p *Parser) parseLetStatement() *LetStatement {
 	statement := &LetStatement{Token: p.currToken}
+
+	if isKeyword(p.peekToken.Type) {
+		p.reportError(p.peekToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.peekToken.Literal))
+		return nil
+	}
 
 	if !p.expectPeek(lexer.IDENT) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
@@ -261,6 +301,11 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 // It captures the left-hand identifier, consumes the '=' token, and parses
 // the right-hand expression with the lowest precedence.
 func (p *Parser) parseAssignStatement() *AssignStatement {
+	if isKeyword(p.currToken.Type) {
+		p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.currToken.Literal))
+		return nil
+	}
+
 	statement := &AssignStatement{
 		Name: &Identifier{Token: p.currToken, Value: p.currToken.Literal},
 	}
@@ -282,23 +327,12 @@ func (p *Parser) parseExpressionStatement() *ExpressionStatement {
 	return statement
 }
 
-// reportError formats and appends a syntax error with the given token's line and column.
-func (p *Parser) reportError(token lexer.Token, msg string) {
-	p.errors = append(p.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
-}
-
-// nextToken advances the parser's two-token window by shifting peekToken into
-// currToken and reading the next token from the Tokenizer into peekToken.
-func (p *Parser) nextToken() {
-	p.currToken = p.peekToken
-	p.peekToken = p.tknzr.NextToken()
-}
-
 // parseIdentifier returns an Identifier expression node for the current token.
 func (p *Parser) parseIdentifier() Expression {
 	return &Identifier{Token: p.currToken, Value: p.currToken.Literal}
 }
 
+// parsePrefixExpression parses a prefix operator expression, such as -5 or !true.
 func (p *Parser) parsePrefixExpression() Expression {
 	expression := &PrefixExpression{
 		Token:    p.currToken,
@@ -376,6 +410,20 @@ func (p *Parser) parseIndexExpression(left Expression) Expression {
 	if !p.expectPeek(lexer.RBRACKET) {
 		return nil
 	}
+	return exp
+}
+
+// parsePropertyExpression parses an object property access, capturing the left-hand
+// expression (the object) and parsing the identifier following the dot.
+func (p *Parser) parsePropertyExpression(left Expression) Expression {
+	exp := &PropertyExpression{Token: p.currToken, Object: left}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected property name, got %s", p.currToken.Type))
+		return nil
+	}
+
+	exp.Property = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
 	return exp
 }
 
@@ -535,6 +583,10 @@ func (p *Parser) parseFunctionParameters() []*Parameter {
 
 	p.nextToken()
 	parseSingleParam := func() *Parameter {
+		if isKeyword(p.currToken.Type) {
+			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a parameter name", p.currToken.Literal))
+			return nil
+		}
 		param := &Parameter{Name: p.currToken.Literal}
 
 		if !p.expectPeek(lexer.COLON) {
@@ -604,6 +656,37 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []Expression {
 	return list
 }
 
+// parseTypeSignature parses a type identifier or array type like [Number] or [[Number]].
+func (p *Parser) parseTypeSignature() string {
+	if p.peekToken.Type == lexer.LBRACKET {
+		p.nextToken() // move to [
+		innerType := p.parseTypeSignature()
+		if !p.expectPeek(lexer.RBRACKET) {
+			return ""
+		}
+		return "[" + innerType + "]"
+	}
+
+	if p.expectPeek(lexer.IDENT) {
+		return p.currToken.Literal
+	}
+
+	p.reportError(p.peekToken, fmt.Sprintf("expected type identifier, got %s", p.peekToken.Type))
+	return ""
+}
+
+// reportError formats and appends a syntax error with the given token's line and column.
+func (p *Parser) reportError(token lexer.Token, msg string) {
+	p.errors = append(p.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+}
+
+// nextToken advances the parser's two-token window by shifting peekToken into
+// currToken and reading the next token from the Tokenizer into peekToken.
+func (p *Parser) nextToken() {
+	p.currToken = p.peekToken
+	p.peekToken = p.tknzr.NextToken()
+}
+
 // expectPeek checks whether the peek token matches the expected type. If it
 // does, the parser advances and returns true; otherwise it records a peek error
 // and returns false without advancing.
@@ -627,23 +710,4 @@ func (p *Parser) synchronize() {
 		}
 		p.nextToken()
 	}
-}
-
-// parseTypeSignature parses a type identifier or array type like [Number] or [[Number]].
-func (p *Parser) parseTypeSignature() string {
-	if p.peekToken.Type == lexer.LBRACKET {
-		p.nextToken() // move to [
-		innerType := p.parseTypeSignature()
-		if !p.expectPeek(lexer.RBRACKET) {
-			return ""
-		}
-		return "[" + innerType + "]"
-	}
-
-	if p.expectPeek(lexer.IDENT) {
-		return p.currToken.Literal
-	}
-
-	p.reportError(p.peekToken, fmt.Sprintf("expected type identifier, got %s", p.peekToken.Type))
-	return ""
 }
