@@ -268,6 +268,11 @@ func TestAssignmentOnly(t *testing.T) {
 			input:    "tax = 15.5",
 			expected: "tax = 15.5",
 		},
+		{
+			name:     "Index assignment",
+			input:    "a[0] = 5",
+			expected: "a[0] = 5",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -285,6 +290,42 @@ func TestParseErrors(t *testing.T) {
 
 	if len(errors) == 0 {
 		t.Fatal("expected parser errors, but got none")
+	}
+}
+
+// TestInvalidAssignmentTargetErrors ensures that assigning to non-identifiers
+// or non-index expressions generates the correct syntax error.
+func TestInvalidAssignmentTargetErrors(t *testing.T) {
+	tests := []string{
+		"10 = 5",
+		"(10 + 5) = 5",
+		"[1, 2] = [3, 4]",
+		"(1 + 1) = 2",
+		"\"hello\" = 5",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for invalid assignment target %q, but got none", input)
+			}
+
+			found := false
+			for _, err := range errors {
+				if text.ContainsSubstring(err, "invalid assignment target") {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected error mentioning 'invalid assignment target', got: %v", errors)
+			}
+		})
 	}
 }
 

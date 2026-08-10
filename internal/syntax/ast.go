@@ -273,6 +273,20 @@ func (a *AssignStatement) String() string {
 	return a.Name.String() + " = " + a.Value.String()
 }
 
+// IndexAssignmentStatement binds an expression result to an array index.
+type IndexAssignmentStatement struct {
+	Token lexer.Token // The '=' token
+	Left  Expression  // The array being indexed
+	Index Expression  // The index expression
+	Value Expression  // The value being assigned
+}
+
+func (i *IndexAssignmentStatement) statementNode() {}
+func (i *IndexAssignmentStatement) TokenLiteral() string { return i.Token.Literal }
+func (i *IndexAssignmentStatement) String() string {
+	return i.Left.String() + "[" + i.Index.String() + "] = " + i.Value.String()
+}
+
 // ExpressionStatement wraps a standalone expression that appears as a
 // top-level statement (e.g. "rate + 50"). Token is the first token of the
 // expression, and Expression holds the parsed expression tree.

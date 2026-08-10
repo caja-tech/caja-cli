@@ -131,6 +131,26 @@ if (1 > 0) {
 				"semantic error: variable 'a' is already declared",
 			},
 		},
+		{
+			name: "Array index assignment on non-array",
+			input: `
+let a = 10
+a[0] = 5
+`,
+			expectedErrors: []string{
+				"type error: index assignment not supported for NUMBER",
+			},
+		},
+		{
+			name: "Array index assignment with non-number index",
+			input: `
+let a = [1, 2, 3]
+a["hello"] = 5
+`,
+			expectedErrors: []string{
+				"type error: array index must be NUMBER, got STRING",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -395,6 +415,39 @@ let b = a[0][1]
 			input: `
 let sum = fn(arr: [Number]): Number { return arr[0] }
 let res = sum([1, 2, 3])
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Valid array index assignment",
+			input: `
+let a = [1, 2, 3]
+a[0] = 5
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Nested array index assignment",
+			input: `
+let a = [[1, 2], [3, 4]]
+a[0][1] = 5
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Dynamic variable array index assignment",
+			input: `
+let a = [1, 2, 3]
+let index = 1
+a[index] = 5
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Dynamic expression array index assignment",
+			input: `
+let a = [1, 2, 3]
+a[1 + 1] = 5
 `,
 			expectedErrors: []string{},
 		},

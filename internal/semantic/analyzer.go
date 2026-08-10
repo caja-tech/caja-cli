@@ -60,6 +60,8 @@ func (a *Analyzer) analyze(node syntax.Node) symbol.Symbol {
 		return a.analyzeLetStatement(n)
 	case *syntax.AssignStatement:
 		return a.analyzeAssignStatement(n)
+	case *syntax.IndexAssignmentStatement:
+		return a.analyzeIndexAssignmentStatement(n)
 	case *syntax.Identifier:
 		return a.analyzeIdentifier(n)
 	case *syntax.IfExpression:
@@ -132,6 +134,23 @@ func (a *Analyzer) analyzeProgram(n *syntax.Program) symbol.Symbol {
 		}
 		a.analyze(s)
 	}
+	return symbol.AnySymbol()
+}
+
+// analyzeIndexAssignmentStatement ensures that the indexed target is an array,
+// the index is a number, and then evaluates the assigned value.
+func (a *Analyzer) analyzeIndexAssignmentStatement(n *syntax.IndexAssignmentStatement) symbol.Symbol {
+	leftSym := a.analyze(n.Left)
+	if leftSym.Type() != environment.ARRAY_OBJ && leftSym.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: index assignment not supported for %s", leftSym.Type()))
+	}
+
+	idxSym := a.analyze(n.Index)
+	if idxSym.Type() != environment.NUMBER_OBJ && idxSym.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: array index must be NUMBER, got %s", idxSym.Type()))
+	}
+
+	a.analyze(n.Value)
 	return symbol.AnySymbol()
 }
 
