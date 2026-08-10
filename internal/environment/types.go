@@ -19,6 +19,7 @@ const (
 	ARRAY_OBJ        ObjectType = "ARRAY"
 	RETURN_VALUE_OBJ ObjectType = "RETURN_VALUE"
 	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
+	MODULE_OBJ       ObjectType = "MODULE"
 )
 
 type Object interface {
@@ -146,3 +147,13 @@ func FormatObject(obj Object) string {
 func PrintObject(obj Object) {
 	fmt.Println(FormatObject(obj))
 }
+
+// Module represents an imported script/module.
+// Env holds the evaluated environment containing the module's exported variables and functions.
+type Module struct {
+	Name string
+	Env  *Environment
+}
+
+func (m *Module) Type() ObjectType { return MODULE_OBJ }
+func (m *Module) Inspect() string  { return "module " + m.Name }

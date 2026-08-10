@@ -36,6 +36,7 @@ const (
 	RBRACE   TokenType = "RBRACE"
 	LBRACKET TokenType = "LBRACKET"
 	RBRACKET TokenType = "RBRACKET"
+	DOT      TokenType = "DOT"
 
 	// Keywords
 	RETURN TokenType = "RETURN"
@@ -48,6 +49,8 @@ const (
 	TRUE   TokenType = "TRUE"
 	FALSE  TokenType = "FALSE"
 	TYPE   TokenType = "TYPE"
+	IMPORT TokenType = "IMPORT"
+	AS     TokenType = "AS"
 )
 
 type Token struct {
@@ -69,6 +72,8 @@ var keywords = map[string]TokenType{
 	"true":   TRUE,
 	"false":  FALSE,
 	"type":   TYPE,
+	"import": IMPORT,
+	"as":     AS,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the

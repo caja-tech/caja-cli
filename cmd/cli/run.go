@@ -2,6 +2,7 @@ package main
 
 import (
 	"caja-cli/internal/environment"
+	"caja-cli/internal/file"
 	"caja-cli/internal/script"
 	"fmt"
 	"os"
@@ -24,8 +25,8 @@ func NewRunCmd() (*cobra.Command, error) {
 			}
 
 			ext := filepath.Ext(filePath)
-			if ext != ".caja" {
-				return fmt.Errorf("invalid file type: expected a '.caja' file, but got '%s'", ext)
+			if ext != file.EXTENSION {
+				return fmt.Errorf("invalid file type: expected a %s file, but got '%s'", file.EXTENSION, ext)
 			}
 
 			sourceCode, err := os.ReadFile(filePath)
@@ -33,12 +34,14 @@ func NewRunCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to read file '%s': %w", filePath, err)
 			}
 
-			program, err := script.Parse(string(sourceCode))
+			baseDir := filepath.Dir(filePath)
+
+			program, globalEnv, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
 			if err != nil {
 				return err
 			}
 
-			eval, err := script.Run(program)
+			eval, err := script.Run(program, globalEnv)
 			if err != nil {
 				return err
 			}

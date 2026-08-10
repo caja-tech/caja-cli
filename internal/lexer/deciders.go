@@ -35,6 +35,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideColonToken,
 	decideStringToken,
 	decideDateToken,
+	decideDotToken,
 }
 
 // decideAssignToken matches the '=' character and produces an ASSIGN token.
@@ -197,6 +198,7 @@ func decideRightBraceToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideLeftBracketToken matches the '[' character and produces an LBRACKET token.
 func decideLeftBracketToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '[' {
 		return deciderResult{true, Token{Type: LBRACKET, Literal: string(t.ch), Line: line, Column: column}}
@@ -205,6 +207,7 @@ func decideLeftBracketToken(t *Tokenizer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideRightBracketToken matches the ']' character and produces an RBRACKET token.
 func decideRightBracketToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == ']' {
 		return deciderResult{true, Token{Type: RBRACKET, Literal: string(t.ch), Line: line, Column: column}}
@@ -281,6 +284,15 @@ func decideStringToken(t *Tokenizer, line int, column int) deciderResult {
 func decideDateToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '\'' {
 		return deciderResult{true, Token{Type: DATE, Literal: t.readDate(), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideDotToken matches the '.' character and produces a DOT token.
+func decideDotToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '.' {
+		return deciderResult{true, Token{Type: DOT, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}

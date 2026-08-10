@@ -1,0 +1,4 @@
+import "utils/math"
+
+let result = math.add(10, 5)
+return result

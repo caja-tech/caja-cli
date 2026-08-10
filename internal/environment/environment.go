@@ -1,10 +1,13 @@
 package environment
 
 import (
+	"caja-cli/internal/syntax"
 	"fmt"
 	"strings"
 )
 
+// StackFrame represents a single frame in the runtime call stack,
+// storing the function name, arguments, and source location.
 type StackFrame struct {
 	FuncName string
 	Line     int
@@ -12,28 +15,70 @@ type StackFrame struct {
 	Args     []string
 }
 
+// EnvConfig holds the configuration for an environment,
+// such as its base directory and whether it represents a module.
+type EnvConfig struct {
+	BaseDir  string
+	FileName string
+	IsModule bool
+}
+
+// EnvRegistry maintains the runtime state of an environment,
+// including variables, the call stack, and cached modules.
+type EnvRegistry struct {
+	store       map[string]Object
+	CallStack   []StackFrame
+	ModuleCache map[string]*Module
+	Loading     map[string]bool
+	ModuleASTs  map[string]*syntax.Program // ASTs parsed during semantic analysis
+}
+
 // Environment provides a symbol table to store and retrieve variables
 // during evaluation. It supports variable shadowing and scope resolution
-// through a reference to an outer enclosing environment.
+// through a reference to an outer enclosing
 type Environment struct {
-	store     map[string]Object
-	outer     *Environment
-	CallStack []StackFrame
+	outer *Environment
+	EnvConfig
+	EnvRegistry
 }
 
 // NewEnvironment creates and returns a new top-level environment with
 // no outer scope.
-func NewEnvironment() *Environment {
-	return &Environment{store: make(map[string]Object), outer: nil, CallStack: []StackFrame{}}
+func NewEnvironment(baseDir string, fileName string, isModule bool) *Environment {
+	return &Environment{
+		outer: nil,
+		EnvConfig: EnvConfig{
+			BaseDir:  baseDir,
+			FileName: fileName,
+			IsModule: isModule,
+		},
+		EnvRegistry: EnvRegistry{
+			store:       make(map[string]Object),
+			CallStack:   []StackFrame{},
+			ModuleCache: make(map[string]*Module),
+			Loading:     make(map[string]bool),
+			ModuleASTs:  make(map[string]*syntax.Program),
+		},
+	}
 }
 
 // NewEnclosedEnvironment creates and returns a new environment that extends
-// the given outer environment. This is typically used for block scopes.
+// the given outer  This is typically used for block scopes.
 func NewEnclosedEnvironment(outer *Environment) *Environment {
-	env := NewEnvironment()
-	env.outer = outer
+	env := &Environment{
+		outer: outer,
+		EnvRegistry: EnvRegistry{
+			store: make(map[string]Object),
+		},
+	}
 	if outer != nil {
+		env.BaseDir = outer.BaseDir
+		env.FileName = outer.FileName
+		env.IsModule = outer.IsModule
 		env.CallStack = outer.CallStack
+		env.ModuleCache = outer.ModuleCache
+		env.Loading = outer.Loading
+		env.ModuleASTs = outer.ModuleASTs
 	}
 	return env
 }
@@ -90,4 +135,21 @@ func (env *Environment) GetStackTrace() string {
 			frame.Column)
 	}
 	return trace
+}
+
+// GetStandardModule retrieves and initializes a built-in standard module
+// (e.g., array, date, string, math) by its name. It returns nil if the module is unknown.
+func (env *Environment) GetStandardModule(moduleName string) *Module {
+	switch moduleName {
+	case "array":
+		return env.newArrayModule()
+	case "date":
+		return env.newDateModule()
+	case "string":
+		return env.newStringModule()
+	case "math":
+		return env.newMathModule()
+	default:
+		return nil
+	}
 }

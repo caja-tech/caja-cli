@@ -30,17 +30,17 @@ func testEval(input string) (interface{}, error) {
 	p := syntax.New(tknzr)
 	program := p.Parse()
 
-	if len(p.Errors()) > 0 {
+	if p.HasErrors() {
 		return nil, fmt.Errorf("parser errors: %v", p.Errors())
 	}
 
-	analyzer := semantic.New()
-	analyzer.Analyze(program)
-	if len(analyzer.Errors()) > 0 {
+	env := environment.NewEnvironment("", "", false)
+	analyzer := semantic.New(env)
+	analyzer.Run(program)
+	if analyzer.HasErrors() {
 		return nil, fmt.Errorf("semantic errors: %v", analyzer.Errors())
 	}
 
-	env := environment.NewEnvironment()
 	result, err := Eval(program, env)
 	if err != nil {
 		return nil, err
@@ -343,7 +343,7 @@ func TestErrorUnknownOperator(t *testing.T) {
 		Right:    &syntax.NumberLiteral{Value: 3},
 	}
 
-	env := environment.NewEnvironment()
+	env := environment.NewEnvironment("", "", false)
 	_, err := Eval(node, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
@@ -359,7 +359,7 @@ func TestErrorUnknownOperator(t *testing.T) {
 // recognized by the evaluator's type switch returns an "unknown node type"
 // error. A mockNode is used to simulate this scenario.
 func TestErrorUnknownNodeType(t *testing.T) {
-	env := environment.NewEnvironment()
+	env := environment.NewEnvironment("", "", false)
 	_, err := Eval(&mockNode{}, env)
 	if err == nil {
 		t.Fatal("expected an error but got none")
@@ -692,7 +692,7 @@ func TestIndependentEnvironments(t *testing.T) {
 		Value: &syntax.NumberLiteral{Value: 42},
 	}
 
-	env1 := environment.NewEnvironment()
+	env1 := environment.NewEnvironment("", "", false)
 	_, err := Eval(assignNode, env1)
 	if err != nil {
 		t.Fatalf("unexpected error setting variable: %v", err)
@@ -703,7 +703,7 @@ func TestIndependentEnvironments(t *testing.T) {
 		Expression: &syntax.Identifier{Value: "x"},
 	}
 
-	env2 := environment.NewEnvironment()
+	env2 := environment.NewEnvironment("", "", false)
 	_, err = Eval(identNode, env2)
 	if err == nil {
 		t.Fatal("expected error from second evaluator but got none")
@@ -756,58 +756,58 @@ func TestEvaluateTypes(t *testing.T) {
 
 func TestEvaluateBuiltins(t *testing.T) {
 	var tests = []testScenario{
-		{"len on number array", "return len([1, 2, 3])", 3.0},
-		{"len on string array", "return len([\"a\", \"b\"])", 2.0},
-		{"len on empty array", "return len([])", 0.0},
-		{"append to array", "let arr = [1, 2]\nlet new = append(arr, 3)\nreturn new[2]", 3.0},
-		{"append does not modify original", "let arr = [1, 2]\nappend(arr, 3)\nreturn len(arr)", 2.0},
-		{"head of array", "return head([5, 6, 7])", 5.0},
-		{"tail of array", "let t = tail([1, 2, 3])\nreturn t[0]", 2.0},
-		{"tail of empty array", "return len(tail([]))", 0.0},
-		{"last of array", "return last([5, 6, 7])", 7.0},
-		{"copy of array", "let arr = [1, 2]\nlet c = copy(arr)\nappend(c, 3)\nreturn len(arr)", 2.0},
-		{"slice of array", "let s = slice([1, 2, 3, 4], 1, 3)\nreturn s[1]", 3.0},
-		{"join of arrays", "let j = join([1, 2], [3, 4])\nreturn j[2]", 3.0},
-		{"charAt string", "return charAt(\"hello\", 1)", "e"},
-		{"substring of string", "return substring(\"hello\", 1, 4)", "ell"},
-		{"concat of strings", "return concat(\"hello\", \" world\")", "hello world"},
-		{"split string by comma", "return split(\"a,b,c\", \",\")[1]", "b"},
-		{"contains returns true", "return contains(\"hello\", \"ell\")", true},
-		{"contains returns false", "return contains(\"hello\", \"world\")", false},
-		{"startsWith true", "return startsWith(\"hello\", \"he\")", true},
-		{"endsWith true", "return endsWith(\"hello\", \"lo\")", true},
-		{"replace string", "return replace(\"hello world\", \"world\", \"caja\")", "hello caja"},
-		{"toUpper", "return toUpper(\"hello\")", "HELLO"},
-		{"toLower", "return toLower(\"HELLO\")", "hello"},
-		{"trim", "return trim(\"   hello \")", "hello"},
-		{"strlen", "return strlen(\"hello\")", 5.0},
-		{"year", "return year('2023-10-25')", 2023.0},
-		{"month", "return month('2023-10-25')", 10.0},
-		{"day", "return day('2023-10-25')", 25.0},
-		{"weekday", "return weekday('2023-10-25')", 3.0},
-		{"parseDate", "return parseDate(\"2023-10-25\")", "2023-10-25"},
-		{"addDays", "return addDays('2023-10-25', 5)", "2023-10-30"},
-		{"addDays negative", "return addDays('2023-10-25', 0 - 5)", "2023-10-20"},
-		{"diffDays", "return diffDays('2023-10-30', '2023-10-25')", 5.0},
-		{"newDate", "return newDate(2023, 10, 25)", "2023-10-25"},
-		{"today is recent", "return year(today()) >= 2024", true},
+		{"len on number array", "import array\nreturn array.len([1, 2, 3])", 3.0},
+		{"len on string array", "import array\nreturn array.len([\"a\", \"b\"])", 2.0},
+		{"len on empty array", "import array\nreturn array.len([])", 0.0},
+		{"append to array", "import array\nlet arr = [1, 2]\nlet new = array.append(arr, 3)\nreturn new[2]", 3.0},
+		{"append does not modify original", "import array\nlet arr = [1, 2]\narray.append(arr, 3)\nreturn array.len(arr)", 2.0},
+		{"head of array", "import array\nreturn array.head([5, 6, 7])", 5.0},
+		{"tail of array", "import array\nlet t = array.tail([1, 2, 3])\nreturn t[0]", 2.0},
+		{"tail of empty array", "import array\nreturn array.len(array.tail([]))", 0.0},
+		{"last of array", "import array\nreturn array.last([5, 6, 7])", 7.0},
+		{"copy of array", "import array\nlet arr = [1, 2]\nlet c = array.copy(arr)\narray.append(c, 3)\nreturn array.len(arr)", 2.0},
+		{"slice of array", "import array\nlet s = array.slice([1, 2, 3, 4], 1, 3)\nreturn s[1]", 3.0},
+		{"join of arrays", "import array\nlet j = array.join([1, 2], [3, 4])\nreturn j[2]", 3.0},
+		{"charAt string", "import string\nreturn string.charAt(\"hello\", 1)", "e"},
+		{"substring of string", "import string\nreturn string.substring(\"hello\", 1, 4)", "ell"},
+		{"concat of strings", "import string\nreturn string.concat(\"hello\", \" world\")", "hello world"},
+		{"split string by comma", "import string\nreturn string.split(\"a,b,c\", \",\")[1]", "b"},
+		{"contains returns true", "import string\nreturn string.contains(\"hello\", \"ell\")", true},
+		{"contains returns false", "import string\nreturn string.contains(\"hello\", \"world\")", false},
+		{"startsWith true", "import string\nreturn string.startsWith(\"hello\", \"he\")", true},
+		{"endsWith true", "import string\nreturn string.endsWith(\"hello\", \"lo\")", true},
+		{"replace string", "import string\nreturn string.replace(\"hello world\", \"world\", \"caja\")", "hello caja"},
+		{"toUpper", "import string\nreturn string.toUpper(\"hello\")", "HELLO"},
+		{"toLower", "import string\nreturn string.toLower(\"HELLO\")", "hello"},
+		{"trim", "import string\nreturn string.trim(\"   hello \")", "hello"},
+		{"strlen", "import string\nreturn string.len(\"hello\")", 5.0},
+		{"year", "import date\nreturn date.year('2023-10-25')", 2023.0},
+		{"month", "import date\nreturn date.month('2023-10-25')", 10.0},
+		{"day", "import date\nreturn date.day('2023-10-25')", 25.0},
+		{"weekday", "import date\nreturn date.weekday('2023-10-25')", 3.0},
+		{"parseDate", "import date\nreturn date.parseDate(\"2023-10-25\")", "2023-10-25"},
+		{"addDays", "import date\nreturn date.addDays('2023-10-25', 5)", "2023-10-30"},
+		{"addDays negative", "import date\nreturn date.addDays('2023-10-25', 0 - 5)", "2023-10-20"},
+		{"diffDays", "import date\nreturn date.diffDays('2023-10-30', '2023-10-25')", 5.0},
+		{"newDate", "import date\nreturn date.newDate(2023, 10, 25)", "2023-10-25"},
+		{"today is recent", "import date\nreturn date.year(date.today()) >= 2024", true},
 	}
 	runTestScenarios(t, tests)
 }
 
 func TestErrorBuiltins(t *testing.T) {
 	var tests = []testErrorScenario{
-		{"charAt index out of bounds (negative)", "return charAt(\"hello\", 0 - 1)", "runtime error: charAt index -1 out of bounds"},
-		{"charAt index out of bounds (too large)", "return charAt(\"hello\", 5)", "runtime error: charAt index 5 out of bounds"},
-		{"substring start out of bounds", "return substring(\"hello\", 0 - 1, 4)", "runtime error: substring start index -1 out of bounds"},
-		{"substring end out of bounds", "return substring(\"hello\", 0, 6)", "runtime error: substring end index 6 out of bounds"},
-		{"substring start > end", "return substring(\"hello\", 4, 1)", "runtime error: substring start index 4 is greater than end index 1"},
-		{"split delimiter empty", "return split(\"hello\", \"\")", "runtime error: split delimiter must be a single character string"},
-		{"split delimiter too long", "return split(\"hello\", \"ll\")", "runtime error: split delimiter must be a single character string"},
-		{"parseDate invalid format", "return parseDate(\"invalid\")", "runtime error: invalid date format for 'parseDate'"},
-		{"newDate invalid month", "return newDate(2023, 13, 1)", "runtime error: invalid date boundaries for 'newDate'"},
-		{"newDate invalid leap year", "return newDate(2023, 2, 29)", "runtime error: invalid date boundaries for 'newDate'"},
-		{"newDate negative year", "return newDate(0 - 1, 1, 1)", "runtime error: invalid date boundaries for 'newDate'"},
+		{"charAt index out of bounds (negative)", "import string\nreturn string.charAt(\"hello\", 0 - 1)", "runtime error: charAt index -1 out of bounds"},
+		{"charAt index out of bounds (too large)", "import string\nreturn string.charAt(\"hello\", 5)", "runtime error: charAt index 5 out of bounds"},
+		{"substring start out of bounds", "import string\nreturn string.substring(\"hello\", 0 - 1, 4)", "runtime error: substring start index -1 out of bounds"},
+		{"substring end out of bounds", "import string\nreturn string.substring(\"hello\", 0, 6)", "runtime error: substring end index 6 out of bounds"},
+		{"substring start > end", "import string\nreturn string.substring(\"hello\", 4, 1)", "runtime error: substring start index 4 is greater than end index 1"},
+		{"split delimiter empty", "import string\nreturn string.split(\"hello\", \"\")", "runtime error: split delimiter must be a single character string"},
+		{"split delimiter too long", "import string\nreturn string.split(\"hello\", \"ll\")", "runtime error: split delimiter must be a single character string"},
+		{"parseDate invalid format", "import date\nreturn date.parseDate(\"invalid\")", "runtime error: invalid date format for 'parseDate'"},
+		{"newDate invalid month", "import date\nreturn date.newDate(2023, 13, 1)", "runtime error: invalid date boundaries for 'newDate'"},
+		{"newDate invalid leap year", "import date\nreturn date.newDate(2023, 2, 29)", "runtime error: invalid date boundaries for 'newDate'"},
+		{"newDate negative year", "import date\nreturn date.newDate(0 - 1, 1, 1)", "runtime error: invalid date boundaries for 'newDate'"},
 	}
 	runTestErrorScenarios(t, tests)
 }

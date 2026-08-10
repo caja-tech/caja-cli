@@ -10,8 +10,6 @@ import (
 )
 
 var (
-	TRUE            = &environment.Boolean{Value: true}
-	FALSE           = &environment.Boolean{Value: false}
 	stackTraceLimit = 10000
 )
 
@@ -58,6 +56,10 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalFunctionLiteral(node, env)
 	case *syntax.CallExpression:
 		return evalCallExpression(node, env)
+	case *syntax.ImportStatement:
+		return evalImportStatement(node, env)
+	case *syntax.PropertyExpression:
+		return evalPropertyExpression(node, env)
 	}
 
 	return nil, fmt.Errorf("unknown node type: %T", n)
@@ -98,7 +100,7 @@ func evalDateLiteral(node *syntax.DateLiteral) (environment.Object, error) {
 
 // evalBooleanLiteral returns a Boolean object representing the literal's value.
 func evalBooleanLiteral(node *syntax.BooleanLiteral) (environment.Object, error) {
-	return nativeBoolToBooleanObject(node.Value), nil
+	return environment.NativeBoolToBooleanObject(node.Value), nil
 }
 
 // evalArrayLiteral evaluates all expressions within an array literal and returns
@@ -108,7 +110,62 @@ func evalArrayLiteral(node *syntax.ArrayLiteral, env *environment.Environment) (
 	if err != nil {
 		return nil, err
 	}
+
 	return &environment.Array{Elements: elements}, nil
+}
+
+// evalImportStatement evaluates an import by using the environment's ImportLoader.
+func evalImportStatement(node *syntax.ImportStatement, env *environment.Environment) (environment.Object, error) {
+	modPath := node.Path
+	modName := node.Name.Value
+
+	if cached, ok := env.ModuleCache[modPath]; ok {
+		env.Set(modName, cached)
+		return cached, nil
+	}
+
+	if stdMod := env.GetStandardModule(modPath); stdMod != nil {
+		env.ModuleCache[modPath] = stdMod
+		env.Set(modName, stdMod)
+		return stdMod, nil
+	}
+
+	if env.Loading[modPath] {
+		return nil, fmt.Errorf("circular import detected: %s", modPath)
+	}
+
+	env.Loading[modPath] = true
+	defer func() { env.Loading[modPath] = false }()
+
+	moduleObj, err := loadModule(modPath, env)
+	if err != nil {
+		return nil, err
+	}
+
+	env.ModuleCache[modPath] = moduleObj
+	env.Set(modName, moduleObj)
+
+	return moduleObj, nil
+}
+
+// evalPropertyExpression retrieves a property from a module object.
+func evalPropertyExpression(node *syntax.PropertyExpression, env *environment.Environment) (environment.Object, error) {
+	obj, err := Eval(node.Object, env)
+	if err != nil {
+		return nil, err
+	}
+
+	module, ok := obj.(*environment.Module)
+	if !ok {
+		return nil, fmt.Errorf("runtime error: property access is only supported on modules")
+	}
+
+	val, ok := module.Env.Get(node.Property.Value)
+	if !ok {
+		return nil, fmt.Errorf("runtime error: property '%s' not found in module '%s'", node.Property.Value, module.Name)
+	}
+
+	return val, nil
 }
 
 // evalIndexExpression evaluates an array index operation, ensuring the left side
@@ -217,16 +274,18 @@ func evalPrefixExpression(operator string, right environment.Object) (environmen
 	}
 }
 
+// evalBangOperatorExpression applies the logical NOT operator (!) to the given object, returning the inverse boolean.
 func evalBangOperatorExpression(right environment.Object) (environment.Object, error) {
-	if right == TRUE {
-		return FALSE, nil
+	if right == environment.True() {
+		return environment.False(), nil
 	}
-	if right == FALSE {
-		return TRUE, nil
+	if right == environment.False() {
+		return environment.True(), nil
 	}
 	return nil, fmt.Errorf("type mismatch")
 }
 
+// evalMinusPrefixOperatorExpression applies the unary minus operator (-) to the given numeric object, negating its value.
 func evalMinusPrefixOperatorExpression(right environment.Object) (environment.Object, error) {
 	if right.Type() != environment.NUMBER_OBJ {
 		return nil, fmt.Errorf("type mismatch")
@@ -337,6 +396,10 @@ func evalProgram(program *syntax.Program, env *environment.Environment) (environ
 		}
 	}
 
+	if env.IsModule {
+		return &environment.Number{Value: 0}, nil // or return some ANY value/nil
+	}
+
 	return nil, fmt.Errorf("execution error: script finished without a return statement")
 }
 
@@ -345,10 +408,6 @@ func evalProgram(program *syntax.Program, env *environment.Environment) (environ
 func evalIdentifier(node *syntax.Identifier, env *environment.Environment) (environment.Object, error) {
 	if val, ok := env.Get(node.Value); ok {
 		return val, nil
-	}
-
-	if builtin, ok := environment.GetBuiltinFn(node.Value); ok {
-		return builtin, nil
 	}
 
 	return nil, fmt.Errorf("runtime error: identifier not found: %s", node.Value)
@@ -385,17 +444,17 @@ func evalInfixExpression(operator string, left, right environment.Object) (envir
 	case "^":
 		return &environment.Number{Value: math.Pow(leftVal, rightVal)}, nil
 	case "<":
-		return nativeBoolToBooleanObject(leftVal < rightVal), nil
+		return environment.NativeBoolToBooleanObject(leftVal < rightVal), nil
 	case ">":
-		return nativeBoolToBooleanObject(leftVal > rightVal), nil
+		return environment.NativeBoolToBooleanObject(leftVal > rightVal), nil
 	case "<=":
-		return nativeBoolToBooleanObject(leftVal <= rightVal), nil
+		return environment.NativeBoolToBooleanObject(leftVal <= rightVal), nil
 	case ">=":
-		return nativeBoolToBooleanObject(leftVal >= rightVal), nil
+		return environment.NativeBoolToBooleanObject(leftVal >= rightVal), nil
 	case "==":
-		return nativeBoolToBooleanObject(leftVal == rightVal), nil
+		return environment.NativeBoolToBooleanObject(leftVal == rightVal), nil
 	case "!=":
-		return nativeBoolToBooleanObject(leftVal != rightVal), nil
+		return environment.NativeBoolToBooleanObject(leftVal != rightVal), nil
 	default:
 		return nil, fmt.Errorf("unknown operator: %s", operator)
 	}
@@ -459,15 +518,6 @@ func evalExpressions(exps []syntax.Expression, env *environment.Environment) ([]
 	return result, nil
 }
 
-// nativeBoolToBooleanObject converts a native Go boolean into its corresponding
-// environment.Boolean object wrapper, returning either the TRUE or FALSE singleton.
-func nativeBoolToBooleanObject(input bool) *environment.Boolean {
-	if input {
-		return TRUE
-	}
-	return FALSE
-}
-
 // isTruthy determines if a types.Object value is considered true,
 // which is any non-zero value or true boolean.
 func isTruthy(val environment.Object) bool {
@@ -475,4 +525,27 @@ func isTruthy(val environment.Object) bool {
 		return val.(*environment.Boolean).Value
 	}
 	return false
+}
+
+// loadModule initializes a new environment for a module, evaluates its AST,
+// and returns a Module object containing the evaluated environment.
+func loadModule(moduleName string, env *environment.Environment) (*environment.Module, error) {
+	modEnv := environment.NewEnvironment(env.BaseDir, moduleName, true)
+	modEnv.ModuleASTs = env.ModuleASTs
+
+	// Reuse AST cached during semantic analysis phase
+	modProgram, ok := env.ModuleASTs[moduleName]
+	if !ok {
+		return nil, fmt.Errorf("module %s not found on cache", moduleName)
+	}
+
+	_, err := Eval(modProgram, modEnv)
+	if err != nil {
+		return nil, fmt.Errorf("failed to evaluate module %s: %s", moduleName, err)
+	}
+
+	return &environment.Module{
+		Name: moduleName,
+		Env:  modEnv,
+	}, nil
 }
