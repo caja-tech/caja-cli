@@ -775,10 +775,10 @@ func TestConsecutiveIllegalCharacters(t *testing.T) {
 }
 
 // TestInvalidCharacters ensures that multiple illegal characters scattered
-// throughout valid input ("10 @ 5 #") each generate a distinct syntax error
+// throughout valid input ("10 @ 5 $") each generate a distinct syntax error
 // message referencing the correct line and column of the offending character.
 func TestInvalidCharacters(t *testing.T) {
-	input := `10 @ 5 #`
+	input := `10 @ 5 $`
 	_, errors := Lex(input)
 
 	if len(errors) != 2 {
@@ -790,8 +790,31 @@ func TestInvalidCharacters(t *testing.T) {
 		t.Errorf("expected error %q, got %q", expectedErr1, errors[0])
 	}
 
-	expectedErr2 := "Syntax Error at line 1, column 8: unrecognized character '#'"
+	expectedErr2 := "Syntax Error at line 1, column 8: unrecognized character '$'"
 	if errors[1] != expectedErr2 {
 		t.Errorf("expected error %q, got %q", expectedErr2, errors[1])
 	}
+}
+
+// TestSingleLineComments verifies that comments starting with '#' are ignored by the tokenizer.
+func TestSingleLineComments(t *testing.T) {
+	input := `
+# This is a comment at the top
+let a = 10 # This is a comment at the end of a line
+# Another full line comment
+return a
+`
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 3, 1}},
+		{"Identifier 'a'", Token{IDENT, "a", 3, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 3, 7}},
+		{"Number value", Token{NUMBER, "10", 3, 9}},
+		{"Return keyword", Token{RETURN, "return", 5, 1}},
+		{"Identifier 'a'", Token{IDENT, "a", 5, 8}},
+		{"End of file", Token{EOF, "", 6, 1}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
 }
