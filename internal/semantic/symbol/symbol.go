@@ -65,7 +65,17 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 		}, true
 
 	case "math":
-		return map[string]Symbol{}, true
+		return map[string]Symbol{
+			"abs":   NewBuiltinSymbol(1),
+			"sqrt":  NewBuiltinSymbol(1),
+			"pow":   NewBuiltinSymbol(2),
+			"floor": NewBuiltinSymbol(1),
+			"ceil":  NewBuiltinSymbol(1),
+			"round": NewBuiltinSymbol(1),
+			"min":   NewBuiltinSymbol(2),
+			"max":   NewBuiltinSymbol(2),
+			"log":   NewBuiltinSymbol(2),
+		}, true
 	}
 
 	return nil, false

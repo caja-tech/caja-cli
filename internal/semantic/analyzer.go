@@ -490,6 +490,10 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeDateDiffDaysFunction(n), true
 	case "date.newDate":
 		return a.analyzeDateNewDateFunction(n), true
+	case "math.abs", "math.sqrt", "math.floor", "math.ceil", "math.round":
+		return a.analyzeMathOneArgFunction(functionName, n), true
+	case "math.pow", "math.min", "math.max", "math.log":
+		return a.analyzeMathTwoArgFunction(functionName, n), true
 	default:
 		return symbol.AnySymbol(), false
 	}

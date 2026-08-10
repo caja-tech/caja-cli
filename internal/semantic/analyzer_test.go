@@ -681,6 +681,102 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input:          "import date\nreturn date.newDate(\"2023\", 1, 1)",
 			expectedErrors: []string{"type error: first argument to 'newDate' must be NUMBER, got STRING"},
 		},
+		{
+			name:  "abs() works with correct types",
+			input: "import math\nreturn math.abs(-10.5)",
+		},
+		{
+			name:           "abs() rejects missing arguments",
+			input:          "import math\nreturn math.abs()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'abs', got 0"},
+		},
+		{
+			name:           "abs() rejects mismatched types",
+			input:          "import math\nreturn math.abs(\"hello\")",
+			expectedErrors: []string{"type error: first argument to 'abs' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "sqrt() works with correct types",
+			input: "import math\nreturn math.sqrt(16)",
+		},
+		{
+			name:           "sqrt() rejects mismatched types",
+			input:          "import math\nreturn math.sqrt(\"hello\")",
+			expectedErrors: []string{"type error: first argument to 'sqrt' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "floor() works with correct types",
+			input: "import math\nreturn math.floor(4.9)",
+		},
+		{
+			name:           "floor() rejects mismatched types",
+			input:          "import math\nreturn math.floor(\"hello\")",
+			expectedErrors: []string{"type error: first argument to 'floor' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "ceil() works with correct types",
+			input: "import math\nreturn math.ceil(4.1)",
+		},
+		{
+			name:           "ceil() rejects mismatched types",
+			input:          "import math\nreturn math.ceil(\"hello\")",
+			expectedErrors: []string{"type error: first argument to 'ceil' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "round() works with correct types",
+			input: "import math\nreturn math.round(4.5)",
+		},
+		{
+			name:           "round() rejects mismatched types",
+			input:          "import math\nreturn math.round(\"hello\")",
+			expectedErrors: []string{"type error: first argument to 'round' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "pow() works with correct types",
+			input: "import math\nreturn math.pow(2, 3)",
+		},
+		{
+			name:           "pow() rejects missing arguments",
+			input:          "import math\nreturn math.pow(2)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'pow', got 1"},
+		},
+		{
+			name:           "pow() rejects mismatched first type",
+			input:          "import math\nreturn math.pow(\"2\", 3)",
+			expectedErrors: []string{"type error: first argument to 'pow' must be NUMBER, got STRING"},
+		},
+		{
+			name:           "pow() rejects mismatched second type",
+			input:          "import math\nreturn math.pow(2, \"3\")",
+			expectedErrors: []string{"type error: second argument to 'pow' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "min() works with correct types",
+			input: "import math\nreturn math.min(2, 3)",
+		},
+		{
+			name:           "min() rejects mismatched second type",
+			input:          "import math\nreturn math.min(2, \"3\")",
+			expectedErrors: []string{"type error: second argument to 'min' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "max() works with correct types",
+			input: "import math\nreturn math.max(2, 3)",
+		},
+		{
+			name:           "max() rejects mismatched first type",
+			input:          "import math\nreturn math.max(\"2\", 3)",
+			expectedErrors: []string{"type error: first argument to 'max' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "log() works with correct types",
+			input: "import math\nreturn math.log(100, 10)",
+		},
+		{
+			name:           "log() rejects mismatched second type",
+			input:          "import math\nreturn math.log(100, \"10\")",
+			expectedErrors: []string{"type error: second argument to 'log' must be NUMBER, got STRING"},
+		},
 	}
 	runTestScenarios(t, tests)
 }
