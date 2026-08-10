@@ -124,8 +124,15 @@ func (t *Tokenizer) readDate() string {
 // skipWhitespace advances past any combination of spaces, tabs, newlines, and
 // carriage-returns, updating line and column tracking along the way.
 func (t *Tokenizer) skipWhitespace() {
-	for t.ch == ' ' || t.ch == '\t' || t.ch == '\n' || t.ch == '\r' {
-		t.readChar()
+	for t.ch == ' ' || t.ch == '\t' || t.ch == '\n' || t.ch == '\r' || t.ch == '#' {
+		if t.ch == '#' {
+			// consume until newline or EOF
+			for t.ch != '\n' && t.ch != '\r' && t.ch != 0 {
+				t.readChar()
+			}
+		} else {
+			t.readChar()
+		}
 	}
 }
 
