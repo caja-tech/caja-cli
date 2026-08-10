@@ -313,6 +313,12 @@ func (a *Analyzer) analyzeInfixExpression(n *syntax.InfixExpression) symbol.Symb
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot compare %s and %s using '%s'", leftSymbol.Type(), rightSymbol.Type(), n.Operator))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+
+	case "and", "or", "xor":
+		if leftSymbol.Type() != environment.BOOLEAN_OBJ || rightSymbol.Type() != environment.BOOLEAN_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two BOOLEANs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+		}
+		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	}
 
 	return symbol.AnySymbol()

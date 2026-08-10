@@ -780,3 +780,34 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticLogicalOperators(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:           "Logical AND with correct types",
+			input:          "return true and false",
+			expectedErrors: []string{},
+		},
+		{
+			name:           "Logical OR with correct types",
+			input:          "return true or false",
+			expectedErrors: []string{},
+		},
+		{
+			name:           "Logical XOR with correct types",
+			input:          "return true xor false",
+			expectedErrors: []string{},
+		},
+		{
+			name:           "Logical AND with wrong left type",
+			input:          "return 1 and true",
+			expectedErrors: []string{"type error: operator 'and' requires two BOOLEANs, got NUMBER and BOOLEAN"},
+		},
+		{
+			name:           "Logical OR with wrong right type",
+			input:          "return false or \"string\"",
+			expectedErrors: []string{"type error: operator 'or' requires two BOOLEANs, got BOOLEAN and STRING"},
+		},
+	}
+	runTestScenarios(t, tests)
+}

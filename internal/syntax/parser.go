@@ -72,6 +72,9 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.infixParseFuncs[lexer.LPAREN] = p.parseFunctionCallExpression
 	p.infixParseFuncs[lexer.LBRACKET] = p.parseIndexExpression
 	p.infixParseFuncs[lexer.DOT] = p.parsePropertyExpression
+	p.infixParseFuncs[lexer.AND] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.OR] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.XOR] = p.parseInfixExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -180,7 +183,7 @@ func (p *Parser) parseImportStatement() *ImportStatement {
 		statement.Name = &Identifier{Token: p.currToken, Value: basename}
 	} else if p.peekToken.Type == lexer.IDENT {
 		p.nextToken()
-		if isKeyword(p.currToken.Type) {
+		if lexer.IsKeyword(p.currToken.Type) {
 			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a module name", p.currToken.Literal))
 			return nil
 		}
@@ -197,7 +200,7 @@ func (p *Parser) parseImportStatement() *ImportStatement {
 			return nil
 		}
 
-		if isKeyword(p.currToken.Type) {
+		if lexer.IsKeyword(p.currToken.Type) {
 			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a module alias", p.currToken.Literal))
 			return nil
 		}
@@ -208,22 +211,13 @@ func (p *Parser) parseImportStatement() *ImportStatement {
 	return statement
 }
 
-// isKeyword checks if the given token type is a reserved keyword in the language.
-func isKeyword(tokenType lexer.TokenType) bool {
-	switch tokenType {
-	case lexer.RETURN, lexer.IF, lexer.ELSE, lexer.LET, lexer.FN, lexer.TRUE, lexer.FALSE, lexer.TYPE, lexer.IMPORT, lexer.AS:
-		return true
-	}
-	return false
-}
-
 // parseLetStatement parses a variable declaration of the form "let ident = expr".
 // It captures the "let" keyword token, ensures the next token is an identifier,
 // expects an assignment operator, and then parses the initialization expression.
 func (p *Parser) parseLetStatement() *LetStatement {
 	statement := &LetStatement{Token: p.currToken}
 
-	if isKeyword(p.peekToken.Type) {
+	if lexer.IsKeyword(p.peekToken.Type) {
 		p.reportError(p.peekToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.peekToken.Literal))
 		return nil
 	}
@@ -301,7 +295,7 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 // It captures the left-hand identifier, consumes the '=' token, and parses
 // the right-hand expression with the lowest precedence.
 func (p *Parser) parseAssignStatement() *AssignStatement {
-	if isKeyword(p.currToken.Type) {
+	if lexer.IsKeyword(p.currToken.Type) {
 		p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.currToken.Literal))
 		return nil
 	}
@@ -583,7 +577,7 @@ func (p *Parser) parseFunctionParameters() []*Parameter {
 
 	p.nextToken()
 	parseSingleParam := func() *Parameter {
-		if isKeyword(p.currToken.Type) {
+		if lexer.IsKeyword(p.currToken.Type) {
 			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a parameter name", p.currToken.Literal))
 			return nil
 		}

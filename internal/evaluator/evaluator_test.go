@@ -148,9 +148,20 @@ func TestEvaluateMath(t *testing.T) {
 		{"Comparison ==", "return 10 == 10", true},
 		{"Comparison !=", "return 10 != 10", false},
 		{"Prefix Minus", "return -5", -5.0},
+		{"Logical AND true", "return true and true", true},
+		{"Logical AND false", "return true and false", false},
+		{"Logical OR true", "return false or true", true},
+		{"Logical OR false", "return false or false", false},
+		{"Logical XOR true", "return true xor false", true},
+		{"Logical XOR false", "return true xor true", false},
+		{"Short-circuit AND", "return false and 1 / 0 == 1", false},
+		{"Short-circuit OR", "return true or 1 / 0 == 1", true},
+		{"Logical complex", "return (10 > 5) and (5 < 10) or false", true},
+
 		{"Prefix Minus Double", "return --5", 5.0},
 		{"Prefix Bang True", "return !true", false},
 		{"Prefix Bang False", "return !false", true},
+		{"Prefix Bang Grouped Logic", "return !(true and false)", true},
 		{"Prefix Bang Double", "return !!true", true},
 	}
 

@@ -244,12 +244,49 @@ func evalInfixExpressionNode(node *syntax.InfixExpression, env *environment.Envi
 		return nil, err
 	}
 
+	if node.Operator == "and" || node.Operator == "or" {
+		leftBool, ok := left.(*environment.Boolean)
+		if !ok {
+			return nil, fmt.Errorf("type mismatch")
+		}
+		if node.Operator == "and" && !leftBool.Value {
+			return left, nil
+		}
+		if node.Operator == "or" && leftBool.Value {
+			return left, nil
+		}
+	}
+
 	right, err := Eval(node.Right, env)
 	if err != nil {
 		return nil, err
 	}
 
+	if node.Operator == "and" || node.Operator == "or" || node.Operator == "xor" {
+		return evalBooleanInfixExpression(node.Operator, left, right)
+	}
+
 	return evalInfixExpression(node.Operator, left, right)
+}
+
+func evalBooleanInfixExpression(operator string, left, right environment.Object) (environment.Object, error) {
+	if left.Type() != environment.BOOLEAN_OBJ || right.Type() != environment.BOOLEAN_OBJ {
+		return nil, fmt.Errorf("type mismatch")
+	}
+
+	leftVal := left.(*environment.Boolean).Value
+	rightVal := right.(*environment.Boolean).Value
+
+	switch operator {
+	case "and":
+		return environment.NativeBoolToBooleanObject(leftVal && rightVal), nil
+	case "or":
+		return environment.NativeBoolToBooleanObject(leftVal || rightVal), nil
+	case "xor":
+		return environment.NativeBoolToBooleanObject(leftVal != rightVal), nil
+	default:
+		return nil, fmt.Errorf("unknown operator: %s", operator)
+	}
 }
 
 // evalPrefixExpressionNode evaluates the right operand and applies the prefix operator.

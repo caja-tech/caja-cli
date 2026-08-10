@@ -37,6 +37,16 @@ func TestOperatorPrecedenceParsing(t *testing.T) {
 			input:    "rate = (100 / 2) + 15.5",
 			expected: "rate = ((100 / 2) + 15.5)",
 		},
+		{
+			name:     "Logical operators precedence over comparison",
+			input:    "a == b and c < d",
+			expected: "((a == b) and (c < d))",
+		},
+		{
+			name:     "Logical operators left-to-right",
+			input:    "true and false or true xor false",
+			expected: "(((true and false) or true) xor false)",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -837,6 +847,7 @@ func TestKeywordVariableErrors(t *testing.T) {
 		"if = 5",                         // Assignment to keyword
 		"let f = fn(let: Number) { 10 }", // Function parameter as keyword
 		"let as = 10",                    // Let declaration with 'as' keyword
+		"let and = 10",                   // Let declaration with 'and' keyword
 	}
 
 	for _, input := range tests {
