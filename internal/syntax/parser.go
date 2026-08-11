@@ -337,42 +337,43 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 	}
 	statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
-	if !p.expectPeek(lexer.FN) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected function name, got %s", p.currToken.Type))
-		return nil
-	}
-
-	statement.Signature = &FunctionSignature{}
-	if !p.expectPeek(lexer.LPAREN) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected lparen, got %s", p.currToken.Type))
-		return nil
-	}
-
-	if p.peekToken.Type != lexer.RPAREN {
-		paramType := p.parseTypeSignature()
-		if paramType != "" {
-			statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
+	if p.peekToken.Type == lexer.FN {
+		p.nextToken() // move to fn
+		
+		statement.Signature = &FunctionSignature{}
+		if !p.expectPeek(lexer.LPAREN) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected lparen, got %s", p.currToken.Type))
+			return nil
 		}
-		for p.peekToken.Type == lexer.COMMA {
-			p.nextToken() // move to comma
+
+		if p.peekToken.Type != lexer.RPAREN {
 			paramType := p.parseTypeSignature()
 			if paramType != "" {
 				statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
 			}
+			for p.peekToken.Type == lexer.COMMA {
+				p.nextToken() // move to comma
+				paramType := p.parseTypeSignature()
+				if paramType != "" {
+					statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
+				}
+			}
 		}
-	}
 
-	if !p.expectPeek(lexer.RPAREN) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected rparen, got %s", p.currToken.Type))
-		return nil
-	}
+		if !p.expectPeek(lexer.RPAREN) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected rparen, got %s", p.currToken.Type))
+			return nil
+		}
 
-	if !p.expectPeek(lexer.COLON) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected colon got %s", p.currToken.Type))
-		return nil
-	}
+		if !p.expectPeek(lexer.COLON) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected colon got %s", p.currToken.Type))
+			return nil
+		}
 
-	statement.Signature.ReturnType = p.parseTypeSignature()
+		statement.Signature.ReturnType = p.parseTypeSignature()
+	} else {
+		statement.TargetType = p.parseTypeSignature()
+	}
 
 	return statement
 }

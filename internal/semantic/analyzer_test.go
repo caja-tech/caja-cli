@@ -32,7 +32,7 @@ func runTestScenarios(t *testing.T, tests []testScenario) {
 			errors := analyzer.Errors()
 
 			if len(errors) != len(tt.expectedErrors) {
-				t.Fatalf("expected %d errors, got %d.", len(tt.expectedErrors), len(errors))
+				t.Fatalf("expected %d errors, got %d. Errors: %v", len(tt.expectedErrors), len(errors), errors)
 			}
 
 			for i, err := range errors {
@@ -972,6 +972,30 @@ let a = fn(b: Number): Number {
 			expectedErrors: []string{
 				"semantic error: 'private' modifier is only allowed at the top-level of a module",
 			},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "Type alias with primitive types",
+			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom): money { return m }\nprocess(100, true, \"John\", 42)",
+		},
+		{
+			name:  "Type alias with array types",
+			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection): prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
+		},
+		{
+			name:           "Type alias mismatch",
+			input:          "type money Number\nlet add = fn(a: money): money { return a }\nadd(\"string\")",
+			expectedErrors: []string{"type error: argument 1 expected NUMBER, got STRING"},
+		},
+		{
+			name:           "Undefined type in alias",
+			input:          "type someType Some\nlet doSomething = fn(a: someType): Number { return 1 }",
+			expectedErrors: []string{"type error: cannot resolve type name for Some"},
 		},
 	}
 	runTestScenarios(t, tests)

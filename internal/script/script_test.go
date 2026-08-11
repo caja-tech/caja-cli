@@ -62,6 +62,12 @@ func TestModules(t *testing.T) {
 			expectVal:   20,
 		},
 		{
+			name:        "Type Alias Simple",
+			file:        "type_alias_simple.caja",
+			expectError: false,
+			expectVal:   15,
+		},
+		{
 			name:        "Const Array Mutation",
 			file:        "const_array_mutation.caja",
 			expectError: false,
