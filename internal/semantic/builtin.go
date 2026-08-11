@@ -490,3 +490,30 @@ func (a *Analyzer) analyzeMathTwoArgFunction(functionName string, n *syntax.Call
 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
+
+// analyzeLogFunction checks the arity and type for 2-argument log functions, returning a STRING.
+func (a *Analyzer) analyzeLogFunction(functionName string, n *syntax.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	arg1Symbol := a.analyze(n.Arguments[0])
+	if arg1Symbol.Type() != environment.STRING_OBJ && arg1Symbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", functionName, arg1Symbol.Type()))
+	}
+	// The second argument can be anything, so we just analyze it without type checking
+	_ = a.analyze(n.Arguments[1])
+
+	return symbol.NewBasicSymbol(environment.STRING_OBJ)
+}
+
+// analyzeLogExportFunction checks the arity for the log.export function, returning ANY.
+func (a *Analyzer) analyzeLogExportFunction(functionName string, n *syntax.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 argument for '%s', got %d", functionName, len(n.Arguments)))
+	} else {
+		_ = a.analyze(n.Arguments[0])
+	}
+	return symbol.AnySymbol()
+}

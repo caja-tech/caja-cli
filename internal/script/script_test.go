@@ -91,6 +91,18 @@ func TestModules(t *testing.T) {
 			expectError: false,
 			expectVal:   math.Pi,
 		},
+		{
+			name:        "Log Module Tests",
+			file:        "test_log.caja",
+			expectError: false,
+			expectVal:   1.0,
+		},
+		{
+			name:        "Log Export Tests",
+			file:        "test_log_export.caja",
+			expectError: false,
+			expectVal:   1.0,
+		},
 	}
 
 	for _, tc := range testCases {

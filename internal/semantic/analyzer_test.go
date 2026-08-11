@@ -830,7 +830,44 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input:          "import math\nreturn math.log(100, \"10\")",
 			expectedErrors: []string{"type error: second argument to 'log' must be NUMBER, got STRING"},
 		},
+		{
+			name:  "log.info() works with correct types",
+			input: "import log\nreturn log.info(\"message\", 42)",
+		},
+		{
+			name:           "log.info() rejects mismatched first type",
+			input:          "import log\nreturn log.info(42, 42)",
+			expectedErrors: []string{"type error: first argument to 'info' must be STRING, got NUMBER"},
+		},
+		{
+			name:           "log.info() rejects missing arguments",
+			input:          "import log\nreturn log.info(\"message\")",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'info', got 1"},
+		},
+		{
+			name:  "log.warn() works with any second type",
+			input: "import log\nreturn log.warn(\"message\", [1, 2, 3])",
+		},
+		{
+			name:  "log.error() works with any second type",
+			input: "import log\nreturn log.error(\"message\", true)",
+		},
+		{
+			name:  "log.export() accepts any valid argument",
+			input: "import log\nreturn log.export([1, 2, 3])",
+		},
+		{
+			name:           "log.export() rejects missing arguments",
+			input:          "import log\nreturn log.export()",
+			expectedErrors: []string{"arity error: expected 1 argument for 'export', got 0"},
+		},
+		{
+			name:           "log.export() rejects too many arguments",
+			input:          "import log\nreturn log.export(1, 2)",
+			expectedErrors: []string{"arity error: expected 1 argument for 'export', got 2"},
+		},
 	}
+
 	runTestScenarios(t, tests)
 }
 

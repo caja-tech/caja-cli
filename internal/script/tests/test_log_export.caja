@@ -1,0 +1,5 @@
+import "log"
+log.export("Hello")
+log.export(42)
+log.export([1, 2, 3])
+return 1
