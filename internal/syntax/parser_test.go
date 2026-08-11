@@ -798,6 +798,16 @@ func TestTypeAliasParsing(t *testing.T) {
 			input:    "type DateFactory fn(): Date",
 			expected: "type DateFactory fn(): Date",
 		},
+		{
+			name:     "Type alias with simple Number",
+			input:    "type money Number",
+			expected: "type money Number",
+		},
+		{
+			name:     "Type alias with array Any",
+			input:    "type collection [Any]",
+			expected: "type collection [Any]",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -1126,4 +1136,22 @@ func TestPrivateModifierErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTypeAliasUsage verifies that all primitive types and array variations can be mapped to type aliases and used securely in function parameters.
+func TestTypeAliasUsage(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Type alias with primitive types used in functions",
+			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom): money { m }",
+			expected: "type money Numbertype moment Datetype name Stringtype custom Anylet process = fn(m: money, d: moment, n: name, c: custom): money { ... }",
+		},
+		{
+			name:     "Type alias with array types used in functions",
+			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection): prices { p }",
+			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Any]let addAll = fn(p: prices, n: names, h: holidays, c: collection): prices { ... }",
+		},
+	}
+
+	runTestScenarios(t, tests)
 }

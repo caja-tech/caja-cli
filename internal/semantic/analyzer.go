@@ -203,15 +203,15 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *syntax.PropertyAssignme
 // returning the type of the last statement in the block.
 func (a *Analyzer) analyzeBlockStatement(n *syntax.BlockStatement) symbol.Symbol {
 	a.pushScope()
-	var lastType = environment.ANY_OBJ
+	var lastSymbol symbol.Symbol = symbol.NewBasicSymbol(environment.ANY_OBJ)
 	for _, s := range n.Statements {
 		if importStmt, isImport := s.(*syntax.ImportStatement); isImport {
 			a.reportError(importStmt.Token, "semantic error: import statements are only allowed at the top-level of a file")
 		}
-		lastType = a.analyze(s).Type()
+		lastSymbol = a.analyze(s)
 	}
 	a.popScope()
-	return symbol.NewBasicSymbol(lastType)
+	return lastSymbol
 }
 
 // analyzeLetStatement checks for variable redeclarations and registers the
@@ -507,25 +507,36 @@ func (a *Analyzer) analyzeExpressionStatement(n *syntax.ExpressionStatement) sym
 // analyzeTypeAliasStatement resolves the parameter and return types for a type alias
 // and registers the resulting function signature in the analyzer's type registry.
 func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) symbol.Symbol {
-	var paramTypes []symbol.Symbol
-	for _, pt := range n.Signature.ParamTypes {
-		paramSymbol, ok := a.findTypeSymbolInTypes(pt)
-		if !ok {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", pt))
+	var aliasedSymbol symbol.Symbol
+
+	if n.Signature != nil {
+		var paramTypes []symbol.Symbol
+		for _, pt := range n.Signature.ParamTypes {
+			paramSymbol, ok := a.findTypeSymbolInTypes(pt)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", pt))
+			}
+			paramTypes = append(paramTypes, paramSymbol)
 		}
-		paramTypes = append(paramTypes, paramSymbol)
+	
+		var returnType symbol.Symbol
+		if n.Signature.ReturnType != "" {
+			resolvedReturn, ok := a.findTypeSymbolInTypes(n.Signature.ReturnType)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.Signature.ReturnType))
+			}
+			returnType = resolvedReturn
+		}
+		aliasedSymbol = symbol.NewFunctionSymbol(len(n.Signature.ParamTypes), paramTypes, returnType)
+	} else if n.TargetType != "" {
+		resolvedSymbol, ok := a.findTypeSymbolInTypes(n.TargetType)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.TargetType))
+		}
+		aliasedSymbol = resolvedSymbol
 	}
 
-	var returnType symbol.Symbol
-	if n.Signature.ReturnType != "" {
-		resolvedReturn, ok := a.findTypeSymbolInTypes(n.Signature.ReturnType)
-		if !ok {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.Signature.ReturnType))
-		}
-		returnType = resolvedReturn
-	}
-
-	a.types[n.Name.Value] = symbol.NewFunctionSymbol(len(n.Signature.ParamTypes), paramTypes, returnType)
+	a.types[n.Name.Value] = aliasedSymbol
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {

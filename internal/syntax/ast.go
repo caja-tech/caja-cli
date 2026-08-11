@@ -449,10 +449,11 @@ func (fs *FunctionSignature) String() string {
 // (e.g. "type BinaryOp fn(Number, Number): Number"). It holds the "type" token,
 // Name is the new alias identifier, and Signature is the function signature.
 type TypeAliasStatement struct {
-	Token     lexer.Token
-	Name      *Identifier
-	Signature *FunctionSignature
-	IsPrivate bool
+	Token      lexer.Token
+	Name       *Identifier
+	Signature  *FunctionSignature // Used for fn(...) types
+	TargetType string             // Used for simple alias types like Number, [String], etc.
+	IsPrivate  bool
 }
 
 func (ts *TypeAliasStatement) statementNode()       {}
@@ -462,7 +463,13 @@ func (ts *TypeAliasStatement) String() string {
 	if ts.IsPrivate {
 		out += "private "
 	}
-	out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.Signature.String()
+	
+	if ts.Signature != nil {
+		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.Signature.String()
+	} else {
+		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.TargetType
+	}
+	
 	return out
 }
 
