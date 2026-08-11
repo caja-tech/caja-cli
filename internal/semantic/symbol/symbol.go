@@ -84,6 +84,13 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"LOG10E": &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 		}, true
 
+	case "log":
+		return map[string]Symbol{
+			"info":   NewBuiltinSymbol(2),
+			"warn":   NewBuiltinSymbol(2),
+			"error":  NewBuiltinSymbol(2),
+			"export": NewBuiltinSymbol(1),
+		}, true
 	}
 
 	return nil, false

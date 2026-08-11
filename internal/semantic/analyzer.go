@@ -519,8 +519,13 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeMathOneArgFunction(functionName, n), true
 	case "math.pow", "math.min", "math.max", "math.log":
 		return a.analyzeMathTwoArgFunction(functionName, n), true
+	case "log.info", "log.warn", "log.error":
+		return a.analyzeLogFunction(functionName, n), true
+	case "log.export":
+		return a.analyzeLogExportFunction(functionName, n), true
 	default:
 		return symbol.AnySymbol(), false
+
 	}
 }
 

@@ -31,6 +31,7 @@ type EnvRegistry struct {
 	ModuleCache map[string]*Module
 	Loading     map[string]bool
 	ModuleASTs  map[string]*syntax.Program // ASTs parsed during semantic analysis
+	ExportedValues *[]Object
 }
 
 // Environment provides a symbol table to store and retrieve variables
@@ -45,6 +46,7 @@ type Environment struct {
 // NewEnvironment creates and returns a new top-level environment with
 // no outer scope.
 func NewEnvironment(baseDir string, fileName string, isModule bool) *Environment {
+	exportedValues := make([]Object, 0)
 	return &Environment{
 		outer: nil,
 		EnvConfig: EnvConfig{
@@ -58,6 +60,7 @@ func NewEnvironment(baseDir string, fileName string, isModule bool) *Environment
 			ModuleCache: make(map[string]*Module),
 			Loading:     make(map[string]bool),
 			ModuleASTs:  make(map[string]*syntax.Program),
+			ExportedValues: &exportedValues,
 		},
 	}
 }
@@ -79,6 +82,7 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 		env.ModuleCache = outer.ModuleCache
 		env.Loading = outer.Loading
 		env.ModuleASTs = outer.ModuleASTs
+		env.ExportedValues = outer.ExportedValues
 	}
 	return env
 }
@@ -149,7 +153,10 @@ func (env *Environment) GetStandardModule(moduleName string) *Module {
 		return env.newStringModule()
 	case "math":
 		return env.newMathModule()
+	case "log":
+		return env.newLogModule()
 	default:
 		return nil
+
 	}
 }

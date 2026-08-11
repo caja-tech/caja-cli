@@ -848,3 +848,83 @@ func TestErrorBuiltins(t *testing.T) {
 	}
 	runTestErrorScenarios(t, tests)
 }
+
+func TestEvaluateLogFunctions(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"log.info output format", "import log\nreturn log.info(\"test message\", 123)", "[Info]: test message: 123"},
+		{"log.warn output format", "import log\nreturn log.warn(\"warning msg\", true)", "[Warning]: warning msg: true"},
+		{"log.error output format", "import log\nreturn log.error(\"error occurred\", [1, 2])", "[Error]: error occurred: [1, 2]"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evaluated, err := testEval(tc.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			resultStr, ok := evaluated.(string)
+			if !ok {
+				t.Fatalf("expected result to be a string, got %T", evaluated)
+			}
+			if !strings.Contains(resultStr, tc.expected) {
+				t.Errorf("expected result to contain '%s', got '%s'", tc.expected, resultStr)
+			}
+		})
+	}
+}
+
+func TestEvaluateLogExport(t *testing.T) {
+	input := `
+	import log
+	log.export("First export")
+	log.export(42)
+	log.export([1, 2, 3])
+	return 1
+	`
+	tknzr := lexer.New(input)
+	p := syntax.New(tknzr)
+	program := p.Parse()
+
+	if p.HasErrors() {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+
+	env := environment.NewEnvironment("", "", false)
+	analyzer := semantic.New(env)
+	analyzer.Run(program)
+	if analyzer.HasErrors() {
+		t.Fatalf("semantic errors: %v", analyzer.Errors())
+	}
+
+	_, err := Eval(program, env)
+	if err != nil {
+		t.Fatalf("evaluation error: %v", err)
+	}
+
+	if env.ExportedValues == nil {
+		t.Fatalf("expected env.ExportedValues to not be nil")
+	}
+	
+	if len(*env.ExportedValues) != 3 {
+		t.Errorf("expected 3 exported values, got %d", len(*env.ExportedValues))
+	}
+	
+	val1 := environment.FormatObject((*env.ExportedValues)[0])
+	val2 := environment.FormatObject((*env.ExportedValues)[1])
+	val3 := (*env.ExportedValues)[2].Inspect() // Array inspects differently than FormatObject
+
+	if val1 != "First export" {
+		t.Errorf("expected 'First export', got '%s'", val1)
+	}
+	if val2 != "42" {
+		t.Errorf("expected '42', got '%s'", val2)
+	}
+	if val3 != "[1, 2, 3]" {
+		t.Errorf("expected '[1, 2, 3]', got '%s'", val3)
+	}
+}
+
