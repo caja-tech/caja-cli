@@ -901,3 +901,57 @@ func TestSemanticLogicalOperators(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestSemanticAnalysisPrivateModifier(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid private let at top level",
+			input: `
+private let a = 10
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Invalid private let inside block",
+			input: `
+if (true) {
+	private let a = 10
+}
+`,
+			expectedErrors: []string{
+				"semantic error: 'private' modifier is only allowed at the top-level of a module",
+			},
+		},
+		{
+			name: "Valid private type at top level",
+			input: `
+private type MyFunc fn(): Number
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Invalid private type inside block",
+			input: `
+if (true) {
+	private type MyFunc fn(): Number
+}
+`,
+			expectedErrors: []string{
+				"semantic error: 'private' modifier is only allowed at the top-level of a module",
+			},
+		},
+		{
+			name: "Invalid private let inside function block",
+			input: `
+let a = fn(b: Number): Number {
+	private let c = 10
+	return b + c
+}
+`,
+			expectedErrors: []string{
+				"semantic error: 'private' modifier is only allowed at the top-level of a module",
+			},
+		},
+	}
+	runTestScenarios(t, tests)
+}

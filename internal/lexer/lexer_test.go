@@ -837,3 +837,35 @@ func TestBooleanOperatorKeywords(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+func TestPrivateVariableTokenization(t *testing.T) {
+	input := "private let rate = 15.5"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Private keyword", Token{PRIVATE, "private", 1, 1}},
+		{"Let keyword", Token{LET, "let", 1, 9}},
+		{"Identifier rate", Token{IDENT, "rate", 1, 13}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 18}},
+		{"Number 15.5", Token{NUMBER, "15.5", 1, 20}},
+		{"End of file", Token{EOF, "", 1, 24}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+func TestPrivateTypeTokenization(t *testing.T) {
+	input := "private type Alias = Number"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Private keyword", Token{PRIVATE, "private", 1, 1}},
+		{"Type keyword", Token{TYPE, "type", 1, 9}},
+		{"Identifier Alias", Token{IDENT, "Alias", 1, 14}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 20}},
+		{"Type Number", Token{IDENT, "Number", 1, 22}},
+		{"End of file", Token{EOF, "", 1, 28}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

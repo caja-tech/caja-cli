@@ -928,3 +928,52 @@ func TestEvaluateLogExport(t *testing.T) {
 	}
 }
 
+// TestEvaluatePrivateLet verifies that a private let statement evaluates normally within its own module.
+func TestEvaluatePrivateLet(t *testing.T) {
+	var tests = []testScenario{
+		{"Private let works in local scope", "private let a = 10\nreturn a", 10.0},
+		{"Private let re-assignment", "private let a = 10\na = 20\nreturn a", 20.0},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestErrorPrivatePropertyAccess verifies that accessing a private property on a module
+// from outside of that module produces a runtime error.
+func TestErrorPrivatePropertyAccess(t *testing.T) {
+	// Create a module environment with a private property
+	moduleEnv := environment.NewEnvironment("test_module", "", false)
+	moduleEnv.Set("secret", &environment.Number{Value: 42})
+	moduleEnv.MarkPrivate("secret")
+
+	module := &environment.Module{
+		Name: "test_module",
+		Env:  moduleEnv,
+	}
+
+	// Create main environment and inject the module directly
+	mainEnv := environment.NewEnvironment("", "", false)
+	mainEnv.Set("test_module", module)
+
+	input := "return test_module.secret"
+
+	tknzr := lexer.New(input)
+	p := syntax.New(tknzr)
+	program := p.Parse()
+
+	if p.HasErrors() {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+
+	// Evaluate directly to bypass semantic analysis which would also need the module injected
+	_, err := Eval(program, mainEnv)
+	if err == nil {
+		t.Fatal("expected an error but got none")
+	}
+
+	expected := "runtime error: property 'secret' is private and cannot be accessed from outside module 'test_module'"
+	if !strings.Contains(err.Error(), expected) {
+		t.Errorf("expected error to contain %q, got %q", expected, err.Error())
+	}
+}
+

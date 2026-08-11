@@ -243,13 +243,18 @@ type LetStatement struct {
 	Token lexer.Token
 	Name  *Identifier
 	Value Expression
+	IsPrivate bool
 }
 
 func (ls *LetStatement) statementNode()       {}
 func (ls *LetStatement) TokenLiteral() string { return ls.Token.Literal }
 func (ls *LetStatement) String() string {
 	var out string
+	if ls.IsPrivate {
+		out += "private "
+	}
 	out += ls.TokenLiteral() + " " + ls.Name.String() + " = "
+
 	if ls.Value != nil {
 		out += ls.Value.String()
 	}
@@ -408,12 +413,18 @@ type TypeAliasStatement struct {
 	Token     lexer.Token
 	Name      *Identifier
 	Signature *FunctionSignature
+	IsPrivate bool
 }
 
 func (ts *TypeAliasStatement) statementNode()       {}
 func (ts *TypeAliasStatement) TokenLiteral() string { return ts.Token.Literal }
 func (ts *TypeAliasStatement) String() string {
-	return "type " + ts.Name.Value + " " + ts.Signature.String()
+	var out string
+	if ts.IsPrivate {
+		out += "private "
+	}
+	out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.Signature.String()
+	return out
 }
 
 // ImportStatement represents an import declaration (e.g. "import second").

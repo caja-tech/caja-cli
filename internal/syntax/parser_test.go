@@ -969,3 +969,87 @@ func TestImportStatement(t *testing.T) {
 		})
 	}
 }
+
+// TestPrivateModifierParsing verifies that the private access modifier is correctly
+// parsed for let statements and type alias statements.
+func TestPrivateModifierParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Private let statement",
+			input:    "private let rate = 15.5",
+			expected: "private let rate = 15.5",
+		},
+		{
+			name:     "Private type alias",
+			input:    "private type BinaryOp fn(Number, Number): Number",
+			expected: "private type BinaryOp fn(Number, Number): Number",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestPrivateModifierErrors verifies that the private access modifier generates
+// correct syntax errors when applied to invalid statements like imports or other keywords.
+func TestPrivateModifierErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name:          "Private on import",
+			input:         "private import math",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let' or 'type'",
+		},
+		{
+			name:          "Private on return",
+			input:         "private return 10",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let' or 'type'",
+		},
+		{
+			name:          "Return private",
+			input:         "return private",
+			expectedError: "unknown prefix type \"PRIVATE\"",
+		},
+		{
+			name:          "Import private",
+			input:         "import private",
+			expectedError: "expected identifier or string for module name, got PRIVATE",
+		},
+		{
+			name:          "Private as variable declaration",
+			input:         "let private = 10",
+			expectedError: "syntax error: cannot use keyword 'private' as a variable name",
+		},
+		{
+			name:          "Private standalone",
+			input:         "private",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let' or 'type'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for %q, but got none", tt.input)
+			}
+
+			found := false
+			for _, err := range errors {
+				if text.ContainsSubstring(err, tt.expectedError) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected error mentioning %q, got: %v", tt.expectedError, errors)
+			}
+		})
+	}
+}

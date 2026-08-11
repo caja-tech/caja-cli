@@ -134,16 +134,38 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseReturnStatement()
 	}
 
+	isPrivate := false
+	if p.currToken.Type == lexer.PRIVATE {
+		isPrivate = true
+		p.nextToken()
+		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE {
+			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let' or 'type'")
+			return nil
+		}
+	}
+
 	if p.currToken.Type == lexer.LET {
-		return p.parseLetStatement()
+		stmt := p.parseLetStatement()
+		if stmt != nil {
+			stmt.IsPrivate = isPrivate
+		}
+		return stmt
 	}
 
 	if p.currToken.Type == lexer.IMPORT {
+		if isPrivate {
+			p.reportError(p.currToken, "syntax error: 'private' modifier cannot be applied to imports")
+			return nil
+		}
 		return p.parseImportStatement()
 	}
 
 	if p.currToken.Type == lexer.TYPE {
-		return p.parseTypeAliasStatement()
+		stmt := p.parseTypeAliasStatement()
+		if stmt != nil {
+			stmt.IsPrivate = isPrivate
+		}
+		return stmt
 	}
 
 	if p.peekToken.Type == lexer.ASSIGN && lexer.IsKeyword(p.currToken.Type) {

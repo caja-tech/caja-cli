@@ -39,21 +39,22 @@ const (
 	DOT      TokenType = "DOT"
 
 	// Keywords
-	RETURN TokenType = "RETURN"
-	IF     TokenType = "IF"
-	ELSE   TokenType = "ELSE"
-	LET    TokenType = "LET"
-	FN     TokenType = "FN"
-	COMMA  TokenType = "COMMA"
-	COLON  TokenType = "COLON"
-	TRUE   TokenType = "TRUE"
-	FALSE  TokenType = "FALSE"
-	TYPE   TokenType = "TYPE"
-	IMPORT TokenType = "IMPORT"
-	AS     TokenType = "AS"
-	AND    TokenType = "AND"
-	OR     TokenType = "OR"
-	XOR    TokenType = "XOR"
+	RETURN  TokenType = "RETURN"
+	IF      TokenType = "IF"
+	ELSE    TokenType = "ELSE"
+	LET     TokenType = "LET"
+	FN      TokenType = "FN"
+	COMMA   TokenType = "COMMA"
+	COLON   TokenType = "COLON"
+	TRUE    TokenType = "TRUE"
+	FALSE   TokenType = "FALSE"
+	TYPE    TokenType = "TYPE"
+	IMPORT  TokenType = "IMPORT"
+	AS      TokenType = "AS"
+	AND     TokenType = "AND"
+	OR      TokenType = "OR"
+	XOR     TokenType = "XOR"
+	PRIVATE TokenType = "PRIVATE"
 )
 
 type Token struct {
@@ -67,19 +68,20 @@ type Token struct {
 // Any identifier matching a keyword is emitted as that keyword token instead
 // of a generic IDENT token.
 var keywords = map[string]TokenType{
-	"return": RETURN,
-	"if":     IF,
-	"else":   ELSE,
-	"let":    LET,
-	"fn":     FN,
-	"true":   TRUE,
-	"false":  FALSE,
-	"type":   TYPE,
-	"import": IMPORT,
-	"as":     AS,
-	"and":    AND,
-	"or":     OR,
-	"xor":    XOR,
+	"return":  RETURN,
+	"if":      IF,
+	"else":    ELSE,
+	"let":     LET,
+	"fn":      FN,
+	"true":    TRUE,
+	"false":   FALSE,
+	"type":    TYPE,
+	"import":  IMPORT,
+	"as":      AS,
+	"and":     AND,
+	"or":      OR,
+	"xor":     XOR,
+	"private": PRIVATE,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the
@@ -95,7 +97,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE:
 		return true
 	}
 	return false

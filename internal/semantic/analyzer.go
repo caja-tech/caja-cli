@@ -20,6 +20,7 @@ type Analyzer struct {
 	globalEnv     *environment.Environment
 	cache         map[string]*Analyzer
 	loading       map[string]bool
+	privates      map[string]bool
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -32,6 +33,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		globalEnv: globalEnv,
 		cache:     make(map[string]*Analyzer),
 		loading:   make(map[string]bool),
+		privates:  make(map[string]bool),
 	}
 
 	return analyzer
@@ -210,6 +212,15 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) symbol.Symbol {
 	}
 
 	a.declare(n.Name.Value, valType)
+	
+	if n.IsPrivate {
+		if len(a.scopes) > 1 {
+			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
+		} else {
+			a.privates[n.Name.Value] = true
+		}
+	}
+
 	return valType
 }
 
@@ -417,6 +428,14 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) symbo
 
 	a.types[n.Name.Value] = symbol.NewFunctionSymbol(len(n.Signature.ParamTypes), paramTypes, returnType)
 
+	if n.IsPrivate {
+		if len(a.scopes) > 1 {
+			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
+		} else {
+			a.privates[n.Name.Value] = true
+		}
+	}
+
 	return symbol.AnySymbol()
 }
 
@@ -591,7 +610,7 @@ func (a *Analyzer) analyzeImportStatement(n *syntax.ImportStatement) symbol.Symb
 	modName := n.Name.Value
 
 	if symbols, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols)
+		modSymbol := symbol.NewModuleSymbol(modName, symbols, nil)
 		a.declare(modName, modSymbol)
 		return modSymbol
 	}

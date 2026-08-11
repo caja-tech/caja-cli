@@ -103,6 +103,18 @@ func TestModules(t *testing.T) {
 			expectError: false,
 			expectVal:   1.0,
 		},
+		{
+			name:        "Valid Private Import",
+			file:        "test_private_valid.caja",
+			expectError: false,
+			expectVal:   10.0,
+		},
+		{
+			name:        "Invalid Private Import",
+			file:        "test_private_invalid.caja",
+			expectError: true,
+			errorMsg:    "property 'secret' is private and cannot be accessed from outside module 'test_private_export'",
+		},
 	}
 
 	for _, tc := range testCases {
