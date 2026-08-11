@@ -68,6 +68,21 @@ func TestSimpleExpressions(t *testing.T) {
 			expected: "rate",
 		},
 		{
+			name:     "Bare identifier with numbers",
+			input:    "rate2",
+			expected: "rate2",
+		},
+		{
+			name:     "Identifier with numbers mixed",
+			input:    "a1b2c3",
+			expected: "a1b2c3",
+		},
+		{
+			name:     "Identifier with underscore",
+			input:    "my_rate_2",
+			expected: "my_rate_2",
+		},
+		{
 			name:     "Single binary operation",
 			input:    "10 + 5",
 			expected: "(10 + 5)",

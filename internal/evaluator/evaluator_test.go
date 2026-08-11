@@ -6,6 +6,7 @@ import (
 	"caja-cli/internal/semantic"
 	"caja-cli/internal/syntax"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 )
@@ -816,6 +817,13 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"math min", "import math\nreturn math.min(10, 5)", 5.0},
 		{"math max", "import math\nreturn math.max(10, 5)", 10.0},
 		{"math log", "import math\nreturn math.log(100, 10)", 2.0},
+		{"math PI", "import math\nreturn math.PI", math.Pi},
+		{"math E", "import math\nreturn math.E", math.E},
+		{"math SQRT2", "import math\nreturn math.SQRT2", math.Sqrt2},
+		{"math LN2", "import math\nreturn math.LN2", math.Ln2},
+		{"math LN10", "import math\nreturn math.LN10", math.Ln10},
+		{"math LOG2E", "import math\nreturn math.LOG2E", math.Log2E},
+		{"math LOG10E", "import math\nreturn math.LOG10E", math.Log10E},
 	}
 	runTestScenarios(t, tests)
 }

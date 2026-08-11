@@ -142,7 +142,7 @@ func (t *Tokenizer) skipWhitespace() {
 // the identifier.
 func (t *Tokenizer) readIdentifier() string {
 	position := t.position
-	for t.isCurrentCharALetter() {
+	for t.isCurrentCharALetter() || t.isCurrentCharADigit() {
 		t.readChar()
 	}
 	return t.input[position:t.position]

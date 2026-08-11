@@ -2,6 +2,7 @@ package script
 
 import (
 	"caja-cli/internal/environment"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,6 +84,12 @@ func TestModules(t *testing.T) {
 			file:        "test_math.caja",
 			expectError: false,
 			expectVal:   48.5,
+		},
+		{
+			name:        "Math Constants Tests",
+			file:        "test_math_constants.caja",
+			expectError: false,
+			expectVal:   math.Pi,
 		},
 	}
 
