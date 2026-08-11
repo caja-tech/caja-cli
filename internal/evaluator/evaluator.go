@@ -26,6 +26,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalAssignStatement(node, env)
 	case *syntax.IndexAssignmentStatement:
 		return evalIndexAssignmentStatement(node, env)
+	case *syntax.PropertyAssignmentStatement:
+		return evalPropertyAssignmentStatement(node, env)
 	case *syntax.NumberLiteral:
 		return evalNumberLiteral(node)
 	case *syntax.StringLiteral:
@@ -44,6 +46,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalReturnStatement(node, env)
 	case *syntax.LetStatement:
 		return evalLetStatement(node, env)
+	case *syntax.ConstStatement:
+		return evalConstStatement(node, env)
 	case *syntax.IfExpression:
 		return evalIfExpression(node, env)
 	case *syntax.BlockStatement:
@@ -105,6 +109,27 @@ func evalIndexAssignmentStatement(node *syntax.IndexAssignmentStatement, env *en
 	}
 
 	arr.Elements[idx] = valObj
+	return valObj, nil
+}
+
+// evalPropertyAssignmentStatement evaluates the property assignment, updates the object, and returns the assigned value.
+func evalPropertyAssignmentStatement(node *syntax.PropertyAssignmentStatement, env *environment.Environment) (environment.Object, error) {
+	left, err := Eval(node.Object, env)
+	if err != nil {
+		return nil, err
+	}
+
+	mod, ok := left.(*environment.Module)
+	if !ok {
+		return nil, fmt.Errorf("type error: property assignment not supported for %s", left.Type())
+	}
+
+	valObj, err := Eval(node.Value, env)
+	if err != nil {
+		return nil, err
+	}
+
+	mod.Env.Set(node.Property.Value, valObj)
 	return valObj, nil
 }
 
@@ -271,6 +296,19 @@ func evalReturnStatement(node *syntax.ReturnStatement, env *environment.Environm
 
 // evalLetStatement evaluates the assigned value and creates a new variable in the environment.
 func evalLetStatement(node *syntax.LetStatement, env *environment.Environment) (environment.Object, error) {
+	val, err := Eval(node.Value, env)
+	if err != nil {
+		return nil, err
+	}
+	env.Set(node.Name.Value, val)
+	if node.IsPrivate {
+		env.MarkPrivate(node.Name.Value)
+	}
+	return val, nil
+}
+
+// evalConstStatement evaluates the assigned value and creates a new constant in the environment.
+func evalConstStatement(node *syntax.ConstStatement, env *environment.Environment) (environment.Object, error) {
 	val, err := Eval(node.Value, env)
 	if err != nil {
 		return nil, err

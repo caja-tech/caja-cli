@@ -902,6 +902,27 @@ func TestSemanticLogicalOperators(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
+func TestSemanticAnalysisConstModifier(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "Valid const declaration",
+			input: "const a = 10",
+		},
+		{
+			name:  "Invalid const reassignment",
+			input: "const a = 10\na = 20",
+			expectedErrors: []string{
+				"[Line 2, Column 3] semantic error: cannot assign to constant variable 'a'",
+			},
+		},
+		{
+			name:  "Valid let reassignment",
+			input: "let a = 10\na = 20",
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
 func TestSemanticAnalysisPrivateModifier(t *testing.T) {
 	tests := []testScenario{
 		{

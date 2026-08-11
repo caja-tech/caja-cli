@@ -138,14 +138,22 @@ func (p *Parser) parseStatement() Statement {
 	if p.currToken.Type == lexer.PRIVATE {
 		isPrivate = true
 		p.nextToken()
-		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE {
-			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let' or 'type'")
+		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST {
+			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'")
 			return nil
 		}
 	}
 
 	if p.currToken.Type == lexer.LET {
 		stmt := p.parseLetStatement()
+		if stmt != nil {
+			stmt.IsPrivate = isPrivate
+		}
+		return stmt
+	}
+
+	if p.currToken.Type == lexer.CONST {
+		stmt := p.parseConstStatement()
 		if stmt != nil {
 			stmt.IsPrivate = isPrivate
 		}
@@ -190,7 +198,16 @@ func (p *Parser) parseStatement() Statement {
 		if idxExpr, ok := exprStmt.Expression.(*IndexExpression); ok {
 			return &IndexAssignmentStatement{Token: assignToken, Left: idxExpr.Left, Index: idxExpr.Index, Value: rhs}
 		}
-		p.reportError(assignToken, "invalid assignment target")
+		if propExpr, ok := exprStmt.Expression.(*PropertyExpression); ok {
+			return &PropertyAssignmentStatement{
+				Token:    assignToken,
+				Object:   propExpr.Object,
+				Property: propExpr.Property,
+				Value:    rhs,
+			}
+		}
+
+		p.reportError(assignToken, "syntax error: invalid assignment target")
 		return nil
 	}
 	return exprStmt
@@ -259,6 +276,32 @@ func (p *Parser) parseImportStatement() *ImportStatement {
 // expects an assignment operator, and then parses the initialization expression.
 func (p *Parser) parseLetStatement() *LetStatement {
 	statement := &LetStatement{Token: p.currToken}
+
+	if lexer.IsKeyword(p.peekToken.Type) {
+		p.reportError(p.peekToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.peekToken.Literal))
+		return nil
+	}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+	statement.Name = &Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.ASSIGN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected assignment, got %s", p.currToken.Type))
+		return nil
+	}
+
+	p.nextToken()
+	statement.Value = p.parseExpression(LOWEST)
+
+	return statement
+}
+
+// parseConstStatement parses a constant variable declaration of the form "const ident = expr".
+func (p *Parser) parseConstStatement() *ConstStatement {
+	statement := &ConstStatement{Token: p.currToken}
 
 	if lexer.IsKeyword(p.peekToken.Type) {
 		p.reportError(p.peekToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.peekToken.Literal))

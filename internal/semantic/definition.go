@@ -8,14 +8,14 @@ import (
 
 // findVarSymbolInScope checks if a variable name has been declared in the current or
 // any outer scope. It returns true if the variable is found, false otherwise.
-func (a *Analyzer) findVarSymbolInScope(varName string) (symbol.Symbol, bool) {
+func (a *Analyzer) findVarSymbolInScope(varName string) (ScopeEntry, bool) {
 	for i := len(a.scopes) - 1; i >= 0; i-- {
-		if sym, ok := a.scopes[i][varName]; ok {
-			return sym, true
+		if entry, ok := a.scopes[i][varName]; ok {
+			return entry, true
 		}
 	}
 
-	return symbol.AnySymbol(), false
+	return ScopeEntry{}, false
 }
 
 // findTypeSymbolInTypes converts a type name string into its corresponding symbol.Symbol representation,

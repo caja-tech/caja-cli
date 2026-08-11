@@ -1,0 +1,3 @@
+import let_module
+let_module.val = 20
+return let_module.val
