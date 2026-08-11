@@ -146,6 +146,14 @@ func (env *Environment) newMathModule() *Module {
 			return &Number{Value: math.Log(nObj.Value) / math.Log(bObj.Value)}, nil
 		}})
 
+	mathEnv.Set("PI", &Number{Value: math.Pi})
+	mathEnv.Set("E", &Number{Value: math.E})
+	mathEnv.Set("SQRT2", &Number{Value: math.Sqrt2})
+	mathEnv.Set("LN2", &Number{Value: math.Ln2})
+	mathEnv.Set("LN10", &Number{Value: math.Ln10})
+	mathEnv.Set("LOG2E", &Number{Value: math.Log2E})
+	mathEnv.Set("LOG10E", &Number{Value: math.Log10E})
+
 	return &Module{
 		Name: moduleName,
 		Env:  mathEnv,
