@@ -308,6 +308,33 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
+func TestPropertyAssignmentStatement(t *testing.T) {
+	input := `obj.prop = 42`
+	tknzr := lexer.New(input)
+	p := New(tknzr)
+	program := p.Parse()
+
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser has %d errors: %v", len(p.Errors()), p.Errors())
+	}
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*PropertyAssignmentStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not PropertyAssignmentStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.TokenLiteral() != "=" {
+		t.Errorf("stmt.TokenLiteral not '='. got=%q", stmt.TokenLiteral())
+	}
+	if stmt.Property.Value != "prop" {
+		t.Errorf("stmt.Property.Value not 'prop'. got=%q", stmt.Property.Value)
+	}
+}
+
 // TestInvalidAssignmentTargetErrors ensures that assigning to non-identifiers
 // or non-index expressions generates the correct syntax error.
 func TestInvalidAssignmentTargetErrors(t *testing.T) {
@@ -609,6 +636,53 @@ func TestLetStatements(t *testing.T) {
 	}
 
 	runTestScenarios(t, tests)
+}
+
+func TestConstStatements(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "Basic const assignment",
+			input: "const a = 10",
+			expected: "const a = 10",
+		},
+		{
+			name:  "Const assignment with expression",
+			input: "const b = a + 5",
+			expected: "const b = (a + 5)",
+		},
+		{
+			name:  "Private const assignment",
+			input: "private const secret = 42",
+			expected: "private const secret = 42",
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestConstStatementErrors(t *testing.T) {
+	tests := []string{
+		"const import \"foo\"",
+		"import const \"foo\"",
+		"const return 10",
+		"return const 10",
+		"const",
+		"let const = 10",
+		"const const = 10",
+		"const type MyFunc fn(Number): Number",
+		"type const MyFunc fn(Number): Number",
+		"type const fn(Number): Number",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			l := lexer.New(input)
+			p := New(l)
+			p.Parse()
+			if !p.HasErrors() {
+				t.Fatalf("expected parsing error for input: %q", input)
+			}
+		})
+	}
 }
 
 // TestLetStatementErrors validates that malformed let statements are caught by the parser.
@@ -999,13 +1073,13 @@ func TestPrivateModifierErrors(t *testing.T) {
 	}{
 		{
 			name:          "Private on import",
-			input:         "private import math",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let' or 'type'",
+			input:         "private import \"foo\"",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'",
 		},
 		{
 			name:          "Private on return",
 			input:         "private return 10",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let' or 'type'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'",
 		},
 		{
 			name:          "Return private",
@@ -1025,7 +1099,7 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private standalone",
 			input:         "private",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let' or 'type'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'",
 		},
 	}
 

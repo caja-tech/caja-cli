@@ -56,6 +56,24 @@ func TestModules(t *testing.T) {
 			expectVal:   15,
 		},
 		{
+			name:        "Let Module Import Reassign",
+			file:        "let_import_reassign.caja",
+			expectError: false,
+			expectVal:   20,
+		},
+		{
+			name:        "Const Array Mutation",
+			file:        "const_array_mutation.caja",
+			expectError: false,
+			expectVal:   5,
+		},
+		{
+			name:        "Const Module Import Reassign",
+			file:        "const_import_reassign.caja",
+			expectError: true,
+			errorMsg:    "semantic error: cannot assign to constant property 'val'",
+		},
+		{
 			name:        "Transitive Module Alias Import",
 			file:        "transitive_one.caja",
 			expectError: false,

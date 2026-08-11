@@ -13,7 +13,7 @@ import (
 // It manages variable scopes and tracks semantic errors such as
 // undeclared variables and variable redeclarations.
 type Analyzer struct {
-	scopes        []map[string]symbol.Symbol
+	scopes        []map[string]ScopeEntry
 	types         map[string]symbol.Symbol
 	errors        []string
 	functionDepth int
@@ -25,9 +25,9 @@ type Analyzer struct {
 
 // New creates and returns a new Analyzer with an initial global scope.
 func New(globalEnv *environment.Environment) *Analyzer {
-	globalScope := make(map[string]symbol.Symbol)
+	globalScope := make(map[string]ScopeEntry)
 	analyzer := &Analyzer{
-		scopes:    []map[string]symbol.Symbol{globalScope},
+		scopes:    []map[string]ScopeEntry{globalScope},
 		types:     make(map[string]symbol.Symbol),
 		errors:    make([]string, 0),
 		globalEnv: globalEnv,
@@ -60,10 +60,14 @@ func (a *Analyzer) analyze(node syntax.Node) symbol.Symbol {
 		return a.analyzeBlockStatement(n)
 	case *syntax.LetStatement:
 		return a.analyzeLetStatement(n)
+	case *syntax.ConstStatement:
+		return a.analyzeConstStatement(n)
 	case *syntax.AssignStatement:
 		return a.analyzeAssignStatement(n)
 	case *syntax.IndexAssignmentStatement:
 		return a.analyzeIndexAssignmentStatement(n)
+	case *syntax.PropertyAssignmentStatement:
+		return a.analyzePropertyAssignmentStatement(n)
 	case *syntax.Identifier:
 		return a.analyzeIdentifier(n)
 	case *syntax.IfExpression:
@@ -136,7 +140,25 @@ func (a *Analyzer) analyzeProgram(n *syntax.Program) symbol.Symbol {
 		}
 		a.analyze(s)
 	}
-	return symbol.AnySymbol()
+
+	exports := make(map[string]symbol.Symbol)
+	privates := make(map[string]bool)
+	constants := make(map[string]bool)
+	
+	// Assuming top-level declarations are in the first scope (index 0)
+	if len(a.scopes) > 0 {
+		for name, entry := range a.scopes[0] {
+			exports[name] = entry.Sym
+			if a.privates[name] {
+				privates[name] = true
+			}
+			if entry.IsConstant {
+				constants[name] = true
+			}
+		}
+	}
+
+	return symbol.NewModuleSymbol("module", exports, privates, constants)
 }
 
 // analyzeIndexAssignmentStatement ensures that the indexed target is an array,
@@ -152,6 +174,27 @@ func (a *Analyzer) analyzeIndexAssignmentStatement(n *syntax.IndexAssignmentStat
 		a.reportError(n.Token, fmt.Sprintf("type error: array index must be NUMBER, got %s", idxSym.Type()))
 	}
 
+	a.analyze(n.Value)
+	return symbol.AnySymbol()
+}
+
+// analyzePropertyAssignmentStatement ensures that the object is a module,
+// checks that the property exists, is not private and is not constant,
+// and evaluates the assigned value.
+func (a *Analyzer) analyzePropertyAssignmentStatement(n *syntax.PropertyAssignmentStatement) symbol.Symbol {
+	leftSym := a.analyze(n.Object)
+	
+	if leftSym.Type() != environment.MODULE_OBJ && leftSym.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: property assignment not supported for %s", leftSym.Type()))
+	}
+	
+	if modSymbol, ok := leftSym.(*symbol.ModuleSymbol); ok {
+		// Module symbol is available (e.g., standard modules)
+		if modSymbol.IsConstant(n.Property.Value) {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant property '%s'", n.Property.Value))
+		}
+	}
+	
 	a.analyze(n.Value)
 	return symbol.AnySymbol()
 }
@@ -198,7 +241,7 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) symbol.Symbol {
 		}
 
 		fnSymbol := symbol.NewFunctionSymbol(len(fnNode.Parameters), paramTypes, returnType)
-		a.declare(n.Name.Value, fnSymbol)
+		a.declare(n.Name.Value, fnSymbol, false)
 
 		if guaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
@@ -211,7 +254,60 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) symbol.Symbol {
 		valType = a.analyze(n.Value)
 	}
 
-	a.declare(n.Name.Value, valType)
+	a.declare(n.Name.Value, valType, false)
+	
+	if n.IsPrivate {
+		if len(a.scopes) > 1 {
+			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
+		} else {
+			a.privates[n.Name.Value] = true
+		}
+	}
+
+	return valType
+}
+
+// analyzeConstStatement checks for variable redeclarations and registers the
+// newly declared constant in the current scope with its analyzed type.
+func (a *Analyzer) analyzeConstStatement(n *syntax.ConstStatement) symbol.Symbol {
+	if _, exists := a.findVarSymbolInScope(n.Name.Value); exists {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
+	}
+
+	if fnNode, ok := n.Value.(*syntax.FunctionLiteral); ok {
+		var paramTypes []symbol.Symbol
+		for _, param := range fnNode.Parameters {
+			typeName, ok := a.findTypeSymbolInTypes(param.Type)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+			}
+			paramTypes = append(paramTypes, typeName)
+		}
+
+		var returnType symbol.Symbol
+		if fnNode.ReturnType != "" {
+			resolvedReturnType, ok := a.findTypeSymbolInTypes(fnNode.ReturnType)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
+			}
+			returnType = resolvedReturnType
+		}
+
+		fnSymbol := symbol.NewFunctionSymbol(len(fnNode.Parameters), paramTypes, returnType)
+		a.declare(n.Name.Value, fnSymbol, true)
+
+		if guaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
+		}
+	}
+
+	var valType symbol.Symbol
+	valType = symbol.AnySymbol()
+	if n.Value != nil {
+		valType = a.analyze(n.Value)
+	}
+
+	a.declare(n.Name.Value, valType, true)
 	
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -233,10 +329,13 @@ func (a *Analyzer) analyzeAssignStatement(n *syntax.AssignStatement) symbol.Symb
 		sym = a.analyze(n.Value)
 	}
 
-	expectedType, exists := a.findVarSymbolInScope(n.Name.Value)
+	entry, exists := a.findVarSymbolInScope(n.Name.Value)
 	if !exists {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'. Use 'let' to declare it.", n.Name.Value))
+	} else if entry.IsConstant {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant variable '%s'", n.Name.Value))
 	} else {
+		expectedType := entry.Sym
 		if expectedType.Type() != sym.Type() && expectedType.Type() != environment.ANY_OBJ && sym.Type() != environment.ANY_OBJ {
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type(), n.Name.Value, expectedType.Type()))
 		}
@@ -248,8 +347,8 @@ func (a *Analyzer) analyzeAssignStatement(n *syntax.AssignStatement) symbol.Symb
 // analyzeIdentifier resolves the identifier in the current and outer scopes,
 // logging an error if it has not been declared.
 func (a *Analyzer) analyzeIdentifier(n *syntax.Identifier) symbol.Symbol {
-	if sym, ok := a.findVarSymbolInScope(n.Value); ok {
-		return sym
+	if entry, ok := a.findVarSymbolInScope(n.Value); ok {
+		return entry.Sym
 	}
 
 	a.reportError(n.Token, fmt.Sprintf("semantic error: undeclared variable '%s'. Use 'let' to declare it.", n.Value))
@@ -454,7 +553,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *syntax.FunctionLiteral) symbol.Symb
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
 		}
 		paramTypes = append(paramTypes, paramSymbol)
-		a.declare(param.Name, paramSymbol)
+		a.declare(param.Name, paramSymbol, true)
 	}
 
 	actualReturnSymbol := a.analyze(n.Body)
@@ -610,8 +709,8 @@ func (a *Analyzer) analyzeImportStatement(n *syntax.ImportStatement) symbol.Symb
 	modName := n.Name.Value
 
 	if symbols, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols, nil)
-		a.declare(modName, modSymbol)
+		modSymbol := symbol.NewModuleSymbol(modName, symbols, nil, nil)
+		a.declare(modName, modSymbol, true)
 		return modSymbol
 	}
 
@@ -646,7 +745,7 @@ func (a *Analyzer) analyzeImportStatement(n *syntax.ImportStatement) symbol.Symb
 		return symbol.AnySymbol()
 	}
 
-	a.declare(modName, modSymbol)
+	a.declare(modName, modSymbol, true)
 	return modSymbol
 }
 

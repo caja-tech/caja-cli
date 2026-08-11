@@ -9,18 +9,22 @@ type ModuleSymbol struct {
 	name       string
 	scope      map[string]Symbol
 	privates   map[string]bool
+	constants  map[string]bool
 }
 
 // NewModuleSymbol creates and returns a new ModuleSymbol with the specified name and exported scope.
-func NewModuleSymbol(name string, scope map[string]Symbol, privates map[string]bool) *ModuleSymbol {
+func NewModuleSymbol(name string, scope map[string]Symbol, privates map[string]bool, constants map[string]bool) *ModuleSymbol {
 	if privates == nil {
 		privates = make(map[string]bool)
 	}
-	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, privates: privates}
+	if constants == nil {
+		constants = make(map[string]bool)
+	}
+	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, privates: privates, constants: constants}
 }
 
 // Equals compares this ModuleSymbol with another Symbol to determine if they represent the same module.
-// It returns true if both are ModuleSymbols and they share the same name.
+// It returns true if both are ModuleSymbols, and they share the same name.
 func (ms *ModuleSymbol) Equals(other Symbol) bool {
 	otherSymbol, ok := other.(*ModuleSymbol)
 	if !ok {
@@ -45,4 +49,9 @@ func (ms *ModuleSymbol) GetSymbol(symbolName string) (Symbol, bool) {
 // IsPrivate returns true if the given symbol name is marked as private within this module.
 func (ms *ModuleSymbol) IsPrivate(symbolName string) bool {
 	return ms.privates[symbolName]
+}
+
+// IsConstant returns true if the given symbol name is marked as a constant within this module.
+func (ms *ModuleSymbol) IsConstant(symbolName string) bool {
+	return ms.constants[symbolName]
 }

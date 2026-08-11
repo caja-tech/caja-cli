@@ -28,6 +28,7 @@ const (
 	EQ       TokenType = "EQ"
 	NEQ      TokenType = "NEQ"
 	BANG     TokenType = "BANG"
+	CONST    TokenType = "CONST"
 
 	// Delimiters
 	LPAREN   TokenType = "LPAREN"
@@ -76,6 +77,7 @@ var keywords = map[string]TokenType{
 	"true":    TRUE,
 	"false":   FALSE,
 	"type":    TYPE,
+	"const":   CONST,
 	"import":  IMPORT,
 	"as":      AS,
 	"and":     AND,

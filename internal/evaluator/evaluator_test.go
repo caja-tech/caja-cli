@@ -178,6 +178,18 @@ func TestEvaluateMath(t *testing.T) {
 // simple assign-and-read, arithmetic with multiple variables, self-referencing
 // reassignment, and cascading assignments where later variables depend on
 // earlier ones.
+func TestEvaluateConst(t *testing.T) {
+	tests := []testScenario{
+		{"Return const", "const a = 5\nreturn a", 5.0},
+		{"Math with const", "const a = 5 * 5\nreturn a", 25.0},
+		{"Const from const", "const a = 5\nconst b = a\nreturn b", 5.0},
+		{"Cascading consts", "const a = 5\nconst b = a + 5\nconst c = a + b + 5\nreturn c", 20.0},
+		{"Private const", "private const a = 42\nreturn a", 42.0},
+	}
+
+	runTestScenarios(t, tests)
+}
+
 func TestEvaluateVariables(t *testing.T) {
 	var tests = []testScenario{
 		{"Assign and return", "let rate = 15.5\nreturn rate", 15.5},

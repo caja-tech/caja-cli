@@ -261,6 +261,31 @@ func (ls *LetStatement) String() string {
 	return out
 }
 
+// ConstStatement is a statement node that represents an immutable variable declaration
+// and initialization (e.g. "const rate = 100"). Token holds the "const" keyword token,
+// Name is the target identifier, and Value is the right-hand-side expression.
+type ConstStatement struct {
+	Token lexer.Token
+	Name  *Identifier
+	Value Expression
+	IsPrivate bool
+}
+
+func (cs *ConstStatement) statementNode()       {}
+func (cs *ConstStatement) TokenLiteral() string { return cs.Token.Literal }
+func (cs *ConstStatement) String() string {
+	var out string
+	if cs.IsPrivate {
+		out += "private "
+	}
+	out += cs.TokenLiteral() + " " + cs.Name.String() + " = "
+
+	if cs.Value != nil {
+		out += cs.Value.String()
+	}
+	return out
+}
+
 // AssignStatement is a statement node that binds the result of an expression
 // to an identifier (e.g. "rate = 100 / 2"). Token holds the '=' token, Name
 // is the target identifier, and Value is the right-hand-side expression.
@@ -290,6 +315,20 @@ func (i *IndexAssignmentStatement) statementNode() {}
 func (i *IndexAssignmentStatement) TokenLiteral() string { return i.Token.Literal }
 func (i *IndexAssignmentStatement) String() string {
 	return i.Left.String() + "[" + i.Index.String() + "] = " + i.Value.String()
+}
+
+// PropertyAssignmentStatement binds an expression result to an object's property.
+type PropertyAssignmentStatement struct {
+	Token    lexer.Token // The '=' token
+	Object   Expression  // The object being modified
+	Property *Identifier // The specific property to reassign
+	Value    Expression  // The value being assigned
+}
+
+func (p *PropertyAssignmentStatement) statementNode() {}
+func (p *PropertyAssignmentStatement) TokenLiteral() string { return p.Token.Literal }
+func (p *PropertyAssignmentStatement) String() string {
+	return p.Object.String() + "." + p.Property.String() + " = " + p.Value.String()
 }
 
 // ExpressionStatement wraps a standalone expression that appears as a
