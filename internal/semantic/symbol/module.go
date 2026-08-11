@@ -8,11 +8,15 @@ type ModuleSymbol struct {
 	symbolType environment.ObjectType
 	name       string
 	scope      map[string]Symbol
+	privates   map[string]bool
 }
 
 // NewModuleSymbol creates and returns a new ModuleSymbol with the specified name and exported scope.
-func NewModuleSymbol(name string, scope map[string]Symbol) *ModuleSymbol {
-	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope}
+func NewModuleSymbol(name string, scope map[string]Symbol, privates map[string]bool) *ModuleSymbol {
+	if privates == nil {
+		privates = make(map[string]bool)
+	}
+	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, privates: privates}
 }
 
 // Equals compares this ModuleSymbol with another Symbol to determine if they represent the same module.
@@ -36,4 +40,9 @@ func (ms *ModuleSymbol) Type() environment.ObjectType {
 func (ms *ModuleSymbol) GetSymbol(symbolName string) (Symbol, bool) {
 	symbol, ok := ms.scope[symbolName]
 	return symbol, ok
+}
+
+// IsPrivate returns true if the given symbol name is marked as private within this module.
+func (ms *ModuleSymbol) IsPrivate(symbolName string) bool {
+	return ms.privates[symbolName]
 }

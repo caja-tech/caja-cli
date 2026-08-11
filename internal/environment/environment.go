@@ -32,6 +32,7 @@ type EnvRegistry struct {
 	Loading     map[string]bool
 	ModuleASTs  map[string]*syntax.Program // ASTs parsed during semantic analysis
 	ExportedValues *[]Object
+	privates    map[string]bool
 }
 
 // Environment provides a symbol table to store and retrieve variables
@@ -55,12 +56,13 @@ func NewEnvironment(baseDir string, fileName string, isModule bool) *Environment
 			IsModule: isModule,
 		},
 		EnvRegistry: EnvRegistry{
-			store:       make(map[string]Object),
-			CallStack:   []StackFrame{},
-			ModuleCache: make(map[string]*Module),
-			Loading:     make(map[string]bool),
-			ModuleASTs:  make(map[string]*syntax.Program),
+			store:          make(map[string]Object),
+			CallStack:      []StackFrame{},
+			ModuleCache:    make(map[string]*Module),
+			Loading:        make(map[string]bool),
+			ModuleASTs:     make(map[string]*syntax.Program),
 			ExportedValues: &exportedValues,
+			privates:       make(map[string]bool),
 		},
 	}
 }
@@ -83,6 +85,7 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 		env.Loading = outer.Loading
 		env.ModuleASTs = outer.ModuleASTs
 		env.ExportedValues = outer.ExportedValues
+		env.privates = outer.privates
 	}
 	return env
 }
@@ -100,9 +103,19 @@ func (env *Environment) Get(key string) (Object, bool) {
 
 // Set defines a new variable or updates an existing one in the current
 // environment and returns its value.
-func (env *Environment) Set(key string, val Object) Object {
-	env.store[key] = val
+func (e *Environment) Set(name string, val Object) Object {
+	e.store[name] = val
 	return val
+}
+
+// MarkPrivate marks a variable as private to this module.
+func (e *Environment) MarkPrivate(name string) {
+	e.privates[name] = true
+}
+
+// IsPrivate returns true if the variable is marked as private in the current module's registry.
+func (e *Environment) IsPrivate(name string) bool {
+	return e.privates[name]
 }
 
 // Assign updates the value of an existing variable in the innermost scope

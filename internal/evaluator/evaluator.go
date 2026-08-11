@@ -203,6 +203,10 @@ func evalPropertyExpression(node *syntax.PropertyExpression, env *environment.En
 		return nil, fmt.Errorf("runtime error: property '%s' not found in module '%s'", node.Property.Value, module.Name)
 	}
 
+	if module.Env.IsPrivate(node.Property.Value) {
+		return nil, fmt.Errorf("runtime error: property '%s' is private and cannot be accessed from outside module '%s'", node.Property.Value, module.Name)
+	}
+
 	return val, nil
 }
 
@@ -272,6 +276,9 @@ func evalLetStatement(node *syntax.LetStatement, env *environment.Environment) (
 		return nil, err
 	}
 	env.Set(node.Name.Value, val)
+	if node.IsPrivate {
+		env.MarkPrivate(node.Name.Value)
+	}
 	return val, nil
 }
 
