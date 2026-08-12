@@ -173,6 +173,8 @@ func (fl *FunctionLiteral) String() string {
 	return out
 }
 
+// StructLiteral is an expression node representing a struct instantiation.
+// It holds the struct name identifier and a map of provided field values.
 type StructLiteral struct {
 	Token      lexer.Token // The '{' token
 	StructName string
@@ -355,6 +357,8 @@ func (fs *FunctionSignature) String() string {
 	return out
 }
 
+// StructField represents a single field definition within a struct type alias,
+// holding the field's name, expected type string, and constant modifier.
 type StructField struct {
 	Name       *Identifier
 	Type       string
@@ -368,6 +372,8 @@ func (sf *StructField) String() string {
 	return sf.Name.String() + " " + sf.Type
 }
 
+// StructDefinition represents the body of a struct type declaration,
+// containing the struct keyword token and a slice of field definitions.
 type StructDefinition struct {
 	Token  lexer.Token // The 'struct' token
 	Fields []StructField

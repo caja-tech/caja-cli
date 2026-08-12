@@ -34,7 +34,7 @@ type Parser struct {
 	errors []string
 }
 
-// newParser creates a Parser for the given Tokenizer, registers the built-in prefix
+// New creates a Parser for the given Tokenizer, registers the built-in prefix
 // and infix parse functions for identifiers, numbers, grouped expressions, and
 // arithmetic operators, and primes the two-token lookahead by reading twice.
 func New(t *lexer.Lexer) *Parser {
@@ -86,7 +86,7 @@ func New(t *lexer.Lexer) *Parser {
 	return p
 }
 
-// parse consumes all tokens from the Tokenizer and returns a Program AST.
+// Parse consumes all tokens from the Tokenizer and returns a Program AST.
 // Each iteration parses one statement; if parsing fails, synchronize is called
 // to skip ahead to the next likely statement boundary before continuing.
 func (p *Parser) Parse() *ast.Program {
@@ -130,6 +130,7 @@ func (p *Parser) HasErrors() bool {
 	return len(p.Errors()) > 0
 }
 
+// parseNilLiteral returns a NilLiteral expression node for the current token.
 func (p *Parser) parseNilLiteral() ast.Expression {
 	return &ast.NilLiteral{Token: p.currToken}
 }
