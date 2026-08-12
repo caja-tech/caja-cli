@@ -226,6 +226,8 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	return symbol.NewFunctionSymbol(len(n.Parameters), paramTypes, expectedReturnSymbol)
 }
 
+// analyzeStructLiteral validates the fields of a struct instantiation
+// against its struct definition, checking for missing or mismatched fields.
 func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 	defSym, ok := a.findTypeSymbolInTypes(n.StructName)
 	if !ok {
@@ -744,6 +746,8 @@ func (a *Analyzer) analyzeIndexAssignmentStatement(n *ast.IndexAssignmentStateme
 	return symbol.AnySymbol()
 }
 
+// analyzePropertyExpression ensures that the object is a module or struct,
+// checks that the property exists, and handles nullable object safe navigation.
 func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.Symbol {
 	leftSymbol := a.analyze(n.Object)
 

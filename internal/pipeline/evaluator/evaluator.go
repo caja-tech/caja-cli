@@ -419,6 +419,8 @@ func evalInfixExpressionNode(node *ast.InfixExpression, env *environment.Environ
 	return evalInfixExpression(node.Operator, left, right)
 }
 
+// evalBooleanInfixExpression applies a logical operator (and, or, xor) to
+// the left and right boolean operands, returning the resulting boolean.
 func evalBooleanInfixExpression(operator string, left, right environment.Object) (environment.Object, error) {
 	if left.Type() != environment.BOOLEAN_OBJ || right.Type() != environment.BOOLEAN_OBJ {
 		return nil, fmt.Errorf("type mismatch")
@@ -714,6 +716,8 @@ func isTruthy(val environment.Object) bool {
 	return false
 }
 
+// evalStructLiteral evaluates all field expressions within a struct literal
+// and constructs a StructObject holding the evaluated field values.
 func evalStructLiteral(node *ast.StructLiteral, env *environment.Environment) (environment.Object, error) {
 	fields := make(map[string]environment.Object)
 
