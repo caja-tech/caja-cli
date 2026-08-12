@@ -25,6 +25,22 @@ func (a *Analyzer) findTypeSymbolInTypes(typeName string) (symbol.Symbol, bool) 
 		return symbol.AnySymbol(), false
 	}
 
+	isNullable := false
+	if strings.HasSuffix(typeName, "?") {
+		isNullable = true
+		typeName = typeName[:len(typeName)-1]
+	}
+
+	resultSymbol, ok := a.findTypeSymbolInTypesRaw(typeName)
+	if isNullable {
+		resultSymbol = &symbol.NullableSymbol{Underlying: resultSymbol}
+	}
+	return resultSymbol, ok
+}
+
+// findTypeSymbolInTypesRaw handles the actual symbol lookup without nullable wrapping.
+func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, bool) {
+
 	if strings.HasPrefix(typeName, "[") && strings.HasSuffix(typeName, "]") {
 		innerTypeStr := typeName[1 : len(typeName)-1]
 		innerSymbol, ok := a.findTypeSymbolInTypes(innerTypeStr)
@@ -43,6 +59,26 @@ func (a *Analyzer) findTypeSymbolInTypes(typeName string) (symbol.Symbol, bool) 
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ), true
 	case "Date":
 		return symbol.NewBasicSymbol(environment.DATE_OBJ), true
+	}
+
+	if strings.Contains(typeName, ".") {
+		parts := strings.SplitN(typeName, ".", 2)
+		modName := parts[0]
+		propName := parts[1]
+		
+		entry, ok := a.findVarSymbolInScope(modName)
+		if ok {
+			if modSym, ok := entry.Sym.(*symbol.ModuleSymbol); ok {
+				if modSym.IsPrivate(propName) {
+					// Treat private types as undefined when accessed from outside
+					return symbol.AnySymbol(), false
+				}
+				if typeSym, ok := modSym.GetType(propName); ok {
+					return typeSym, true
+				}
+			}
+		}
+		return symbol.AnySymbol(), false
 	}
 
 	if sym, ok := a.types[typeName]; ok {

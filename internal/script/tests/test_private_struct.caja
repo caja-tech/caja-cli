@@ -1,0 +1,4 @@
+import "struct_module" as sm
+
+let s = sm.Secret { token: "123" }
+return 1

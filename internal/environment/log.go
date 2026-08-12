@@ -7,9 +7,9 @@ import (
 
 // newLogModule initializes and returns a builtin "log" module,
 // populating it with standard logging functions.
-func (env *Environment) newLogModule() *Module {
+func (e *Environment) newLogModule() *Module {
 	moduleName := "log"
-	logEnv := NewEnvironment(env.BaseDir, moduleName, true)
+	logEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	createLogFunc := func(level string) *Builtin {
 		return &Builtin{
@@ -25,7 +25,7 @@ func (env *Environment) newLogModule() *Module {
 
 				timestamp := time.Now().Format("2006-01-02 15:04:05.000")
 				valStr := FormatObject(args[1])
-				
+
 				logPrefix := "Info"
 				if level == "warn" {
 					logPrefix = "Warning"
@@ -49,13 +49,12 @@ func (env *Environment) newLogModule() *Module {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("arity error: expected 1 argument for 'export', got %d", len(args))
 			}
-			if env.ExportedValues != nil {
-				*env.ExportedValues = append(*env.ExportedValues, args[0])
+			if e.ExportedValues != nil {
+				*e.ExportedValues = append(*e.ExportedValues, args[0])
 			}
 			return nil, nil
 		},
 	})
-
 
 	return &Module{
 		Name: moduleName,

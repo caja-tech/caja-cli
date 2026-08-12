@@ -1155,3 +1155,121 @@ func TestTypeAliasUsage(t *testing.T) {
 
 	runTestScenarios(t, tests)
 }
+
+func TestNullableTypesAndNavigation(t *testing.T) {
+	t.Run("Nullable Struct Properties", func(t *testing.T) {
+		input := `
+		type Node struct {
+			value Number
+			next Node?
+		}`
+		l := lexer.New(input)
+		p := New(l)
+		program := p.Parse()
+
+		if len(p.Errors()) != 0 {
+			t.Fatalf("parser returned errors: %v", p.Errors())
+		}
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("expected 1 statement, got %d", len(program.Statements))
+		}
+
+		typeAlias, ok := program.Statements[0].(*TypeAliasStatement)
+		if !ok {
+			t.Fatalf("statement is not TypeAliasStatement. got=%T", program.Statements[0])
+		}
+
+		structNode := typeAlias.StructDefinition
+		if structNode == nil {
+			t.Fatalf("target type is not StructDefinition. got=nil")
+		}
+
+		var nextType string
+		for _, f := range structNode.Fields {
+			if f.Name.Value == "next" {
+				nextType = f.Type
+			}
+		}
+		if nextType != "Node?" {
+			t.Errorf("expected 'next' field type to be Node?, got %s", nextType)
+		}
+	})
+
+	t.Run("Nullable Function Params and Return Type", func(t *testing.T) {
+		input := "let f = fn(node: Node?): Node? { return node }"
+		l := lexer.New(input)
+		p := New(l)
+		program := p.Parse()
+		
+		if len(p.Errors()) != 0 {
+			t.Fatalf("parser returned errors: %v", p.Errors())
+		}
+
+		letStmt := program.Statements[0].(*LetStatement)
+		fnLit := letStmt.Value.(*FunctionLiteral)
+		if fnLit.Parameters[0].Type != "Node?" {
+			t.Errorf("expected param type Node?, got %s", fnLit.Parameters[0].Type)
+		}
+		if fnLit.ReturnType != "Node?" {
+			t.Errorf("expected return type Node?, got %s", fnLit.ReturnType)
+		}
+	})
+
+	t.Run("Consecutive Safe Navigation", func(t *testing.T) {
+		input := "user?.address?.city"
+		l := lexer.New(input)
+		p := New(l)
+		program := p.Parse()
+		
+		if len(p.Errors()) != 0 {
+			t.Fatalf("parser returned errors: %v", p.Errors())
+		}
+
+		exprStmt := program.Statements[0].(*ExpressionStatement)
+		propExpr := exprStmt.Expression.(*PropertyExpression)
+		if !propExpr.Safe {
+			t.Errorf("expected Safe=true for .city")
+		}
+		if propExpr.Property.Value != "city" {
+			t.Errorf("expected property 'city', got %s", propExpr.Property.Value)
+		}
+		innerProp := propExpr.Object.(*PropertyExpression)
+		if !innerProp.Safe {
+			t.Errorf("expected Safe=true for .address")
+		}
+	})
+
+	t.Run("Nullable Primitives Forbidden", func(t *testing.T) {
+		inputs := []string{
+			"type T struct { a Number? }",
+			"type T struct { a String? }",
+			"type T struct { a Boolean? }",
+			"type T struct { a Date? }",
+		}
+		for _, input := range inputs {
+			l := lexer.New(input)
+			p := New(l)
+			p.Parse()
+			
+			if len(p.Errors()) == 0 {
+				t.Fatalf("expected parsing error for input '%s', but found none", input)
+			}
+			if !contains(p.Errors()[0], "cannot be nullable") {
+				t.Errorf("expected primitive nullable error, got: %v", p.Errors())
+			}
+		}
+	})
+}
+
+// contains is a helper to check if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || s[0:len(substr)] == substr || s[len(s)-len(substr):] == substr || func() bool {
+		for i := 0; i <= len(s)-len(substr); i++ {
+			if s[i:i+len(substr)] == substr {
+				return true
+			}
+		}
+		return false
+	}())
+}

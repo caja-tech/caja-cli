@@ -869,3 +869,71 @@ func TestPrivateTypeTokenization(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+// TestStructTokenization verifies the tokenization of the struct definition and struct literal block
+func TestStructTokenization(t *testing.T) {
+	input := "type User struct {\n const name String\n}\nlet u = User { name: \"Bob\" }"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Type keyword", Token{TYPE, "type", 1, 1}},
+		{"Identifier User", Token{IDENT, "User", 1, 6}},
+		{"Struct keyword", Token{STRUCT, "struct", 1, 11}},
+		{"Left brace", Token{LBRACE, "{", 1, 18}},
+		
+		{"Const keyword", Token{CONST, "const", 2, 2}},
+		{"Identifier name", Token{IDENT, "name", 2, 8}},
+		{"Type String", Token{IDENT, "String", 2, 13}},
+		
+		{"Right brace", Token{RBRACE, "}", 3, 1}},
+		
+		{"Let keyword", Token{LET, "let", 4, 1}},
+		{"Identifier u", Token{IDENT, "u", 4, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 4, 7}},
+		{"Identifier User", Token{IDENT, "User", 4, 9}},
+		{"Left brace", Token{LBRACE, "{", 4, 14}},
+		{"Identifier name", Token{IDENT, "name", 4, 16}},
+		{"Colon", Token{COLON, ":", 4, 20}},
+		{"String value", Token{STRING, "Bob", 4, 22}},
+		{"Right brace", Token{RBRACE, "}", 4, 28}},
+		{"End of file", Token{EOF, "", 4, 29}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestQuestionTokens verifies that ? and ?. are correctly tokenized, including edge cases.
+func TestQuestionTokens(t *testing.T) {
+	input := "Node? node?.next user?.address?.city [String]? Node ?"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		// Baseline
+		{"Identifier Node", Token{IDENT, "Node", 1, 1}},
+		{"Question mark", Token{QUESTION, "?", 1, 5}},
+		{"Identifier node", Token{IDENT, "node", 1, 7}},
+		{"Question dot", Token{QUESTIONDOT, "?.", 1, 11}},
+		{"Identifier next", Token{IDENT, "next", 1, 13}},
+		
+		// Consecutive safe navigation
+		{"Identifier user", Token{IDENT, "user", 1, 18}},
+		{"Question dot", Token{QUESTIONDOT, "?.", 1, 22}},
+		{"Identifier address", Token{IDENT, "address", 1, 24}},
+		{"Question dot", Token{QUESTIONDOT, "?.", 1, 31}},
+		{"Identifier city", Token{IDENT, "city", 1, 33}},
+		
+		// Nullable array type
+		{"Left Bracket", Token{LBRACKET, "[", 1, 38}},
+		{"Identifier String", Token{IDENT, "String", 1, 39}},
+		{"Right Bracket", Token{RBRACKET, "]", 1, 45}},
+		{"Question mark", Token{QUESTION, "?", 1, 46}},
+		
+		// Spacing edge case
+		{"Identifier Node", Token{IDENT, "Node", 1, 48}},
+		{"Question mark", Token{QUESTION, "?", 1, 53}},
+		
+		{"End of file", Token{EOF, "", 1, 54}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

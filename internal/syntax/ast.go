@@ -1,6 +1,8 @@
 package syntax
 
 import (
+	"strings"
+
 	"caja-cli/internal/lexer"
 )
 
@@ -145,6 +147,16 @@ type BooleanLiteral struct {
 func (b *BooleanLiteral) expressionNode()      {}
 func (b *BooleanLiteral) TokenLiteral() string { return b.Token.Literal }
 func (b *BooleanLiteral) String() string       { return b.Token.Literal }
+
+// NilLiteral is an expression node that represents a nil constant.
+// Token carries the original tokenizer.Token.
+type NilLiteral struct {
+	Token lexer.Token
+}
+
+func (n *NilLiteral) expressionNode()      {}
+func (n *NilLiteral) TokenLiteral() string { return n.Token.Literal }
+func (n *NilLiteral) String() string       { return n.Token.Literal }
 
 // ArrayLiteral is an expression node that represents a list of values.
 // Token carries the original tokenizer.Token (typically '['), and Elements
@@ -323,11 +335,15 @@ type PropertyAssignmentStatement struct {
 	Object   Expression  // The object being modified
 	Property *Identifier // The specific property to reassign
 	Value    Expression  // The value being assigned
+	Safe     bool        // True if accessed with ?.
 }
 
 func (p *PropertyAssignmentStatement) statementNode() {}
 func (p *PropertyAssignmentStatement) TokenLiteral() string { return p.Token.Literal }
 func (p *PropertyAssignmentStatement) String() string {
+	if p.Safe {
+		return p.Object.String() + "?." + p.Property.String() + " = " + p.Value.String()
+	}
 	return p.Object.String() + "." + p.Property.String() + " = " + p.Value.String()
 }
 
@@ -449,11 +465,12 @@ func (fs *FunctionSignature) String() string {
 // (e.g. "type BinaryOp fn(Number, Number): Number"). It holds the "type" token,
 // Name is the new alias identifier, and Signature is the function signature.
 type TypeAliasStatement struct {
-	Token      lexer.Token
-	Name       *Identifier
-	Signature  *FunctionSignature // Used for fn(...) types
-	TargetType string             // Used for simple alias types like Number, [String], etc.
-	IsPrivate  bool
+	Token            lexer.Token
+	Name             *Identifier
+	Signature        *FunctionSignature // Used for fn(...) types
+	TargetType       string             // Used for simple alias types like Number, [String], etc.
+	StructDefinition *StructDefinition  // Used for struct types
+	IsPrivate        bool
 }
 
 func (ts *TypeAliasStatement) statementNode()       {}
@@ -466,10 +483,60 @@ func (ts *TypeAliasStatement) String() string {
 	
 	if ts.Signature != nil {
 		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.Signature.String()
+	} else if ts.StructDefinition != nil {
+		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.StructDefinition.String()
 	} else {
 		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.TargetType
 	}
 	
+	return out
+}
+
+type StructField struct {
+	Name       *Identifier
+	Type       string
+	IsConstant bool
+}
+
+func (sf *StructField) String() string {
+	if sf.IsConstant {
+		return "const " + sf.Name.String() + " " + sf.Type
+	}
+	return sf.Name.String() + " " + sf.Type
+}
+
+type StructDefinition struct {
+	Token  lexer.Token // The 'struct' token
+	Fields []StructField
+}
+
+func (sd *StructDefinition) String() string {
+	var out string
+	out += "struct {\n"
+	for _, f := range sd.Fields {
+		out += "  " + f.String() + "\n"
+	}
+	out += "}"
+	return out
+}
+
+type StructLiteral struct {
+	Token      lexer.Token // The '{' token
+	StructName string
+	Fields     map[string]Expression
+}
+
+func (sl *StructLiteral) expressionNode()      {}
+func (sl *StructLiteral) TokenLiteral() string { return sl.Token.Literal }
+func (sl *StructLiteral) String() string {
+	var out string
+	out += sl.StructName + " {"
+	var fields []string
+	for name, val := range sl.Fields {
+		fields = append(fields, name+": "+val.String())
+	}
+	out += strings.Join(fields, ", ")
+	out += "}"
 	return out
 }
 
@@ -506,16 +573,21 @@ func (is *ImportStatement) String() string {
 	return is.TokenLiteral() + " " + is.Name.String()
 }
 
+
 // PropertyExpression represents a property access via dot notation (e.g. "second.myFunc").
 // Token holds the "." token, Object is the expression being accessed, and Property is the identifier.
 type PropertyExpression struct {
 	Token    lexer.Token
 	Object   Expression
 	Property *Identifier
+	Safe     bool
 }
 
 func (pe *PropertyExpression) expressionNode()      {}
 func (pe *PropertyExpression) TokenLiteral() string { return pe.Token.Literal }
 func (pe *PropertyExpression) String() string {
+	if pe.Safe {
+		return "(" + pe.Object.String() + "?." + pe.Property.String() + ")"
+	}
 	return "(" + pe.Object.String() + "." + pe.Property.String() + ")"
 }

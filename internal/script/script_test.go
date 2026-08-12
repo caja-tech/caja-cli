@@ -56,6 +56,12 @@ func TestModules(t *testing.T) {
 			expectVal:   15,
 		},
 		{
+			name:        "Nullable Struct Navigation",
+			file:        "test_nullable_struct_main.caja",
+			expectError: false,
+			expectVal:   100,
+		},
+		{
 			name:        "Let Module Import Reassign",
 			file:        "let_import_reassign.caja",
 			expectError: false,
@@ -96,6 +102,24 @@ func TestModules(t *testing.T) {
 			file:        "test_import_nonexistent.caja",
 			expectError: true,
 			errorMsg:    "failed to import 'does_not_exist'",
+		},
+		{
+			name:        "Struct Module Access",
+			file:        "test_struct_access.caja",
+			expectError: false,
+			expectVal:   10,
+		},
+		{
+			name:        "Private Struct Import",
+			file:        "test_private_struct.caja",
+			expectError: true,
+			errorMsg:    "semantic error: undefined struct 'sm.Secret'",
+		},
+		{
+			name:        "Const Struct Property Reassign",
+			file:        "test_const_struct_prop.caja",
+			expectError: true,
+			errorMsg:    "semantic error: cannot assign to constant property 'id' on struct 'sm.User'",
 		},
 		{
 			name:        "Folder Import",

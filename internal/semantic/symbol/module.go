@@ -8,19 +8,23 @@ type ModuleSymbol struct {
 	symbolType environment.ObjectType
 	name       string
 	scope      map[string]Symbol
+	types      map[string]Symbol
 	privates   map[string]bool
 	constants  map[string]bool
 }
 
 // NewModuleSymbol creates and returns a new ModuleSymbol with the specified name and exported scope.
-func NewModuleSymbol(name string, scope map[string]Symbol, privates map[string]bool, constants map[string]bool) *ModuleSymbol {
+func NewModuleSymbol(name string, scope map[string]Symbol, types map[string]Symbol, privates map[string]bool, constants map[string]bool) *ModuleSymbol {
+	if types == nil {
+		types = make(map[string]Symbol)
+	}
 	if privates == nil {
 		privates = make(map[string]bool)
 	}
 	if constants == nil {
 		constants = make(map[string]bool)
 	}
-	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, privates: privates, constants: constants}
+	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, types: types, privates: privates, constants: constants}
 }
 
 // Equals compares this ModuleSymbol with another Symbol to determine if they represent the same module.
@@ -54,4 +58,10 @@ func (ms *ModuleSymbol) IsPrivate(symbolName string) bool {
 // IsConstant returns true if the given symbol name is marked as a constant within this module.
 func (ms *ModuleSymbol) IsConstant(symbolName string) bool {
 	return ms.constants[symbolName]
+}
+
+// GetType retrieves an exported type from the module's types map.
+func (ms *ModuleSymbol) GetType(typeName string) (Symbol, bool) {
+	symbol, ok := ms.types[typeName]
+	return symbol, ok
 }

@@ -20,6 +20,10 @@ func NewArraySymbol(elementSymbol Symbol) *ArraySymbol {
 // Equals compares this ArraySymbol with another Symbol to determine if they represent the same type.
 // It returns true if they are both ArraySymbols and their inner element symbols match, or if either is an ANY_OBJ.
 func (as *ArraySymbol) Equals(other Symbol) bool {
+	if other.Type() == environment.ANY_OBJ || as.Type() == environment.ANY_OBJ {
+		return true
+	}
+
 	otherSymbol, ok := other.(*ArraySymbol)
 	if !ok {
 		return false

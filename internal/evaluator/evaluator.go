@@ -36,6 +36,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalDateLiteral(node)
 	case *syntax.BooleanLiteral:
 		return evalBooleanLiteral(node)
+	case *syntax.NilLiteral:
+		return environment.NullObj, nil
 	case *syntax.ArrayLiteral:
 		return evalArrayLiteral(node, env)
 	case *syntax.IndexExpression:
@@ -66,6 +68,8 @@ func Eval(n syntax.Node, env *environment.Environment) (environment.Object, erro
 		return evalImportStatement(node, env)
 	case *syntax.PropertyExpression:
 		return evalPropertyExpression(node, env)
+	case *syntax.StructLiteral:
+		return evalStructLiteral(node, env)
 	}
 
 	return nil, fmt.Errorf("unknown node type: %T", n)
@@ -81,6 +85,10 @@ func evalIndexAssignmentStatement(node *syntax.IndexAssignmentStatement, env *en
 	left, err := Eval(node.Left, env)
 	if err != nil {
 		return nil, err
+	}
+
+	if left.Type() == environment.NULL_OBJ {
+		return nil, fmt.Errorf("null pointer exception: cannot assign to index of nil")
 	}
 
 	arr, ok := left.(*environment.Array)
@@ -119,18 +127,27 @@ func evalPropertyAssignmentStatement(node *syntax.PropertyAssignmentStatement, e
 		return nil, err
 	}
 
-	mod, ok := left.(*environment.Module)
-	if !ok {
-		return nil, fmt.Errorf("type error: property assignment not supported for %s", left.Type())
-	}
-
 	valObj, err := Eval(node.Value, env)
 	if err != nil {
 		return nil, err
 	}
 
-	mod.Env.Set(node.Property.Value, valObj)
-	return valObj, nil
+	if left.Type() == environment.NULL_OBJ {
+		if node.Safe {
+			return environment.NullObj, nil
+		}
+		return nil, fmt.Errorf("null pointer exception: cannot assign property '%s' of nil", node.Property.Value)
+	}
+
+	if mod, ok := left.(*environment.Module); ok {
+		mod.Env.Set(node.Property.Value, valObj)
+		return valObj, nil
+	} else if structObj, ok := left.(*environment.StructObject); ok {
+		structObj.Fields[node.Property.Value] = valObj
+		return valObj, nil
+	}
+
+	return nil, fmt.Errorf("type error: property assignment not supported for %s", left.Type())
 }
 
 // evalAssignStatement evaluates the assigned value and updates the existing variable in the environment.
@@ -218,21 +235,33 @@ func evalPropertyExpression(node *syntax.PropertyExpression, env *environment.En
 		return nil, err
 	}
 
-	module, ok := obj.(*environment.Module)
-	if !ok {
-		return nil, fmt.Errorf("runtime error: property access is only supported on modules")
+	if obj.Type() == environment.NULL_OBJ {
+		if node.Safe {
+			return environment.NullObj, nil
+		}
+		return nil, fmt.Errorf("null pointer exception: cannot read property '%s' of nil", node.Property.Value)
 	}
 
-	val, ok := module.Env.Get(node.Property.Value)
-	if !ok {
-		return nil, fmt.Errorf("runtime error: property '%s' not found in module '%s'", node.Property.Value, module.Name)
+	if module, ok := obj.(*environment.Module); ok {
+		val, ok := module.Env.Get(node.Property.Value)
+		if !ok {
+			return nil, fmt.Errorf("runtime error: property '%s' not found in module '%s'", node.Property.Value, module.Name)
+		}
+
+		if module.Env.IsPrivate(node.Property.Value) {
+			return nil, fmt.Errorf("runtime error: property '%s' is private and cannot be accessed from outside module '%s'", node.Property.Value, module.Name)
+		}
+
+		return val, nil
+	} else if structObj, ok := obj.(*environment.StructObject); ok {
+		val, ok := structObj.Fields[node.Property.Value]
+		if !ok {
+			return nil, fmt.Errorf("runtime error: property '%s' not found in struct '%s'", node.Property.Value, structObj.StructName)
+		}
+		return val, nil
 	}
 
-	if module.Env.IsPrivate(node.Property.Value) {
-		return nil, fmt.Errorf("runtime error: property '%s' is private and cannot be accessed from outside module '%s'", node.Property.Value, module.Name)
-	}
-
-	return val, nil
+	return nil, fmt.Errorf("runtime error: property access is only supported on modules and structs")
 }
 
 // evalIndexExpression evaluates an array index operation, ensuring the left side
@@ -246,6 +275,10 @@ func evalIndexExpression(node *syntax.IndexExpression, env *environment.Environm
 	index, err := Eval(node.Index, env)
 	if err != nil {
 		return nil, err
+	}
+
+	if left.Type() == environment.NULL_OBJ {
+		return nil, fmt.Errorf("null pointer exception: cannot read index of nil")
 	}
 
 	arrayObj, okLeft := left.(*environment.Array)
@@ -347,6 +380,40 @@ func evalInfixExpressionNode(node *syntax.InfixExpression, env *environment.Envi
 
 	if node.Operator == "and" || node.Operator == "or" || node.Operator == "xor" {
 		return evalBooleanInfixExpression(node.Operator, left, right)
+	}
+	
+	if node.Operator == "==" || node.Operator == "!=" {
+		var isEqual bool
+		if left == nil && right == nil {
+			isEqual = true
+		} else if left == nil || right == nil {
+			isEqual = false
+		} else if left.Type() == right.Type() {
+			switch left.Type() {
+			case environment.NUMBER_OBJ:
+				isEqual = left.(*environment.Number).Value == right.(*environment.Number).Value
+			case environment.STRING_OBJ:
+				isEqual = left.(*environment.String).Value == right.(*environment.String).Value
+			case environment.BOOLEAN_OBJ:
+				isEqual = left.(*environment.Boolean).Value == right.(*environment.Boolean).Value
+			case environment.NULL_OBJ:
+				isEqual = true
+			default:
+				isEqual = left == right
+			}
+		} else {
+			// different types
+			if left.Type() == environment.NULL_OBJ && right.Type() == environment.NULL_OBJ {
+				isEqual = true
+			} else {
+				isEqual = false
+			}
+		}
+		
+		if node.Operator == "==" {
+			return environment.NativeBoolToBooleanObject(isEqual), nil
+		}
+		return environment.NativeBoolToBooleanObject(!isEqual), nil
 	}
 
 	return evalInfixExpression(node.Operator, left, right)
@@ -645,6 +712,23 @@ func isTruthy(val environment.Object) bool {
 		return val.(*environment.Boolean).Value
 	}
 	return false
+}
+
+func evalStructLiteral(node *syntax.StructLiteral, env *environment.Environment) (environment.Object, error) {
+	fields := make(map[string]environment.Object)
+
+	for name, expr := range node.Fields {
+		val, err := Eval(expr, env)
+		if err != nil {
+			return nil, err
+		}
+		fields[name] = val
+	}
+
+	return &environment.StructObject{
+		StructName: node.StructName,
+		Fields:     fields,
+	}, nil
 }
 
 // loadModule initializes a new environment for a module, evaluates its AST,

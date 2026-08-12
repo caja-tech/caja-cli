@@ -36,6 +36,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideStringToken,
 	decideDateToken,
 	decideDotToken,
+	decideQuestionToken,
 }
 
 // decideAssignToken matches the '=' character and produces an ASSIGN token.
@@ -293,6 +294,23 @@ func decideDateToken(t *Tokenizer, line int, column int) deciderResult {
 func decideDotToken(t *Tokenizer, line int, column int) deciderResult {
 	if t.ch == '.' {
 		return deciderResult{true, Token{Type: DOT, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}
+
+// decideQuestionToken matches the '?' character and produces a QUESTION token,
+// or a QUESTIONDOT token if it is followed by a '.' character.
+func decideQuestionToken(t *Tokenizer, line int, column int) deciderResult {
+	if t.ch == '?' {
+		if t.peekChar() == '.' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: QUESTIONDOT, Literal: literal, Line: line, Column: column}}
+		}
+		return deciderResult{true, Token{Type: QUESTION, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}

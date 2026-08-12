@@ -1000,3 +1000,183 @@ func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+func TestSemanticAnalysisStructs(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Struct with nested struct field",
+			input: `
+				type User struct {
+					name String
+				}
+				type Profile struct {
+					user User
+					age Number
+				}
+				let p = Profile {
+					user: User { name: "Bob" },
+					age: 30
+				}
+				let n = p.user.name
+			`,
+		},
+		{
+			name: "Recursive struct definition",
+			input: `
+				type Node struct {
+					value Number
+					next Node
+				}
+				let n = Node {
+					value: 1,
+					next: Node {
+						value: 2,
+						next: Node {
+							value: 3
+						}
+					}
+				}
+			`,
+			expectedErrors: []string{"semantic error: missing required field 'next' in struct literal"},
+		},
+		{
+			name: "Recursive struct definition with nil",
+			input: `
+				type Node struct {
+					value Number
+					next Node?
+				}
+				let n = Node {
+					value: 1,
+					next: Node {
+						value: 2,
+						next: nil
+					}
+				}
+			`,
+		},
+		{
+			name: "Undefined struct",
+			input: `let p = Unknown { a: 1 }`,
+			expectedErrors: []string{"semantic error: undefined struct 'Unknown'"},
+		},
+		{
+			name: "Missing required struct field",
+			input: `
+				type User struct {
+					name String
+					age Number
+				}
+				let u = User { name: "Bob" }
+			`,
+			expectedErrors: []string{"semantic error: missing required field 'age' in struct literal"},
+		},
+		{
+			name: "Type mismatch in struct field",
+			input: `
+				type User struct {
+					age Number
+				}
+				let u = User { age: "30" }
+			`,
+			expectedErrors: []string{"type error: field 'age' expects NUMBER, got STRING"},
+		},
+		{
+			name: "Access undefined struct property",
+			input: `
+				type User struct {
+					name String
+				}
+				let u = User { name: "Bob" }
+				let x = u.age
+			`,
+			expectedErrors: []string{"semantic error: property 'age' not found on struct 'User'"},
+		},
+		{
+			name: "Update const struct property",
+			input: `
+				type User struct {
+					const name String
+				}
+				let u = User { name: "Bob" }
+				u.name = "Alice"
+			`,
+			expectedErrors: []string{"semantic error: cannot assign to constant property 'name' on struct 'User'"},
+		},
+		{
+			name: "Update non-existent struct property",
+			input: `
+				type User struct {
+					name String
+				}
+				let u = User { name: "Bob" }
+				u.age = 30
+			`,
+			expectedErrors: []string{"semantic error: property 'age' not found on struct 'User'"},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestSemanticNullableNavigation(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid consecutive safe navigation",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: nil }
+				let x = a.b?.c
+			`,
+		},
+		{
+			name: "Invalid missing safe navigation on nullable struct property",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: nil }
+				let x = a.b.c
+			`,
+			expectedErrors: []string{"semantic error: property access on nullable type requires safe navigation operator '?.'"},
+		},
+		{
+			name: "Invalid unnecessary safe navigation on non-nullable struct property",
+			input: `
+				type B struct { c Number }
+				type A struct { b B }
+				let a = A { b: B { c: 1 } }
+				let x = a?.b.c
+			`,
+			expectedErrors: []string{"semantic error: unnecessary safe navigation on non-nullable type"},
+		},
+		{
+			name: "Valid safe assignment",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: nil }
+				a.b?.c = 2
+			`,
+		},
+		{
+			name: "Invalid safe assignment missing safe navigation",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: nil }
+				a.b.c = 2
+			`,
+			expectedErrors: []string{"semantic error: property assignment on nullable type requires safe navigation operator '?.'"},
+		},
+		{
+			name: "Invalid safe assignment unnecessary safe navigation",
+			input: `
+				type B struct { c Number }
+				type A struct { b B }
+				let a = A { b: B { c: 1 } }
+				a?.b.c = 2
+			`,
+			expectedErrors: []string{"semantic error: unnecessary safe navigation on non-nullable type"},
+		},
+	}
+	runTestScenarios(t, tests)
+}

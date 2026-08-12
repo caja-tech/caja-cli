@@ -26,13 +26,13 @@ type EnvConfig struct {
 // EnvRegistry maintains the runtime state of an environment,
 // including variables, the call stack, and cached modules.
 type EnvRegistry struct {
-	store       map[string]Object
-	CallStack   []StackFrame
-	ModuleCache map[string]*Module
-	Loading     map[string]bool
-	ModuleASTs  map[string]*syntax.Program // ASTs parsed during semantic analysis
+	store          map[string]Object
+	CallStack      []StackFrame
+	ModuleCache    map[string]*Module
+	Loading        map[string]bool
+	ModuleASTs     map[string]*syntax.Program // ASTs parsed during semantic analysis
 	ExportedValues *[]Object
-	privates    map[string]bool
+	privates       map[string]bool
 }
 
 // Environment provides a symbol table to store and retrieve variables
@@ -93,10 +93,10 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 // Get retrieves the value of a variable by its name. It searches the
 // current environment first, then recursively searches the outer environment
 // if the variable is not found locally.
-func (env *Environment) Get(key string) (Object, bool) {
-	val, ok := env.store[key]
-	if !ok && env.outer != nil {
-		return env.outer.Get(key)
+func (e *Environment) Get(key string) (Object, bool) {
+	val, ok := e.store[key]
+	if !ok && e.outer != nil {
+		return e.outer.Get(key)
 	}
 	return val, ok
 }
@@ -121,28 +121,28 @@ func (e *Environment) IsPrivate(name string) bool {
 // Assign updates the value of an existing variable in the innermost scope
 // where it is defined. It recursively searches outer environments to find
 // the variable if it's not present in the current one.
-func (env *Environment) Assign(name string, val Object) {
-	if _, ok := env.store[name]; ok {
-		env.store[name] = val
+func (e *Environment) Assign(name string, val Object) {
+	if _, ok := e.store[name]; ok {
+		e.store[name] = val
 		return
 	}
 
-	if env.outer != nil {
-		env.outer.Assign(name, val)
+	if e.outer != nil {
+		e.outer.Assign(name, val)
 	}
 }
 
 // GetStackTrace generates a formatted string representing the current call stack,
 // showing the function names, arguments, line numbers, and column positions
 // of each active frame in the environment's execution history.
-func (env *Environment) GetStackTrace() string {
-	if len(env.CallStack) == 0 {
+func (e *Environment) GetStackTrace() string {
+	if len(e.CallStack) == 0 {
 		return ""
 	}
 
 	trace := "\nStack trace:\n"
-	for i := len(env.CallStack) - 1; i >= 0; i-- {
-		frame := env.CallStack[i]
+	for i := len(e.CallStack) - 1; i >= 0; i-- {
+		frame := e.CallStack[i]
 		argsJoined := strings.Join(frame.Args, ", ")
 
 		trace += fmt.Sprintf("  at %s(%s) line %d, col %d\n",
@@ -156,18 +156,18 @@ func (env *Environment) GetStackTrace() string {
 
 // GetStandardModule retrieves and initializes a built-in standard module
 // (e.g., array, date, string, math) by its name. It returns nil if the module is unknown.
-func (env *Environment) GetStandardModule(moduleName string) *Module {
+func (e *Environment) GetStandardModule(moduleName string) *Module {
 	switch moduleName {
 	case "array":
-		return env.newArrayModule()
+		return e.newArrayModule()
 	case "date":
-		return env.newDateModule()
+		return e.newDateModule()
 	case "string":
-		return env.newStringModule()
+		return e.newStringModule()
 	case "math":
-		return env.newMathModule()
+		return e.newMathModule()
 	case "log":
-		return env.newLogModule()
+		return e.newLogModule()
 	default:
 		return nil
 

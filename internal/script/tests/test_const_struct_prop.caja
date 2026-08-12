@@ -1,0 +1,5 @@
+import "struct_module" as sm
+
+let u = sm.User { name: "Alice", id: 10 }
+u.id = 20
+return u.id

@@ -57,9 +57,19 @@ func testEval(input string) (interface{}, error) {
 	case *environment.Date:
 		return obj.Value.Format("2006-01-02"), nil
 	case *environment.Array:
+		var elements []string
+		for _, el := range obj.Elements {
+			elements = append(elements, el.Inspect())
+		}
+		return "[" + strings.Join(elements, ", ") + "]", nil
+	case *environment.Function:
+		return obj.Inspect(), nil
+	case *environment.Module:
+		return obj.Inspect(), nil
+	case *environment.StructObject:
 		return obj.Inspect(), nil
 	default:
-		return obj, nil
+		return nil, nil
 	}
 }
 
@@ -1000,6 +1010,227 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 			name:     "Type alias with array types",
 			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection): prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
 			expected: 2.0,
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestStructs(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Struct creation and property access",
+			input: `
+				type User struct {
+					name String
+					age Number
+				}
+				let u = User { name: "Bob", age: 30 }
+				return u.name
+			`,
+			expected: "Bob",
+		},
+		{
+			name: "Struct property mutation",
+			input: `
+				type Point struct {
+					x Number
+					y Number
+				}
+				let p = Point { x: 0, y: 0 }
+				p.x = 10
+				p.y = 20
+				return p.x + p.y
+			`,
+			expected: 30.0,
+		},
+		{
+			name: "Struct passed to and returned from function",
+			input: `
+				type Point struct {
+					x Number
+					y Number
+				}
+				let offset = fn(p: Point): Point {
+					return Point { x: p.x + 5, y: p.y + 5 }
+				}
+				let p1 = Point { x: 10, y: 10 }
+				let p2 = offset(p1)
+				return p2.x
+			`,
+			expected: 15.0,
+		},
+		{
+			name: "Nested structs",
+			input: `
+				type Metadata struct {
+					id Number
+					tag String
+				}
+				type Item struct {
+					meta Metadata
+					value Number
+				}
+				let it = Item {
+					meta: Metadata { id: 100, tag: "box" },
+					value: 99
+				}
+				return it.meta.tag
+			`,
+			expected: "box",
+		},
+		{
+			name: "Deeply nested structs",
+			input: `
+				type Level5 struct { v Number }
+				type Level4 struct { next Level5 }
+				type Level3 struct { next Level4 }
+				type Level2 struct { next Level3 }
+				type Level1 struct { next Level2 }
+
+				let l = Level1 { 
+					next: Level2 { 
+						next: Level3 { 
+							next: Level4 { 
+								next: Level5 { v: 42 } 
+							} 
+						} 
+					} 
+				}
+				return l.next.next.next.next.v
+			`,
+			expected: 42.0,
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestStructErrors(t *testing.T) {
+	tests := []testErrorScenario{
+		{
+			name: "Undefined struct",
+			input: `let p = Unknown { x: 1 }`,
+			expectedError: "semantic error: undefined struct 'Unknown'",
+		},
+		{
+			name: "Null Pointer Exception on property read",
+			input: `
+				type Node struct {
+					value Number
+					next Any
+				}
+				let n = Node {
+					value: 1,
+					next: nil
+				}
+				return n.next.value
+			`,
+			expectedError: "null pointer exception: cannot read property 'value' of nil",
+		},
+		{
+			name: "Missing struct field",
+			input: `
+				type Point struct {
+					x Number
+					y Number
+				}
+				let p = Point { x: 1 }
+			`,
+			expectedError: "semantic error: missing required field 'y' in struct literal",
+		},
+		{
+			name: "Type mismatch in struct literal",
+			input: `
+				type Point struct {
+					x Number
+				}
+				let p = Point { x: "not-a-number" }
+			`,
+			expectedError: "type error: field 'x' expects NUMBER, got STRING",
+		},
+		{
+			name: "Assign to const property",
+			input: `
+				type Point struct {
+					const x Number
+				}
+				let p = Point { x: 1 }
+				p.x = 2
+			`,
+			expectedError: "semantic error: cannot assign to constant property 'x' on struct 'Point'",
+		},
+	}
+	runTestErrorScenarios(t, tests)
+}
+
+func TestNullableTypesEvaluator(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Safe navigation on null struct returns null",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: nil }
+				let x = a.b?.c
+				return x
+			`,
+			expected: nil,
+		},
+		{
+			name: "Safe navigation on instantiated struct returns value",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: B { c: 42 } }
+				let x = a.b?.c
+				return x
+			`,
+			expected: 42.0,
+		},
+		{
+			name: "Consecutive safe navigation on null",
+			input: `
+				type C struct { d Number }
+				type B struct { c C? }
+				type A struct { b B? }
+				let a = A { b: B { c: nil } }
+				let x = a.b?.c?.d
+				return x
+			`,
+			expected: nil,
+		},
+		{
+			name: "Consecutive safe navigation on instantiated struct",
+			input: `
+				type C struct { d Number }
+				type B struct { c C? }
+				type A struct { b B? }
+				let a = A { b: B { c: C { d: 100 } } }
+				let x = a.b?.c?.d
+				return x
+			`,
+			expected: 100.0,
+		},
+		{
+			name: "Safe assignment on null struct is ignored",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: nil }
+				a.b?.c = 2
+				return a.b
+			`,
+			expected: nil,
+		},
+		{
+			name: "Safe assignment on instantiated struct applies value",
+			input: `
+				type B struct { c Number }
+				type A struct { b B? }
+				let a = A { b: B { c: 1 } }
+				a.b?.c = 99
+				return a.b?.c
+			`,
+			expected: 99.0,
 		},
 	}
 	runTestScenarios(t, tests)

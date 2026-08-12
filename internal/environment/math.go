@@ -7,9 +7,9 @@ import (
 
 // newMathModule initializes and returns a builtin "math" module,
 // populating it with standard mathematical functions.
-func (env *Environment) newMathModule() *Module {
+func (e *Environment) newMathModule() *Module {
 	moduleName := "math"
-	mathEnv := NewEnvironment(env.BaseDir, moduleName, true)
+	mathEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	mathEnv.Set("abs", &Builtin{
 		Fn: func(args ...Object) (Object, error) {
@@ -135,14 +135,14 @@ func (env *Environment) newMathModule() *Module {
 			if !ok {
 				return nil, fmt.Errorf("semantic error: second argument to 'log' must be NUMBER, got %s", args[1].Type())
 			}
-			
+
 			if nObj.Value <= 0 {
 				return nil, fmt.Errorf("runtime error: log of non-positive number is undefined")
 			}
 			if bObj.Value <= 0 || bObj.Value == 1 {
 				return nil, fmt.Errorf("runtime error: log base must be positive and not equal to 1")
 			}
-			
+
 			return &Number{Value: math.Log(nObj.Value) / math.Log(bObj.Value)}, nil
 		}})
 

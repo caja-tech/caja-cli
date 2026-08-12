@@ -8,9 +8,9 @@ import (
 
 // newDateModule initializes and returns a builtin "date" module,
 // populating it with standard date manipulation functions.
-func (env *Environment) newDateModule() *Module {
+func (e *Environment) newDateModule() *Module {
 	moduleName := "date"
-	dateEnv := NewEnvironment(env.BaseDir, moduleName, true)
+	dateEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	dateEnv.Set("year", &Builtin{
 		Fn: func(args ...Object) (Object, error) {
