@@ -1,7 +1,7 @@
 package script
 
 import (
-	"caja-cli/internal/environment"
+	"caja-cli/internal/pipeline/environment"
 	"math"
 	"os"
 	"path/filepath"

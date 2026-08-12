@@ -3,8 +3,9 @@ package encoder
 import (
 	"bytes"
 	"caja-cli/internal/file"
-	"caja-cli/internal/lexer"
-	"caja-cli/internal/syntax"
+	"caja-cli/internal/pipeline/ast"
+	"caja-cli/internal/pipeline/lexer"
+	"caja-cli/internal/pipeline/parser"
 	"compress/zlib"
 	"encoding/base64"
 	"encoding/json"
@@ -42,14 +43,14 @@ func Encode(entryFile string, baseDir string) (token string, err error) {
 		bundle.Modules[filename] = source
 
 		tknzr := lexer.New(source)
-		parser := syntax.New(tknzr)
-		prog := parser.Parse()
-		if parser.HasErrors() {
+		p := parser.New(tknzr)
+		prog := p.Parse()
+		if p.HasErrors() {
 			return fmt.Errorf("failed to parse %s", filename)
 		}
 
 		for _, stmt := range prog.Statements {
-			if importStmt, ok := stmt.(*syntax.ImportStatement); ok {
+			if importStmt, ok := stmt.(*ast.ImportStatement); ok {
 				collectErr := collect(filepath.FromSlash(importStmt.Path) + file.EXTENSION)
 				if collectErr != nil {
 					return collectErr
