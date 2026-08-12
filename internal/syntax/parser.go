@@ -50,6 +50,7 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.prefixParseFuncs[lexer.IF] = p.parseIfExpression
 	p.prefixParseFuncs[lexer.TRUE] = p.parseBooleanLiteral
 	p.prefixParseFuncs[lexer.FALSE] = p.parseBooleanLiteral
+	p.prefixParseFuncs[lexer.NIL] = p.parseNilLiteral
 	p.prefixParseFuncs[lexer.FN] = p.parseFunctionLiteral
 	p.prefixParseFuncs[lexer.LBRACKET] = p.parseArrayLiteral
 
@@ -70,8 +71,10 @@ func New(t *lexer.Tokenizer) *Parser {
 	p.infixParseFuncs[lexer.EQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.NEQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.LPAREN] = p.parseFunctionCallExpression
+	p.infixParseFuncs[lexer.LBRACE] = p.parseStructLiteral
 	p.infixParseFuncs[lexer.LBRACKET] = p.parseIndexExpression
 	p.infixParseFuncs[lexer.DOT] = p.parsePropertyExpression
+	p.infixParseFuncs[lexer.QUESTIONDOT] = p.parsePropertyExpression
 	p.infixParseFuncs[lexer.AND] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.OR] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.XOR] = p.parseInfixExpression
@@ -204,6 +207,7 @@ func (p *Parser) parseStatement() Statement {
 				Object:   propExpr.Object,
 				Property: propExpr.Property,
 				Value:    rhs,
+				Safe:     propExpr.Safe,
 			}
 		}
 
@@ -371,6 +375,51 @@ func (p *Parser) parseTypeAliasStatement() *TypeAliasStatement {
 		}
 
 		statement.Signature.ReturnType = p.parseTypeSignature()
+	} else if p.peekToken.Type == lexer.STRUCT {
+		p.nextToken() // move to struct
+		
+		statement.StructDefinition = &StructDefinition{Token: p.currToken}
+		if !p.expectPeek(lexer.LBRACE) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected lbrace, got %s", p.currToken.Type))
+			return nil
+		}
+
+		// parse fields
+		for p.peekToken.Type != lexer.RBRACE && p.peekToken.Type != lexer.EOF {
+			p.nextToken() // move to first token of field (const or IDENT)
+			
+			isConstant := false
+			if p.currToken.Type == lexer.CONST {
+				isConstant = true
+				if !p.expectPeek(lexer.IDENT) {
+					p.reportError(p.peekToken, fmt.Sprintf("expected identifier after const, got %s", p.currToken.Type))
+					return nil
+				}
+			}
+
+			if p.currToken.Type != lexer.IDENT {
+				p.reportError(p.currToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+				return nil
+			}
+
+			field := StructField{
+				Name:       &Identifier{Token: p.currToken, Value: p.currToken.Literal},
+				IsConstant: isConstant,
+			}
+			
+			field.Type = p.parseTypeSignature()
+			if field.Type == "" {
+				p.reportError(p.currToken, "expected type signature")
+				return nil
+			}
+			
+			statement.StructDefinition.Fields = append(statement.StructDefinition.Fields, field)
+		}
+
+		if !p.expectPeek(lexer.RBRACE) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected rbrace, got %s", p.currToken.Type))
+			return nil
+		}
 	} else {
 		statement.TargetType = p.parseTypeSignature()
 	}
@@ -454,6 +503,10 @@ func (p *Parser) parseBooleanLiteral() Expression {
 	}
 }
 
+func (p *Parser) parseNilLiteral() Expression {
+	return &NilLiteral{Token: p.currToken}
+}
+
 // parseArrayLiteral consumes the opening bracket, parses a comma-separated list
 // of expressions, and returns an ArrayLiteral expression node.
 func (p *Parser) parseArrayLiteral() Expression {
@@ -477,7 +530,11 @@ func (p *Parser) parseIndexExpression(left Expression) Expression {
 // parsePropertyExpression parses an object property access, capturing the left-hand
 // expression (the object) and parsing the identifier following the dot.
 func (p *Parser) parsePropertyExpression(left Expression) Expression {
-	exp := &PropertyExpression{Token: p.currToken, Object: left}
+	exp := &PropertyExpression{
+		Token:  p.currToken,
+		Object: left,
+		Safe:   p.currToken.Type == lexer.QUESTIONDOT,
+	}
 
 	if !p.expectPeek(lexer.IDENT) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected property name, got %s", p.currToken.Type))
@@ -717,6 +774,72 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []Expression {
 	return list
 }
 
+// parseStructLiteral parses a struct instantiation of the form `MyStruct { a: 1, b: 2 }`.
+func (p *Parser) parseStructLiteral(left Expression) Expression {
+	var structName string
+	if ident, ok := left.(*Identifier); ok {
+		structName = ident.Value
+	} else if prop, ok := left.(*PropertyExpression); ok {
+		// e.g. "sm.User" -> "sm.User"
+		if modId, ok := prop.Object.(*Identifier); ok {
+			structName = modId.Value + "." + prop.Property.Value
+		} else {
+			p.reportError(p.currToken, "invalid property expression for struct literal")
+			return nil
+		}
+	} else {
+		p.reportError(p.currToken, "expected identifier or property expression before struct literal")
+		return nil
+	}
+
+	literal := &StructLiteral{
+		Token:      p.currToken, // The '{' token
+		StructName: structName,
+		Fields:     make(map[string]Expression),
+	}
+
+	if p.peekToken.Type == lexer.RBRACE {
+		p.nextToken()
+		return literal
+	}
+
+	for p.peekToken.Type != lexer.RBRACE && p.peekToken.Type != lexer.EOF {
+		p.nextToken()
+		if p.currToken.Type != lexer.IDENT {
+			p.reportError(p.currToken, fmt.Sprintf("expected identifier as struct field, got %s", p.currToken.Type))
+			return nil
+		}
+		
+		fieldName := p.currToken.Literal
+		if !p.expectPeek(lexer.COLON) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected colon after struct field, got %s", p.currToken.Type))
+			return nil
+		}
+		
+		p.nextToken()
+		val := p.parseExpression(LOWEST)
+		if val == nil {
+			return nil
+		}
+		
+		literal.Fields[fieldName] = val
+		
+		if p.peekToken.Type == lexer.COMMA {
+			p.nextToken()
+		} else if p.peekToken.Type != lexer.RBRACE {
+			p.reportError(p.peekToken, fmt.Sprintf("expected comma or rbrace, got %s", p.peekToken.Type))
+			return nil
+		}
+	}
+
+	if !p.expectPeek(lexer.RBRACE) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected rbrace, got %s", p.currToken.Type))
+		return nil
+	}
+
+	return literal
+}
+
 // parseTypeSignature parses a type identifier or array type like [Number] or [[Number]].
 func (p *Parser) parseTypeSignature() string {
 	if p.peekToken.Type == lexer.LBRACKET {
@@ -725,11 +848,27 @@ func (p *Parser) parseTypeSignature() string {
 		if !p.expectPeek(lexer.RBRACKET) {
 			return ""
 		}
-		return "[" + innerType + "]"
+		
+		typeName := "[" + innerType + "]"
+		if p.peekToken.Type == lexer.QUESTION {
+			p.nextToken() // move to ?
+			typeName += "?"
+		}
+		return typeName
 	}
 
 	if p.expectPeek(lexer.IDENT) {
-		return p.currToken.Literal
+		typeName := p.currToken.Literal
+		if p.peekToken.Type == lexer.QUESTION {
+			if typeName == "Number" || typeName == "String" || typeName == "Boolean" || typeName == "Date" {
+				p.reportError(p.peekToken, fmt.Sprintf("syntax error: primitive type '%s' cannot be nullable", typeName))
+				p.nextToken() // consume ?
+				return typeName
+			}
+			p.nextToken() // move to ?
+			typeName += "?"
+		}
+		return typeName
 	}
 
 	p.reportError(p.peekToken, fmt.Sprintf("expected type identifier, got %s", p.peekToken.Type))

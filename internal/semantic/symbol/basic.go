@@ -17,13 +17,13 @@ func NewBasicSymbol(symbolType environment.ObjectType) *BasicSymbol {
 // Equals compares this BasicSymbol with another Symbol to determine if they represent the same type.
 // It returns true if their types match exactly, or if either symbol is of type ANY_OBJ.
 func (bs *BasicSymbol) Equals(other Symbol) bool {
+	if bs.symbolType == environment.ANY_OBJ || other.Type() == environment.ANY_OBJ {
+		return true
+	}
+
 	otherSymbol, ok := other.(*BasicSymbol)
 	if !ok {
 		return false
-	}
-
-	if bs.symbolType == environment.ANY_OBJ || otherSymbol.symbolType == environment.ANY_OBJ {
-		return true
 	}
 
 	if bs.symbolType != otherSymbol.symbolType {

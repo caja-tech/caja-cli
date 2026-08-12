@@ -4,9 +4,9 @@ import "fmt"
 
 // newArrayModule initializes and returns a builtin "array" module,
 // populating it with standard array manipulation functions.
-func (env *Environment) newArrayModule() *Module {
+func (e *Environment) newArrayModule() *Module {
 	moduleName := "array"
-	arrayEnv := NewEnvironment(env.BaseDir, moduleName, true)
+	arrayEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	arrayEnv.Set("len", &Builtin{
 		Fn: func(args ...Object) (Object, error) {

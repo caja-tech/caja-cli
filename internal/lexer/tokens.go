@@ -37,7 +37,9 @@ const (
 	RBRACE   TokenType = "RBRACE"
 	LBRACKET TokenType = "LBRACKET"
 	RBRACKET TokenType = "RBRACKET"
-	DOT      TokenType = "DOT"
+	DOT         TokenType = "DOT"
+	QUESTION    TokenType = "QUESTION"
+	QUESTIONDOT TokenType = "QUESTIONDOT"
 
 	// Keywords
 	RETURN  TokenType = "RETURN"
@@ -56,6 +58,8 @@ const (
 	OR      TokenType = "OR"
 	XOR     TokenType = "XOR"
 	PRIVATE TokenType = "PRIVATE"
+	STRUCT  TokenType = "STRUCT"
+	NIL     TokenType = "NIL"
 )
 
 type Token struct {
@@ -84,6 +88,8 @@ var keywords = map[string]TokenType{
 	"or":      OR,
 	"xor":     XOR,
 	"private": PRIVATE,
+	"struct":  STRUCT,
+	"nil":     NIL,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the
@@ -99,7 +105,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, NIL:
 		return true
 	}
 	return false

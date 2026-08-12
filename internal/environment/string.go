@@ -7,9 +7,9 @@ import (
 
 // newStringModule initializes and returns a builtin "string" module,
 // populating it with standard string manipulation functions.
-func (env *Environment) newStringModule() *Module {
+func (e *Environment) newStringModule() *Module {
 	moduleName := "string"
-	stringEnv := NewEnvironment(env.BaseDir, moduleName, true)
+	stringEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	stringEnv.Set("charAt", &Builtin{
 		Fn: func(args ...Object) (Object, error) {

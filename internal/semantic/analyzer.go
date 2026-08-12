@@ -98,13 +98,54 @@ func (a *Analyzer) analyze(node syntax.Node) symbol.Symbol {
 		return symbol.NewBasicSymbol(environment.DATE_OBJ)
 	case *syntax.BooleanLiteral:
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+	case *syntax.NilLiteral:
+		return &symbol.NullSymbol{}
 	case *syntax.ImportStatement:
 		return a.analyzeImportStatement(n)
 	case *syntax.PropertyExpression:
 		return a.analyzePropertyExpression(n)
+	case *syntax.StructLiteral:
+		return a.analyzeStructLiteral(n)
 	}
 
 	return symbol.AnySymbol()
+}
+
+func (a *Analyzer) analyzeStructLiteral(n *syntax.StructLiteral) symbol.Symbol {
+	defSym, ok := a.findTypeSymbolInTypes(n.StructName)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: undefined struct '%s'", n.StructName))
+		return symbol.AnySymbol()
+	}
+
+	structDef, ok := defSym.(*symbol.StructDefSymbol)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("type error: '%s' is not a struct", n.StructName))
+		return symbol.AnySymbol()
+	}
+
+	// Check missing fields
+	for fieldName := range structDef.Fields {
+		if _, exists := n.Fields[fieldName]; !exists {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: missing required field '%s' in struct literal", fieldName))
+		}
+	}
+
+	// Check excess fields and types
+	for fieldName, expr := range n.Fields {
+		fieldDef, exists := structDef.Fields[fieldName]
+		if !exists {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: undefined field '%s' in struct literal", fieldName))
+			continue
+		}
+
+		valSym := a.analyze(expr)
+		if !fieldDef.Type.Equals(valSym) {
+			a.reportError(n.Token, fmt.Sprintf("type error: field '%s' expects %s, got %s", fieldName, fieldDef.Type.Type(), valSym.Type()))
+		}
+	}
+
+	return symbol.NewStructInstanceSymbol(structDef)
 }
 
 // PrintErrors prints all encountered semantic errors to standard output.
@@ -142,9 +183,10 @@ func (a *Analyzer) analyzeProgram(n *syntax.Program) symbol.Symbol {
 	}
 
 	exports := make(map[string]symbol.Symbol)
+	types := make(map[string]symbol.Symbol)
 	privates := make(map[string]bool)
 	constants := make(map[string]bool)
-	
+
 	// Assuming top-level declarations are in the first scope (index 0)
 	if len(a.scopes) > 0 {
 		for name, entry := range a.scopes[0] {
@@ -157,8 +199,14 @@ func (a *Analyzer) analyzeProgram(n *syntax.Program) symbol.Symbol {
 			}
 		}
 	}
+	for name, sym := range a.types {
+		types[name] = sym
+		if a.privates[name] {
+			privates[name] = true
+		}
+	}
 
-	return symbol.NewModuleSymbol("module", exports, privates, constants)
+	return symbol.NewModuleSymbol("module", exports, types, privates, constants)
 }
 
 // analyzeIndexAssignmentStatement ensures that the indexed target is an array,
@@ -183,18 +231,53 @@ func (a *Analyzer) analyzeIndexAssignmentStatement(n *syntax.IndexAssignmentStat
 // and evaluates the assigned value.
 func (a *Analyzer) analyzePropertyAssignmentStatement(n *syntax.PropertyAssignmentStatement) symbol.Symbol {
 	leftSym := a.analyze(n.Object)
-	
-	if leftSym.Type() != environment.MODULE_OBJ && leftSym.Type() != environment.ANY_OBJ {
+
+	isNullable := false
+	if nullableSym, ok := leftSym.(*symbol.NullableSymbol); ok {
+		isNullable = true
+		leftSym = nullableSym.Underlying
+	}
+
+	if isNullable && !n.Safe {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: property assignment on nullable type requires safe navigation operator '?.' (property: %s)", n.Property.Value))
+		return symbol.AnySymbol()
+	} else if !isNullable && n.Safe {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: unnecessary safe navigation on non-nullable type (property: %s)", n.Property.Value))
+		return symbol.AnySymbol()
+	}
+
+	var structDef *symbol.StructDefSymbol
+	if inst, ok := leftSym.(*symbol.StructInstanceSymbol); ok {
+		structDef = inst.Def
+	} else if def, ok := leftSym.(*symbol.StructDefSymbol); ok {
+		structDef = def
+	}
+
+	if leftSym.Type() != environment.MODULE_OBJ && leftSym.Type() != environment.ANY_OBJ && structDef == nil {
 		a.reportError(n.Token, fmt.Sprintf("type error: property assignment not supported for %s", leftSym.Type()))
 	}
-	
+
 	if modSymbol, ok := leftSym.(*symbol.ModuleSymbol); ok {
 		// Module symbol is available (e.g., standard modules)
 		if modSymbol.IsConstant(n.Property.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant property '%s'", n.Property.Value))
 		}
+	} else if structDef != nil {
+		fieldSym, exists := structDef.Fields[n.Property.Value]
+		if !exists {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on struct '%s'", n.Property.Value, structDef.Name))
+		} else if fieldSym.IsConstant {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant property '%s' on struct '%s'", n.Property.Value, structDef.Name))
+		} else {
+			// type check the assignment
+			valSym := a.analyze(n.Value)
+			if !fieldSym.Type.Equals(valSym) {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to property '%s' of type %s", valSym.Type(), n.Property.Value, fieldSym.Type.Type()))
+			}
+			return symbol.AnySymbol()
+		}
 	}
-	
+
 	a.analyze(n.Value)
 	return symbol.AnySymbol()
 }
@@ -255,7 +338,7 @@ func (a *Analyzer) analyzeLetStatement(n *syntax.LetStatement) symbol.Symbol {
 	}
 
 	a.declare(n.Name.Value, valType, false)
-	
+
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
 			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
@@ -308,7 +391,7 @@ func (a *Analyzer) analyzeConstStatement(n *syntax.ConstStatement) symbol.Symbol
 	}
 
 	a.declare(n.Name.Value, valType, true)
-	
+
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
 			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
@@ -438,7 +521,20 @@ func (a *Analyzer) analyzeInfixExpression(n *syntax.InfixExpression) symbol.Symb
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 
 	case "==", "!=":
-		if leftSymbol.Type() != rightSymbol.Type() {
+		// Allow comparison if they are the same type, or if one is NULL_OBJ and the other is a NullableSymbol, ANY_OBJ, Struct, Array, or Function.
+		_, leftNullable := leftSymbol.(*symbol.NullableSymbol)
+		_, rightNullable := rightSymbol.(*symbol.NullableSymbol)
+
+		isValid := leftSymbol.Type() == rightSymbol.Type()
+		if !isValid {
+			if leftSymbol.Type() == environment.NULL_OBJ && (rightNullable || rightSymbol.Type() == environment.ANY_OBJ || environment.IsReferenceType(rightSymbol.Type())) {
+				isValid = true
+			} else if rightSymbol.Type() == environment.NULL_OBJ && (leftNullable || leftSymbol.Type() == environment.ANY_OBJ || environment.IsReferenceType(leftSymbol.Type())) {
+				isValid = true
+			}
+		}
+
+		if !isValid {
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot compare %s and %s using '%s'", leftSymbol.Type(), rightSymbol.Type(), n.Operator))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
@@ -518,7 +614,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) symbo
 			}
 			paramTypes = append(paramTypes, paramSymbol)
 		}
-	
+
 		var returnType symbol.Symbol
 		if n.Signature.ReturnType != "" {
 			resolvedReturn, ok := a.findTypeSymbolInTypes(n.Signature.ReturnType)
@@ -528,6 +624,23 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *syntax.TypeAliasStatement) symbo
 			returnType = resolvedReturn
 		}
 		aliasedSymbol = symbol.NewFunctionSymbol(len(n.Signature.ParamTypes), paramTypes, returnType)
+	} else if n.StructDefinition != nil {
+		fields := make(map[string]symbol.StructFieldSymbol)
+		aliasedSymbol = symbol.NewStructDefSymbol(n.Name.Value, fields)
+
+		// Pre-register the struct in the type registry to allow recursive definitions
+		a.types[n.Name.Value] = aliasedSymbol
+
+		for _, field := range n.StructDefinition.Fields {
+			fieldSym, ok := a.findTypeSymbolInTypes(field.Type)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", field.Type))
+			}
+			fields[field.Name.Value] = symbol.StructFieldSymbol{
+				Type:       fieldSym,
+				IsConstant: field.IsConstant,
+			}
+		}
 	} else if n.TargetType != "" {
 		resolvedSymbol, ok := a.findTypeSymbolInTypes(n.TargetType)
 		if !ok {
@@ -720,7 +833,7 @@ func (a *Analyzer) analyzeImportStatement(n *syntax.ImportStatement) symbol.Symb
 	modName := n.Name.Value
 
 	if symbols, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols, nil, nil)
+		modSymbol := symbol.NewModuleSymbol(modName, symbols, nil, nil, nil)
 		a.declare(modName, modSymbol, true)
 		return modSymbol
 	}
@@ -760,31 +873,69 @@ func (a *Analyzer) analyzeImportStatement(n *syntax.ImportStatement) symbol.Symb
 	return modSymbol
 }
 
-// analyzePropertyExpression ensures the left side is a module and retrieves the property type
 func (a *Analyzer) analyzePropertyExpression(n *syntax.PropertyExpression) symbol.Symbol {
 	leftSymbol := a.analyze(n.Object)
 
 	if leftSymbol.Type() == environment.ANY_OBJ {
+		// Only short-circuit if it's the actual AnySymbol (BasicSymbol with ANY_OBJ), not StructDefSymbol which might return ANY_OBJ.
+		if basic, isBasic := leftSymbol.(*symbol.BasicSymbol); isBasic && basic.Type() == environment.ANY_OBJ {
+			return symbol.AnySymbol()
+		}
+	}
+
+	isNullable := false
+	if nullableSym, ok := leftSymbol.(*symbol.NullableSymbol); ok {
+		isNullable = true
+		leftSymbol = nullableSym.Underlying
+	}
+
+	if isNullable && !n.Safe {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: property access on nullable type requires safe navigation operator '?.' (property: %s)", n.Property.Value))
+		return symbol.AnySymbol()
+	} else if !isNullable && n.Safe {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: unnecessary safe navigation on non-nullable type (property: %s)", n.Property.Value))
 		return symbol.AnySymbol()
 	}
 
-	if leftSymbol.Type() != environment.MODULE_OBJ {
+	var structDef *symbol.StructDefSymbol
+	if inst, ok := leftSymbol.(*symbol.StructInstanceSymbol); ok {
+		structDef = inst.Def
+	} else if def, ok := leftSymbol.(*symbol.StructDefSymbol); ok {
+		structDef = def
+	}
+
+	if leftSymbol.Type() != environment.MODULE_OBJ && structDef == nil {
 		a.reportError(n.Token, fmt.Sprintf("type error: property access not supported for %s", leftSymbol.Type()))
 		return symbol.AnySymbol()
 	}
 
-	modSymbol, ok := leftSymbol.(*symbol.ModuleSymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: could not parse symbol as module %s", leftSymbol.Type()))
+	var propType symbol.Symbol
+
+	if modSymbol, ok := leftSymbol.(*symbol.ModuleSymbol); ok {
+		if propertySymbol, ok := modSymbol.GetSymbol(n.Property.Value); ok {
+			propType = propertySymbol
+		} else {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on module", n.Property.Value))
+			return symbol.AnySymbol()
+		}
+	} else if structDef != nil {
+		if fieldSym, exists := structDef.Fields[n.Property.Value]; exists {
+			propType = fieldSym.Type
+		} else {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on struct '%s'", n.Property.Value, structDef.Name))
+			return symbol.AnySymbol()
+		}
+	} else {
 		return symbol.AnySymbol()
 	}
 
-	if propertySymbol, ok := modSymbol.GetSymbol(n.Property.Value); ok {
-		return propertySymbol
+	if isNullable {
+		// If the object is nullable, and we safely navigated, the resulting property access is also nullable.
+		if _, alreadyNullable := propType.(*symbol.NullableSymbol); !alreadyNullable {
+			propType = &symbol.NullableSymbol{Underlying: propType}
+		}
 	}
-
-	a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on module", n.Property.Value))
-	return symbol.AnySymbol()
+	return propType
 }
 
 // reportError formats and appends a semantic error with the token's line and column.

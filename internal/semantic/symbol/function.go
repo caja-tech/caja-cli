@@ -24,6 +24,10 @@ func NewFunctionSymbol(arity int, paramTypes []Symbol, returnType Symbol) *Funct
 // Equals compares this FunctionSymbol with another Symbol to determine if they represent the same function signature.
 // It returns true if both are FunctionSymbols with matching arities, parameter types, and return types, or if the other symbol is ANY_OBJ.
 func (fs *FunctionSymbol) Equals(other Symbol) bool {
+	if other.Type() == environment.ANY_OBJ || fs.Type() == environment.ANY_OBJ {
+		return true
+	}
+
 	otherSymbol, ok := other.(*FunctionSymbol)
 	if !ok {
 		return false

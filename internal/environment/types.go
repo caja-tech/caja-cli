@@ -20,11 +20,20 @@ const (
 	RETURN_VALUE_OBJ ObjectType = "RETURN_VALUE"
 	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
 	MODULE_OBJ       ObjectType = "MODULE"
+	NULL_OBJ         ObjectType = "NULL"
 )
 
 type Object interface {
 	Type() ObjectType
 	Inspect() string
+}
+
+func IsReferenceType(t ObjectType) bool {
+	switch t {
+	case NUMBER_OBJ, STRING_OBJ, BOOLEAN_OBJ, DATE_OBJ:
+		return false
+	}
+	return true
 }
 
 // Number represents a numeric value (stored as a float64) in the evaluated environment.
@@ -44,6 +53,14 @@ type Boolean struct{ Value bool }
 
 func (b *Boolean) Type() ObjectType { return BOOLEAN_OBJ }
 func (b *Boolean) Inspect() string  { return fmt.Sprintf("%t", b.Value) }
+
+// Null represents a nil value in the evaluated environment.
+type Null struct{}
+
+func (n *Null) Type() ObjectType { return NULL_OBJ }
+func (n *Null) Inspect() string  { return "nil" }
+
+var NullObj = &Null{}
 
 // Date represents a temporal date value in the evaluated environment.
 type Date struct{ Value time.Time }

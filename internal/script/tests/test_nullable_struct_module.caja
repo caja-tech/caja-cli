@@ -1,0 +1,13 @@
+type Info struct {
+    msg String
+}
+
+type Node struct {
+    val Number
+    next Node?
+    info Info?
+}
+
+let createNode = fn(): Node {
+    return Node { val: 0, next: nil, info: nil }
+}
