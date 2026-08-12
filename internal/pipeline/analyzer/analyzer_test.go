@@ -831,6 +831,30 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: second argument to 'log' must be NUMBER, got STRING"},
 		},
 		{
+			name:  "rand() works with 0 arguments",
+			input: "import math\nreturn math.rand()",
+		},
+		{
+			name:           "rand() rejects number argument",
+			input:          "import math\nreturn math.rand(42)",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+		},
+		{
+			name:           "rand() rejects string argument",
+			input:          "import math\nreturn math.rand(\"hello\")",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+		},
+		{
+			name:           "rand() rejects boolean argument",
+			input:          "import math\nreturn math.rand(true)",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+		},
+		{
+			name:           "rand() rejects date argument",
+			input:          "import math\nreturn math.rand(2026-08-12)",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+		},
+		{
 			name:  "log.info() works with correct types",
 			input: "import log\nreturn log.info(\"message\", 42)",
 		},
