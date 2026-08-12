@@ -1,0 +1,49 @@
+package lexer
+
+const (
+	_ int = iota
+	LOWEST_PRECEDENCE
+	ASSIGN_PRECEDENCE
+	LOGICAL_PRECEDENCE
+	COMPARISON_PRECEDENCE
+	SUM_PRECEDENCE
+	PRODUCT_PRECEDENCE
+	EXPONENT_PRECEDENCE
+	PREFIX_PRECEDENCE
+	CALL_PRECEDENCE
+	INDEX_PRECEDENCE
+)
+
+var precedences = map[TokenType]int{
+	ASSIGN:      ASSIGN_PRECEDENCE,
+	LT:          COMPARISON_PRECEDENCE,
+	GT:          COMPARISON_PRECEDENCE,
+	LTEQ:        COMPARISON_PRECEDENCE,
+	GTEQ:        COMPARISON_PRECEDENCE,
+	EQ:          COMPARISON_PRECEDENCE,
+	NEQ:         COMPARISON_PRECEDENCE,
+	PLUS:        SUM_PRECEDENCE,
+	MINUS:       SUM_PRECEDENCE,
+	ASTERISK:    PRODUCT_PRECEDENCE,
+	SLASH:       PRODUCT_PRECEDENCE,
+	MODULO:      PRODUCT_PRECEDENCE,
+	POWER:       EXPONENT_PRECEDENCE,
+	LPAREN:      CALL_PRECEDENCE,
+	LBRACE:      CALL_PRECEDENCE,
+	LBRACKET:    INDEX_PRECEDENCE,
+	DOT:         INDEX_PRECEDENCE,
+	QUESTIONDOT: INDEX_PRECEDENCE,
+	AND:         LOGICAL_PRECEDENCE,
+	OR:          LOGICAL_PRECEDENCE,
+	XOR:         LOGICAL_PRECEDENCE,
+}
+
+// VerifyPrecedenceLevel returns the precedence level associated with the given
+// token type. If the token type has no registered precedence, LOWEST_PRECEDENCE is returned.
+func VerifyPrecedenceLevel(t TokenType) int {
+	if p, ok := precedences[t]; ok {
+		return p
+	}
+
+	return LOWEST_PRECEDENCE
+}

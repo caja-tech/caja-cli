@@ -1,8 +1,8 @@
 package main
 
 import (
-	"caja-cli/internal/environment"
 	"caja-cli/internal/file"
+	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/script"
 	"encoding/csv"
 	"fmt"

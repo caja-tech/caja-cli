@@ -1,30 +1,31 @@
 package script
 
 import (
-	"caja-cli/internal/environment"
-	"caja-cli/internal/evaluator"
-	"caja-cli/internal/lexer"
-	"caja-cli/internal/semantic"
-	"caja-cli/internal/syntax"
+	"caja-cli/internal/pipeline/analyzer"
+	"caja-cli/internal/pipeline/ast"
+	"caja-cli/internal/pipeline/environment"
+	"caja-cli/internal/pipeline/evaluator"
+	"caja-cli/internal/pipeline/lexer"
+	"caja-cli/internal/pipeline/parser"
 	"fmt"
 )
 
 // ParseWithDir parses a script and performs semantic analysis,
 // returning the AST and the global environment with cached module ASTs.
-func ParseWithDir(input string, baseDir string, filePath string) (*syntax.Program, *environment.Environment, error) {
+func ParseWithDir(input string, baseDir string, filePath string) (*ast.Program, *environment.Environment, error) {
 	tknzr := lexer.New(input)
-	parser := syntax.New(tknzr)
-	prog := parser.Parse()
-	parser.PrintErrors()
-	if parser.HasErrors() {
+	p := parser.New(tknzr)
+	prog := p.Parse()
+	p.PrintErrors()
+	if p.HasErrors() {
 		return nil, nil, fmt.Errorf("errors found while parsing input")
 	}
 
 	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-	analyzer := semantic.New(globalEnv)
-	analyzer.Run(prog)
-	analyzer.PrintErrors()
-	if analyzer.HasErrors() {
+	a := analyzer.New(globalEnv)
+	a.Run(prog)
+	a.PrintErrors()
+	if a.HasErrors() {
 		return nil, nil, fmt.Errorf("errors found while performing semantical analysis on input")
 	}
 
@@ -33,7 +34,7 @@ func ParseWithDir(input string, baseDir string, filePath string) (*syntax.Progra
 
 // Run evaluates a program using the global environment from semantic analysis.
 // Returns the result, the global environment, and any error.
-func Run(program *syntax.Program, globalEnv *environment.Environment) (environment.Object, error) {
+func Run(program *ast.Program, globalEnv *environment.Environment) (environment.Object, error) {
 	result, err := evaluator.Eval(program, globalEnv)
 	if err != nil {
 		return nil, err
