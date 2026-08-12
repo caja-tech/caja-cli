@@ -75,6 +75,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"min":    NewBuiltinSymbol(2),
 			"max":    NewBuiltinSymbol(2),
 			"log":    NewBuiltinSymbol(2),
+			"rand":   NewBuiltinSymbol(0),
 			"PI":     &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 			"E":      &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 			"SQRT2":  &BasicSymbol{symbolType: environment.NUMBER_OBJ},

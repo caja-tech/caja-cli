@@ -847,6 +847,7 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"math LN10", "import math\nreturn math.LN10", math.Ln10},
 		{"math LOG2E", "import math\nreturn math.LOG2E", math.Log2E},
 		{"math LOG10E", "import math\nreturn math.LOG10E", math.Log10E},
+		{"math rand", "import math\nlet r = math.rand()\nreturn r >= 0 and r < 1", true},
 	}
 	runTestScenarios(t, tests)
 }

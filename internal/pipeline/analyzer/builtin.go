@@ -62,6 +62,8 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeDateNewDateFunction(n), true
 	case "math.abs", "math.sqrt", "math.floor", "math.ceil", "math.round":
 		return a.analyzeMathOneArgFunction(functionName, n), true
+	case "math.rand":
+		return a.analyzeMathZeroArgFunction(functionName, n), true
 	case "math.pow", "math.min", "math.max", "math.log":
 		return a.analyzeMathTwoArgFunction(functionName, n), true
 	case "log.info", "log.warn", "log.error":
@@ -522,6 +524,16 @@ func (a *Analyzer) analyzeDateNewDateFunction(n *ast.CallExpression) symbol.Symb
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
+}
+
+// analyzeMathZeroArgFunction checks the arity and type for 0-argument math functions, returning a NUMBER.
+func (a *Analyzer) analyzeMathZeroArgFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 0 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 0 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
 
 // analyzeMathOneArgFunction checks the arity and type for 1-argument math functions, returning a NUMBER.

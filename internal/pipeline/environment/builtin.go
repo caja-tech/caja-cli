@@ -3,6 +3,7 @@ package environment
 import (
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"strings"
 	"time"
 )
@@ -532,6 +533,14 @@ func (e *Environment) newMathModule() *Module {
 			}
 
 			return &Number{Value: math.Log(nObj.Value) / math.Log(bObj.Value)}, nil
+		}})
+
+	mathEnv.Set("rand", &Builtin{
+		Fn: func(args ...Object) (Object, error) {
+			if len(args) != 0 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'rand'. got=%d, want=0", len(args))
+			}
+			return &Number{Value: rand.Float64()}, nil
 		}})
 
 	mathEnv.Set("PI", &Number{Value: math.Pi})

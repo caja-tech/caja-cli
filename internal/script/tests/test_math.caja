@@ -9,6 +9,7 @@ let round_val = math.round(4.5)
 let min_val = math.min(10, 5) 
 let max_val = math.max(10, 5) 
 let log_val = math.log(100, 10) 
+let rand_val = math.rand()
 
 let array_results = [abs_val, sqrt_val, pow_val, floor_val, ceil_val, round_val, min_val, max_val, log_val]
 let sum = 0
