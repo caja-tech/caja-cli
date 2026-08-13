@@ -120,6 +120,8 @@ func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
 		return a.analyzePropertyExpression(n)
 	case *ast.StructLiteral:
 		return a.analyzeStructLiteral(n)
+	case *ast.MapLiteral:
+		return a.analyzeMapLiteral(n)
 	}
 
 	return symbol.AnySymbol()
@@ -174,14 +176,62 @@ func (a *Analyzer) analyzeArrayLiteral(n *ast.ArrayLiteral) symbol.Symbol {
 	}
 
 	firstElSymbol := a.analyze(n.Elements[0])
-	for i := 1; i < len(n.Elements); i++ {
-		elSymbol := a.analyze(n.Elements[i])
-		if !firstElSymbol.Equals(elSymbol) && firstElSymbol.Type() != environment.ANY_OBJ && elSymbol.Type() != environment.ANY_OBJ {
+	for _, el := range n.Elements[1:] {
+		elSymbol := a.analyze(el)
+		if !firstElSymbol.Equals(elSymbol) {
 			a.reportError(n.Token, fmt.Sprintf("type error: array elements must have the same type, expected %s, got %s", firstElSymbol.Type(), elSymbol.Type()))
 		}
 	}
 
 	return symbol.NewArraySymbol(firstElSymbol)
+}
+
+func (a *Analyzer) analyzeMapLiteral(n *ast.MapLiteral) symbol.Symbol {
+	if len(n.Pairs) == 0 {
+		return symbol.NewMapSymbol(symbol.AnySymbol(), symbol.AnySymbol())
+	}
+
+	var firstKeySymbol symbol.Symbol
+	var firstValueSymbol symbol.Symbol
+	first := true
+
+	for keyNode, valueNode := range n.Pairs {
+		keySym := a.analyze(keyNode)
+		valSym := a.analyze(valueNode)
+
+		if first {
+			firstKeySymbol = keySym
+			firstValueSymbol = valSym
+
+			// Validate key type
+			isValidKey := false
+			if keySym.Type() == environment.STRING_OBJ || keySym.Type() == environment.NUMBER_OBJ || keySym.Type() == environment.ANY_OBJ {
+				isValidKey = true
+			} else if structSym, ok := keySym.(*symbol.StructInstanceSymbol); ok {
+				if keyField, exists := structSym.Def.Fields["key"]; exists {
+					if fnSym, ok := keyField.Type.(*symbol.FunctionSymbol); ok {
+						if fnSym.ReturnType().Type() == environment.STRING_OBJ {
+							isValidKey = true
+						}
+					}
+				}
+			}
+			if !isValidKey {
+				a.reportError(n.Token, "semantic error: map key must be String, Number, or a Struct with a 'key fn(): String' property")
+			}
+
+			first = false
+		} else {
+			if !firstKeySymbol.Equals(keySym) {
+				a.reportError(n.Token, fmt.Sprintf("type error: map literal has mixed key types, expected %s, got %s", firstKeySymbol.Type(), keySym.Type()))
+			}
+			if !firstValueSymbol.Equals(valSym) {
+				a.reportError(n.Token, fmt.Sprintf("type error: map literal has mixed value types, expected %s, got %s", firstValueSymbol.Type(), valSym.Type()))
+			}
+		}
+	}
+
+	return symbol.NewMapSymbol(firstKeySymbol, firstValueSymbol)
 }
 
 // analyzeFunctionLiteral analyzes a function definition within a new scope,
@@ -272,6 +322,12 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
 	}
 
+	if n.ValueType != "" {
+		if _, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+		}
+	}
+
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		var paramTypes []symbol.Symbol
 		for _, param := range fnNode.Parameters {
@@ -325,6 +381,12 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
 	}
 
+	if n.ValueType != "" {
+		if _, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+		}
+	}
+
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		var paramTypes []symbol.Symbol
 		for _, param := range fnNode.Parameters {
@@ -376,8 +438,8 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	modPath := n.Path
 	modName := n.Name.Value
 
-	if symbols, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols, nil, nil, nil)
+	if symbols, exportedTypes, ok := symbol.GetStandardModule(modPath); ok {
+		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil)
 		a.declare(modName, modSymbol, true)
 		return modSymbol
 	}
@@ -704,26 +766,27 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 	return symbol.AnySymbol()
 }
 
-// analyzeIndexExpression ensures the left side is an array and the index is a number.
+// analyzeIndexExpression ensures the left side is an array or map and the index is valid.
 func (a *Analyzer) analyzeIndexExpression(n *ast.IndexExpression) symbol.Symbol {
-	leftSymbol := a.analyze(n.Left)
+	leftSym := a.analyze(n.Left)
+	indexSym := a.analyze(n.Index)
 
-	if leftSymbol.Type() != environment.ARRAY_OBJ && leftSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: index operator not supported for %s", leftSymbol.Type()))
-	}
-
-	indexSymbol := a.analyze(n.Index)
-	if indexSymbol.Type() != environment.NUMBER_OBJ && indexSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexSymbol.Type()))
-	}
-
-	leftSymbolArray, ok := leftSymbol.(*symbol.ArraySymbol)
-	if !ok {
-		return symbol.AnySymbol()
-	}
-
-	if leftSymbolArray.ElementSymbol() != nil {
-		return leftSymbolArray.ElementSymbol()
+	if leftSym.Type() == environment.ARRAY_OBJ {
+		if indexSym.Type() != environment.NUMBER_OBJ && indexSym.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexSym.Type()))
+		}
+		if arrSym, ok := leftSym.(*symbol.ArraySymbol); ok {
+			return arrSym.ElementSymbol()
+		}
+	} else if leftSym.Type() == environment.MAP_OBJ {
+		if mapSym, ok := leftSym.(*symbol.MapSymbol); ok {
+			if !mapSym.Key.Equals(indexSym) && indexSym.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: map index must be %s, got %s", mapSym.Key.Type(), indexSym.Type()))
+			}
+			return mapSym.Value
+		}
+	} else if leftSym.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: index operator not supported for %s", leftSym.Type()))
 	}
 
 	return symbol.AnySymbol()
@@ -733,17 +796,32 @@ func (a *Analyzer) analyzeIndexExpression(n *ast.IndexExpression) symbol.Symbol 
 // the index is a number, and then evaluates the assigned value.
 func (a *Analyzer) analyzeIndexAssignmentStatement(n *ast.IndexAssignmentStatement) symbol.Symbol {
 	leftSym := a.analyze(n.Left)
-	if leftSym.Type() != environment.ARRAY_OBJ && leftSym.Type() != environment.ANY_OBJ {
+	idxSym := a.analyze(n.Index)
+	valSym := a.analyze(n.Value)
+
+	if leftSym.Type() == environment.ARRAY_OBJ {
+		if idxSym.Type() != environment.NUMBER_OBJ && idxSym.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: array index must be NUMBER, got %s", idxSym.Type()))
+		}
+		if arrSym, ok := leftSym.(*symbol.ArraySymbol); ok {
+			if !arrSym.ElementSymbol().Equals(valSym) && valSym.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to array of %s", valSym.Type(), arrSym.ElementSymbol().Type()))
+			}
+		}
+	} else if leftSym.Type() == environment.MAP_OBJ {
+		if mapSym, ok := leftSym.(*symbol.MapSymbol); ok {
+			if !mapSym.Key.Equals(idxSym) && idxSym.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: map index must be %s, got %s", mapSym.Key.Type(), idxSym.Type()))
+			}
+			if !mapSym.Value.Equals(valSym) && valSym.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to map with value type %s", valSym.Type(), mapSym.Value.Type()))
+			}
+		}
+	} else if leftSym.Type() != environment.ANY_OBJ {
 		a.reportError(n.Token, fmt.Sprintf("type error: index assignment not supported for %s", leftSym.Type()))
 	}
 
-	idxSym := a.analyze(n.Index)
-	if idxSym.Type() != environment.NUMBER_OBJ && idxSym.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: array index must be NUMBER, got %s", idxSym.Type()))
-	}
-
-	a.analyze(n.Value)
-	return symbol.AnySymbol()
+	return valSym
 }
 
 // analyzePropertyExpression ensures that the object is a module or struct,

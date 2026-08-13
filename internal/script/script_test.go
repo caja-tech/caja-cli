@@ -163,6 +163,30 @@ func TestModules(t *testing.T) {
 			expectError: true,
 			errorMsg:    "property 'secret' is private and cannot be accessed from outside module 'test_private_export'",
 		},
+		{
+			name:        "Map Dictionary Test",
+			file:        "test_map.caja",
+			expectError: false,
+			expectVal:   1.0,
+		},
+		{
+			name:        "Map Dictionary Struct Test",
+			file:        "test_map_struct.caja",
+			expectError: false,
+			expectVal:   100.0,
+		},
+		{
+			name:        "Map Module Import Test",
+			file:        "test_map_module_import.caja",
+			expectError: false,
+			expectVal:   200.0,
+		},
+		{
+			name:        "Map Struct Closure Test",
+			file:        "test_map_struct_closure.caja",
+			expectError: false,
+			expectVal:   10.0,
+		},
 	}
 
 	for _, tc := range testCases {

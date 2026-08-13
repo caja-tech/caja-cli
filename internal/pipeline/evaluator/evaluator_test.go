@@ -848,6 +848,8 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"math LOG2E", "import math\nreturn math.LOG2E", math.Log2E},
 		{"math LOG10E", "import math\nreturn math.LOG10E", math.Log10E},
 		{"math rand", "import math\nlet r = math.rand()\nreturn r >= 0 and r < 1", true},
+		{"map containsKey true", "import map\ntype CustomStruct struct {\nkey map.KeyFunc\nvalue Number\n}\nlet d: map[CustomStruct]Number = {}\nlet s = CustomStruct{key: fn(): String { return \"a\" }, value: 10}\nd[s] = 100\nreturn map.containsKey(d, s)", true},
+		{"map containsKey false", "import map\nlet d: map[String]Number = {}\nd[\"a\"] = 1\nreturn map.containsKey(d, \"b\")", false},
 	}
 	runTestScenarios(t, tests)
 }
@@ -1012,6 +1014,11 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 			name:     "Type alias with array types",
 			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection): prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
 			expected: 2.0,
+		},
+		{
+			name:     "Explicitly typed variable with function alias",
+			input:    "type CustomFunc fn(Number): Number\nlet f: CustomFunc = fn(x: Number): Number { return x + 2 }\nreturn f(5)",
+			expected: 7.0,
 		},
 	}
 	runTestScenarios(t, tests)

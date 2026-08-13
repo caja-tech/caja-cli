@@ -19,6 +19,7 @@ const (
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
 	BUILTIN_OBJ      ObjectType = "BUILTIN"
 	ARRAY_OBJ        ObjectType = "ARRAY"
+	MAP_OBJ          ObjectType = "MAP"
 	RETURN_VALUE_OBJ ObjectType = "RETURN_VALUE"
 	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
 	MODULE_OBJ       ObjectType = "MODULE"
@@ -130,17 +131,18 @@ func (f *Function) Inspect() string {
 
 // BuiltinFunction represents a native Go function wrapped for use in the Caja language.
 // It accepts a slice of evaluated objects and returns an evaluated object or an error.
-type BuiltinFunction func(args ...Object) (Object, error)
+type BuiltinFunction func(env *Environment, args ...Object) (Object, error)
 
 // Builtin represents a built-in function provided by the Caja runtime.
 // It implements the Object interface, allowing it to be assigned to variables
 // and passed as arguments just like user-defined functions.
 type Builtin struct {
-	Fn BuiltinFunction
+	Name string
+	Fn   BuiltinFunction
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }
-func (b *Builtin) Inspect() string  { return "built-in function" }
+func (b *Builtin) Inspect() string  { return "builtin function " + b.Name }
 
 // Array represents an ordered collection of evaluated Objects.
 // Elements holds the slice of objects contained within the array.
@@ -226,6 +228,32 @@ func (s *StructObject) Inspect() string {
 
 	out.WriteString(strings.Join(fields, ", "))
 	out.WriteString(" }")
+
+	return out.String()
+}
+
+type MapPair struct {
+	Key   Object
+	Value Object
+}
+
+type Map struct {
+	Pairs map[string]MapPair
+}
+
+func (m *Map) Type() ObjectType { return MAP_OBJ }
+
+func (m *Map) Inspect() string {
+	var out bytes.Buffer
+
+	pairs := []string{}
+	for _, pair := range m.Pairs {
+		pairs = append(pairs, fmt.Sprintf("%s: %s", pair.Key.Inspect(), pair.Value.Inspect()))
+	}
+
+	out.WriteString("{")
+	out.WriteString(strings.Join(pairs, ", "))
+	out.WriteString("}")
 
 	return out.String()
 }

@@ -54,6 +54,7 @@ func New(t *lexer.Lexer) *Parser {
 	p.prefixParseFuncs[lexer.NIL] = p.parseNilLiteral
 	p.prefixParseFuncs[lexer.FN] = p.parseFunctionLiteral
 	p.prefixParseFuncs[lexer.LBRACKET] = p.parseArrayLiteral
+	p.prefixParseFuncs[lexer.LBRACE] = p.parseMapLiteral
 
 	p.prefixParseFuncs[lexer.BANG] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MINUS] = p.parsePrefixExpression
@@ -490,6 +491,11 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 	}
 	statement.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
+	if p.peekToken.Type == lexer.COLON {
+		p.nextToken() // move to colon
+		statement.ValueType = p.parseTypeSignature()
+	}
+
 	if !p.expectPeek(lexer.ASSIGN) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected assignment, got %s", p.currToken.Type))
 		return nil
@@ -515,6 +521,11 @@ func (p *Parser) parseConstStatement() *ast.ConstStatement {
 		return nil
 	}
 	statement.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if p.peekToken.Type == lexer.COLON {
+		p.nextToken() // move to colon
+		statement.ValueType = p.parseTypeSignature()
+	}
 
 	if !p.expectPeek(lexer.ASSIGN) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected assignment, got %s", p.currToken.Type))
@@ -663,6 +674,26 @@ func (p *Parser) parseTypeSignature() string {
 
 	if p.expectPeek(lexer.IDENT) {
 		typeName := p.currToken.Literal
+
+		if typeName == "map" && p.peekToken.Type == lexer.LBRACKET {
+			p.nextToken() // move to [
+			keyType := p.parseTypeSignature()
+			if !p.expectPeek(lexer.RBRACKET) {
+				return ""
+			}
+			valueType := p.parseTypeSignature()
+			return "map[" + keyType + "]" + valueType
+		}
+
+		if p.peekToken.Type == lexer.DOT {
+			p.nextToken() // move to .
+			if p.expectPeek(lexer.IDENT) {
+				typeName += "." + p.currToken.Literal
+			} else {
+				return ""
+			}
+		}
+
 		if p.peekToken.Type == lexer.QUESTION {
 			if typeName == "Number" || typeName == "String" || typeName == "Boolean" || typeName == "Date" {
 				p.reportError(p.peekToken, fmt.Sprintf("syntax error: primitive type '%s' cannot be nullable", typeName))
@@ -674,9 +705,43 @@ func (p *Parser) parseTypeSignature() string {
 		}
 		return typeName
 	}
-
 	p.reportError(p.peekToken, fmt.Sprintf("expected type identifier, got %s", p.peekToken.Type))
 	return ""
+}
+
+// parseMapLiteral parses a map/dictionary definition, e.g., {"key": "value"}.
+func (p *Parser) parseMapLiteral() ast.Expression {
+	mapLiteral := &ast.MapLiteral{
+		Token: p.currToken,
+		Pairs: make(map[ast.Expression]ast.Expression),
+	}
+
+	for p.peekToken.Type != lexer.RBRACE {
+		p.nextToken()
+		key := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+
+		if !p.expectPeek(lexer.COLON) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected colon in map literal, got %s", p.currToken.Type))
+			return nil
+		}
+
+		p.nextToken()
+		value := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+
+		mapLiteral.Pairs[key] = value
+
+		if p.peekToken.Type != lexer.RBRACE && !p.expectPeek(lexer.COMMA) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected comma or rbrace in map literal, got %s", p.currToken.Type))
+			return nil
+		}
+	}
+
+	if !p.expectPeek(lexer.RBRACE) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected rbrace in map literal, got %s", p.currToken.Type))
+		return nil
+	}
+
+	return mapLiteral
 }
 
 // parseReturnStatement parses a return statement of the form "return expr".

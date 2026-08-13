@@ -15,7 +15,8 @@ func (e *Environment) newStringModule() *Module {
 	stringEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	stringEnv.Set("charAt", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.charAt",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'charAt'. got=%d, want=2", len(args))
 			}
@@ -39,7 +40,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("substring", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.substring",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 3 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'substring'. got=%d, want=3", len(args))
 			}
@@ -74,7 +76,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("concat", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.concat",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'concat'. got=%d, want=2", len(args))
 			}
@@ -91,7 +94,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("split", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.split",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'split'. got=%d, want=2", len(args))
 			}
@@ -117,7 +121,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("contains", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.contains",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'contains'. got=%d, want=2", len(args))
 			}
@@ -134,7 +139,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("startsWith", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.startsWith",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'startsWith'. got=%d, want=2", len(args))
 			}
@@ -151,7 +157,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("endsWith", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.endsWith",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'endsWith'. got=%d, want=2", len(args))
 			}
@@ -168,7 +175,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("replace", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.replace",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 3 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'replace'. got=%d, want=3", len(args))
 			}
@@ -189,7 +197,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("toUpper", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.toUpper",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'toUpper'. got=%d, want=1", len(args))
 			}
@@ -202,7 +211,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("toLower", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.toLower",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'toLower'. got=%d, want=1", len(args))
 			}
@@ -215,7 +225,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("trim", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.trim",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'trim'. got=%d, want=1", len(args))
 			}
@@ -228,7 +239,8 @@ func (e *Environment) newStringModule() *Module {
 		}})
 
 	stringEnv.Set("len", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "string.len",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'strlen'. got=%d, want=1", len(args))
 			}
@@ -253,7 +265,8 @@ func (e *Environment) newDateModule() *Module {
 	dateEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	dateEnv.Set("year", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.year",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'year'. got=%d, want=1", len(args))
 			}
@@ -265,7 +278,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("month", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.month",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'month'. got=%d, want=1", len(args))
 			}
@@ -277,7 +291,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("day", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.day",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'day'. got=%d, want=1", len(args))
 			}
@@ -289,7 +304,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("weekday", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.weekday",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'weekday'. got=%d, want=1", len(args))
 			}
@@ -301,7 +317,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("today", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.today",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 0 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'today'. got=%d, want=0", len(args))
 			}
@@ -311,7 +328,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("parseDate", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.parseDate",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'parseDate'. got=%d, want=1", len(args))
 			}
@@ -327,7 +345,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("addDays", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.addDays",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'addDays'. got=%d, want=2", len(args))
 			}
@@ -345,7 +364,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("diffDays", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.diffDays",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'diffDays'. got=%d, want=2", len(args))
 			}
@@ -359,7 +379,8 @@ func (e *Environment) newDateModule() *Module {
 		}})
 
 	dateEnv.Set("newDate", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "date.newDate",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 3 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'newDate'. got=%d, want=3", len(args))
 			}
@@ -401,7 +422,8 @@ func (e *Environment) newMathModule() *Module {
 	mathEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	mathEnv.Set("abs", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.abs",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'abs'. got=%d, want=1", len(args))
 			}
@@ -413,7 +435,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("sqrt", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.sqrt",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'sqrt'. got=%d, want=1", len(args))
 			}
@@ -428,7 +451,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("pow", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.pow",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'pow'. got=%d, want=2", len(args))
 			}
@@ -444,7 +468,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("floor", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.floor",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'floor'. got=%d, want=1", len(args))
 			}
@@ -456,7 +481,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("ceil", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.ceil",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'ceil'. got=%d, want=1", len(args))
 			}
@@ -468,7 +494,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("round", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.round",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'round'. got=%d, want=1", len(args))
 			}
@@ -480,7 +507,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("min", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.min",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'min'. got=%d, want=2", len(args))
 			}
@@ -496,7 +524,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("max", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.max",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'max'. got=%d, want=2", len(args))
 			}
@@ -512,7 +541,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("log", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.log",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'log'. got=%d, want=2", len(args))
 			}
@@ -536,7 +566,8 @@ func (e *Environment) newMathModule() *Module {
 		}})
 
 	mathEnv.Set("rand", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "math.rand",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 0 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'rand'. got=%d, want=0", len(args))
 			}
@@ -564,7 +595,8 @@ func (e *Environment) newArrayModule() *Module {
 	arrayEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	arrayEnv.Set("len", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.len",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for len. got=%d, want=1", len(args))
 			}
@@ -578,7 +610,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("append", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.append",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for append. got=%d, want=2", len(args))
 			}
@@ -593,7 +626,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("head", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.head",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for head. got=%d, want=1", len(args))
 			}
@@ -608,7 +642,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("tail", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.tail",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for tail. got=%d, want=1", len(args))
 			}
@@ -625,7 +660,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("last", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.last",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for last. got=%d, want=1", len(args))
 			}
@@ -640,7 +676,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("copy", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.copy",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for copy. got=%d, want=1", len(args))
 			}
@@ -654,7 +691,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("slice", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.slice",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 3 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for slice. got=%d, want=3", len(args))
 			}
@@ -690,7 +728,8 @@ func (e *Environment) newArrayModule() *Module {
 		}})
 
 	arrayEnv.Set("join", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "array.join",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
 				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'join'. got=%d, want=2", len(args))
 			}
@@ -723,7 +762,8 @@ func (e *Environment) newLogModule() *Module {
 
 	createLogFunc := func(level string) *Builtin {
 		return &Builtin{
-			Fn: func(args ...Object) (Object, error) {
+			Name: "log." + level,
+			Fn: func(env *Environment, args ...Object) (Object, error) {
 				if len(args) != 2 {
 					return nil, fmt.Errorf("semantic error: wrong number of arguments for '%s'. got=%d, want=2", level, len(args))
 				}
@@ -755,7 +795,8 @@ func (e *Environment) newLogModule() *Module {
 	logEnv.Set("error", createLogFunc("error"))
 
 	logEnv.Set("export", &Builtin{
-		Fn: func(args ...Object) (Object, error) {
+		Name: "log.export",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
 				return nil, fmt.Errorf("arity error: expected 1 argument for 'export', got %d", len(args))
 			}
@@ -769,5 +810,18 @@ func (e *Environment) newLogModule() *Module {
 	return &Module{
 		Name: moduleName,
 		Env:  logEnv,
+	}
+}
+
+// newMapModule initializes and returns a builtin "map" module.
+func (e *Environment) newMapModule() *Module {
+	moduleName := "map"
+	mapEnv := NewEnvironment(e.BaseDir, moduleName, true)
+
+	mapEnv.Set("containsKey", &Builtin{Name: "map.containsKey"})
+
+	return &Module{
+		Name: moduleName,
+		Env:  mapEnv,
 	}
 }

@@ -40,6 +40,8 @@ func Eval(n ast.Node, env *environment.Environment) (environment.Object, error) 
 		return environment.NullObj, nil
 	case *ast.ArrayLiteral:
 		return evalArrayLiteral(node, env)
+	case *ast.MapLiteral:
+		return evalMapLiteral(node, env)
 	case *ast.IndexExpression:
 		return evalIndexExpression(node, env)
 	case *ast.Identifier:
@@ -87,37 +89,45 @@ func evalIndexAssignmentStatement(node *ast.IndexAssignmentStatement, env *envir
 		return nil, err
 	}
 
+	idxObj, err := Eval(node.Index, env)
+	if err != nil {
+		return nil, err
+	}
+
+	val, err := Eval(node.Value, env)
+	if err != nil {
+		return nil, err
+	}
+
 	if left.Type() == environment.NULL_OBJ {
 		return nil, fmt.Errorf("null pointer exception: cannot assign to index of nil")
 	}
 
-	arr, ok := left.(*environment.Array)
-	if !ok {
-		return nil, fmt.Errorf("type error: index assignment not supported for %s", left.Type())
+	if arr, ok := left.(*environment.Array); ok {
+		if idxObj.Type() != environment.NUMBER_OBJ {
+			return nil, fmt.Errorf("array index must be NUMBER, got %s", idxObj.Type())
+		}
+		idx := int(idxObj.(*environment.Number).Value)
+
+		if idx < 0 || idx >= len(arr.Elements) {
+			return nil, fmt.Errorf("runtime error: array index out of bounds")
+		}
+
+		arr.Elements[idx] = val
+		return val, nil
 	}
 
-	indexObj, err := Eval(node.Index, env)
-	if err != nil {
-		return nil, err
+	if mapObj, ok := left.(*environment.Map); ok {
+		hash, err := hashKey(idxObj)
+		if err != nil {
+			return nil, err
+		}
+
+		mapObj.Pairs[hash] = environment.MapPair{Key: idxObj, Value: val}
+		return val, nil
 	}
 
-	indexNum, ok := indexObj.(*environment.Number)
-	if !ok {
-		return nil, fmt.Errorf("type error: array index must be NUMBER, got %s", indexObj.Type())
-	}
-
-	idx := int(indexNum.Value)
-	if idx < 0 || idx >= len(arr.Elements) {
-		return nil, fmt.Errorf("runtime error: array index out of bounds")
-	}
-
-	valObj, err := Eval(node.Value, env)
-	if err != nil {
-		return nil, err
-	}
-
-	arr.Elements[idx] = valObj
-	return valObj, nil
+	return nil, fmt.Errorf("index assignment not supported for %s", left.Type())
 }
 
 // evalPropertyAssignmentStatement evaluates the property assignment, updates the object, and returns the assigned value.
@@ -264,6 +274,58 @@ func evalPropertyExpression(node *ast.PropertyExpression, env *environment.Envir
 	return nil, fmt.Errorf("runtime error: property access is only supported on modules and structs")
 }
 
+func hashKey(obj environment.Object) (string, error) {
+	if obj.Type() == environment.STRING_OBJ {
+		return obj.(*environment.String).Value, nil
+	}
+	if obj.Type() == environment.NUMBER_OBJ {
+		return fmt.Sprintf("%f", obj.(*environment.Number).Value), nil
+	}
+	if structObj, ok := obj.(*environment.StructObject); ok {
+		if keyObj, exists := structObj.Fields["key"]; exists {
+			if fn, ok := keyObj.(*environment.Function); ok {
+				extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+				evaluated, err := Eval(fn.Body, extendedEnv)
+				if err != nil {
+					return "", err
+				}
+				if rv, ok := evaluated.(*environment.ReturnValue); ok {
+					evaluated = rv.Value
+				}
+				if strRes, ok := evaluated.(*environment.String); ok {
+					return strRes.Value, nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("unusable as map key: %s", obj.Type())
+}
+
+func evalMapLiteral(node *ast.MapLiteral, env *environment.Environment) (environment.Object, error) {
+	pairs := make(map[string]environment.MapPair)
+
+	for keyNode, valueNode := range node.Pairs {
+		keyObj, err := Eval(keyNode, env)
+		if err != nil {
+			return nil, err
+		}
+
+		hash, err := hashKey(keyObj)
+		if err != nil {
+			return nil, err
+		}
+
+		valObj, err := Eval(valueNode, env)
+		if err != nil {
+			return nil, err
+		}
+
+		pairs[hash] = environment.MapPair{Key: keyObj, Value: valObj}
+	}
+
+	return &environment.Map{Pairs: pairs}, nil
+}
+
 // evalIndexExpression evaluates an array index operation, ensuring the left side
 // is an array and the index is a number within bounds, returning the requested element.
 func evalIndexExpression(node *ast.IndexExpression, env *environment.Environment) (environment.Object, error) {
@@ -281,19 +343,31 @@ func evalIndexExpression(node *ast.IndexExpression, env *environment.Environment
 		return nil, fmt.Errorf("null pointer exception: cannot read index of nil")
 	}
 
-	arrayObj, okLeft := left.(*environment.Array)
-	indexObj, okIndex := index.(*environment.Number)
-
-	if !okLeft || !okIndex {
-		return nil, fmt.Errorf("runtime error: index operator not supported")
+	if arrayObj, ok := left.(*environment.Array); ok {
+		indexObj, okIndex := index.(*environment.Number)
+		if !okIndex {
+			return nil, fmt.Errorf("runtime error: array index must be NUMBER")
+		}
+		idx := int(indexObj.Value)
+		if idx < 0 || idx >= len(arrayObj.Elements) {
+			return nil, fmt.Errorf("runtime error: array index out of bounds")
+		}
+		return arrayObj.Elements[idx], nil
 	}
 
-	idx := int(indexObj.Value)
-	if idx < 0 || idx >= len(arrayObj.Elements) {
-		return nil, fmt.Errorf("runtime error: array index out of bounds")
+	if mapObj, ok := left.(*environment.Map); ok {
+		hash, err := hashKey(index)
+		if err != nil {
+			return nil, err
+		}
+		pair, exists := mapObj.Pairs[hash]
+		if !exists {
+			return environment.NullObj, nil
+		}
+		return pair.Value, nil
 	}
 
-	return arrayObj.Elements[idx], nil
+	return nil, fmt.Errorf("runtime error: index operator not supported for type %s", left.Type())
 }
 
 // evalReturnStatement evaluates the returned expression and wraps it in a ReturnValue object.
@@ -333,6 +407,13 @@ func evalLetStatement(node *ast.LetStatement, env *environment.Environment) (env
 	if err != nil {
 		return nil, err
 	}
+
+	if node.ValueType != "" {
+		if err := checkTypeMatches(node.ValueType, val); err != nil {
+			return nil, err
+		}
+	}
+
 	env.Set(node.Name.Value, val)
 	if node.IsPrivate {
 		env.MarkPrivate(node.Name.Value)
@@ -346,11 +427,53 @@ func evalConstStatement(node *ast.ConstStatement, env *environment.Environment) 
 	if err != nil {
 		return nil, err
 	}
+
+	if node.ValueType != "" {
+		if err := checkTypeMatches(node.ValueType, val); err != nil {
+			return nil, err
+		}
+	}
+
 	env.Set(node.Name.Value, val)
 	if node.IsPrivate {
 		env.MarkPrivate(node.Name.Value)
 	}
 	return val, nil
+}
+
+func checkTypeMatches(expected string, obj environment.Object) error {
+	if expected == "" || expected == "Any" {
+		return nil
+	}
+	if obj.Type() == environment.NULL_OBJ {
+		return nil
+	}
+
+	var expectedObjType environment.ObjectType
+	switch expected {
+	case "Number":
+		expectedObjType = environment.NUMBER_OBJ
+	case "String":
+		expectedObjType = environment.STRING_OBJ
+	case "Boolean":
+		expectedObjType = environment.BOOLEAN_OBJ
+	case "Date":
+		expectedObjType = environment.DATE_OBJ
+	case "Function":
+		expectedObjType = environment.FUNCTION_OBJ
+	default:
+		if len(expected) > 0 && expected[0] == '[' && expected[len(expected)-1] == ']' {
+			expectedObjType = environment.ARRAY_OBJ
+		} else {
+			// Other custom types or modules
+			return nil
+		}
+	}
+
+	if obj.Type() != expectedObjType {
+		return fmt.Errorf("type mismatch: expected %s, got %s", expected, obj.Type())
+	}
+	return nil
 }
 
 // evalInfixExpressionNode evaluates the left and right operands and applies the operator.
@@ -554,12 +677,28 @@ func evalCallExpression(node *ast.CallExpression, env *environment.Environment) 
 
 			return evaluated, nil
 		case *environment.Builtin:
-			result, err := fn.Fn(args...)
+			if fn.Name == "map.containsKey" {
+				if len(args) != 2 {
+					return nil, fmt.Errorf("arity error: expected 2 arguments for 'containsKey', got %d", len(args))
+				}
+				mapObj, ok := args[0].(*environment.Map)
+				if !ok {
+					return nil, fmt.Errorf("type error: first argument to 'containsKey' must be MAP, got %s", args[0].Type())
+				}
+				keyObj := args[1]
+				hash, err := hashKey(keyObj)
+				if err != nil {
+					return nil, err
+				}
+				_, exists := mapObj.Pairs[hash]
+				return &environment.Boolean{Value: exists}, nil
+			}
+
+			result, err := fn.Fn(env, args...)
 			if err != nil {
 				return nil, err
 			}
 			return result, nil
-
 		default:
 			return nil, fmt.Errorf("runtime error: not a function")
 		}
