@@ -48,6 +48,19 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 		return symbol.NewArraySymbol(innerSymbol), ok
 	}
 
+	if strings.HasPrefix(typeName, "map[") {
+		closingBracket := strings.Index(typeName, "]")
+		if closingBracket != -1 {
+			keyTypeStr := typeName[4:closingBracket]
+			valTypeStr := typeName[closingBracket+1:]
+
+			keySym, keyOk := a.findTypeSymbolInTypes(keyTypeStr)
+			valSym, valOk := a.findTypeSymbolInTypes(valTypeStr)
+
+			return symbol.NewMapSymbol(keySym, valSym), keyOk && valOk
+		}
+	}
+
 	switch typeName {
 	case "Any":
 		return symbol.AnySymbol(), true

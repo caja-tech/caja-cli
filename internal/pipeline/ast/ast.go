@@ -203,6 +203,7 @@ type LetStatement struct {
 	Name      *Identifier
 	Value     Expression
 	IsPrivate bool
+	ValueType string
 }
 
 func (ls *LetStatement) statementNode()       {}
@@ -212,7 +213,13 @@ func (ls *LetStatement) String() string {
 	if ls.IsPrivate {
 		out += "private "
 	}
-	out += ls.TokenLiteral() + " " + ls.Name.String() + " = "
+	out += ls.TokenLiteral() + " " + ls.Name.String()
+
+	if ls.ValueType != "" {
+		out += ": " + ls.ValueType
+	}
+
+	out += " = "
 
 	if ls.Value != nil {
 		out += ls.Value.String()
@@ -228,6 +235,7 @@ type ConstStatement struct {
 	Name      *Identifier
 	Value     Expression
 	IsPrivate bool
+	ValueType string
 }
 
 func (cs *ConstStatement) statementNode()       {}
@@ -237,7 +245,13 @@ func (cs *ConstStatement) String() string {
 	if cs.IsPrivate {
 		out += "private "
 	}
-	out += cs.TokenLiteral() + " " + cs.Name.String() + " = "
+	out += cs.TokenLiteral() + " " + cs.Name.String()
+
+	if cs.ValueType != "" {
+		out += ": " + cs.ValueType
+	}
+
+	out += " = "
 
 	if cs.Value != nil {
 		out += cs.Value.String()
@@ -594,4 +608,24 @@ func (p *PropertyAssignmentStatement) String() string {
 		return p.Object.String() + "?." + p.Property.String() + " = " + p.Value.String()
 	}
 	return p.Object.String() + "." + p.Property.String() + " = " + p.Value.String()
+}
+
+// MapLiteral represents a dictionary/map expression.
+type MapLiteral struct {
+	Token lexer.Token // the '{' token
+	Pairs map[Expression]Expression
+}
+
+func (ml *MapLiteral) expressionNode()      {}
+func (ml *MapLiteral) TokenLiteral() string { return ml.Token.Literal }
+func (ml *MapLiteral) String() string {
+	var out string
+	out += "{"
+	var pairs []string
+	for key, value := range ml.Pairs {
+		pairs = append(pairs, key.String()+": "+value.String())
+	}
+	out += strings.Join(pairs, ", ")
+	out += "}"
+	return out
 }

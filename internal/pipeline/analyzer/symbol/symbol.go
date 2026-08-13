@@ -20,8 +20,7 @@ func AnySymbol() *BasicSymbol {
 }
 
 // GetStandardModule retrieves the symbols exported by a standard builtin module by its name.
-// It returns a map of symbol names to their corresponding Symbol types, and a boolean indicating if the module exists.
-func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
+func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol, bool) {
 	switch moduleName {
 	case "array":
 		return map[string]Symbol{
@@ -33,7 +32,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"copy":   NewBuiltinSymbol(1),
 			"slice":  NewBuiltinSymbol(3),
 			"join":   NewBuiltinSymbol(2),
-		}, true
+		}, nil, true
 
 	case "date":
 		return map[string]Symbol{
@@ -46,7 +45,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"addDays":   NewBuiltinSymbol(2),
 			"diffDays":  NewBuiltinSymbol(2),
 			"newDate":   NewBuiltinSymbol(3),
-		}, true
+		}, nil, true
 
 	case "string":
 		return map[string]Symbol{
@@ -62,7 +61,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"toLower":    NewBuiltinSymbol(1),
 			"trim":       NewBuiltinSymbol(1),
 			"len":        NewBuiltinSymbol(1),
-		}, true
+		}, nil, true
 
 	case "math":
 		return map[string]Symbol{
@@ -83,7 +82,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"LN10":   &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 			"LOG2E":  &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 			"LOG10E": &BasicSymbol{symbolType: environment.NUMBER_OBJ},
-		}, true
+		}, nil, true
 
 	case "log":
 		return map[string]Symbol{
@@ -91,8 +90,15 @@ func GetStandardModule(moduleName string) (map[string]Symbol, bool) {
 			"warn":   NewBuiltinSymbol(2),
 			"error":  NewBuiltinSymbol(2),
 			"export": NewBuiltinSymbol(1),
+		}, nil, true
+		
+	case "map":
+		return map[string]Symbol{
+			"containsKey": NewBuiltinSymbol(2),
+		}, map[string]Symbol{
+			"KeyFunc": NewFunctionSymbol(0, nil, NewBasicSymbol(environment.STRING_OBJ)),
 		}, true
 	}
 
-	return nil, false
+	return nil, nil, false
 }

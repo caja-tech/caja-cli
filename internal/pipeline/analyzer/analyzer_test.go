@@ -73,6 +73,55 @@ if (a > 5) {
 `,
 			expectedErrors: []string{},
 		},
+		{
+			name: "Explicit type at variable declaration with custom type and structs",
+			input: `
+type MyType fn(Number):Number
+let a: MyType = nil
+
+type Person struct {
+	name String
+	age Number
+}
+let b: Person = nil
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Type alias of a function signature",
+			input: `
+type CustomFunc fn(Number): Number
+let f: CustomFunc = fn(x: Number): Number { return x }
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "map.KeyFunc usage",
+			input: `
+import map
+type CustomStruct struct {
+	key map.KeyFunc
+	value Number
+}
+let d: map[CustomStruct]Number = {}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "map with custom function value",
+			input: `
+import string
+type CustomFunc fn(String): String
+
+let dict: map[String]CustomFunc = {
+	"a": fn(x: String): String { return string.concat("A", x) },
+	"b": fn(x: String): String { return string.concat("B", x) }
+}
+
+return string.concat(dict["a"]("x"), dict["b"]("y"))
+`,
+			expectedErrors: []string{},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -149,6 +198,15 @@ a["hello"] = 5
 `,
 			expectedErrors: []string{
 				"type error: array index must be NUMBER, got STRING",
+			},
+		},
+		{
+			name: "Undefined custom type in variable declaration",
+			input: `
+let c: CustomType = nil
+`,
+			expectedErrors: []string{
+				"semantic error: variable 'c' type is not declared: 'CustomType'",
 			},
 		},
 	}

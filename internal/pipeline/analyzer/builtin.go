@@ -70,6 +70,8 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeLogFunction(functionName, n), true
 	case "log.export":
 		return a.analyzeLogExportFunction(functionName, n), true
+	case "map.containsKey":
+		return a.analyzeMapContainsKeyFunction(n), true
 	default:
 		return symbol.AnySymbol(), false
 
@@ -595,4 +597,27 @@ func (a *Analyzer) analyzeLogExportFunction(functionName string, n *ast.CallExpr
 		_ = a.analyze(n.Arguments[0])
 	}
 	return symbol.AnySymbol()
+}
+
+// analyzeMapContainsKeyFunction checks the arity and type for map.containsKey, returning a BOOLEAN.
+func (a *Analyzer) analyzeMapContainsKeyFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'containsKey', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	mapSymbol := a.analyze(n.Arguments[0])
+	keySymbol := a.analyze(n.Arguments[1])
+
+	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'containsKey' must be MAP, got %s", mapSymbol.Type()))
+	}
+	
+	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
+		if !mapSym.Key.Equals(keySymbol) && keySymbol.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: map index must be %s, got %s", mapSym.Key.Type(), keySymbol.Type()))
+		}
+	}
+
+	return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 }

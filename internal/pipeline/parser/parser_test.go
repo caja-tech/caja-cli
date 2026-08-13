@@ -634,6 +634,16 @@ func TestLetStatements(t *testing.T) {
 			input:    "let rate = 15.5",
 			expected: "let rate = 15.5",
 		},
+		{
+			name:     "Let declaration with explicit type",
+			input:    "let x: Number = 5",
+			expected: "let x: Number = 5",
+		},
+		{
+			name:     "Let declaration with array type and nil",
+			input:    "let b: [String] = nil",
+			expected: "let b: [String] = nil",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -655,6 +665,16 @@ func TestConstStatements(t *testing.T) {
 			name:     "Private const assignment",
 			input:    "private const secret = 42",
 			expected: "private const secret = 42",
+		},
+		{
+			name:     "Const declaration with explicit type",
+			input:    "const PI: Number = 3.14",
+			expected: "const PI: Number = 3.14",
+		},
+		{
+			name:     "Private const declaration with explicit type",
+			input:    "private const text: String = \"hello\"",
+			expected: "private const text: String = \"hello\"",
 		},
 	}
 	runTestScenarios(t, tests)

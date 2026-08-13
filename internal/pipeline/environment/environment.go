@@ -168,8 +168,9 @@ func (e *Environment) GetStandardModule(moduleName string) *Module {
 		return e.newMathModule()
 	case "log":
 		return e.newLogModule()
+	case "map":
+		return e.newMapModule()
 	default:
 		return nil
-
 	}
 }
