@@ -107,6 +107,21 @@ let d: map[CustomStruct]Number = {}
 `,
 			expectedErrors: []string{},
 		},
+		{
+			name: "map with custom function value",
+			input: `
+import string
+type CustomFunc fn(String): String
+
+let dict: map[String]CustomFunc = {
+	"a": fn(x: String): String { return string.concat("A", x) },
+	"b": fn(x: String): String { return string.concat("B", x) }
+}
+
+return string.concat(dict["a"]("x"), dict["b"]("y"))
+`,
+			expectedErrors: []string{},
+		},
 	}
 	runTestScenarios(t, tests)
 }
