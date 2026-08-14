@@ -252,6 +252,33 @@ func (e *Environment) newStringModule() *Module {
 			return &Number{Value: float64(len(strObj.Value))}, nil
 		}})
 
+	stringEnv.Set("join", &Builtin{
+		Name: "string.join",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'join'. got=%d, want=2", len(args))
+			}
+			arrObj, ok := args[0].(*Array)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: first argument to 'join' must be ARRAY, got %s", args[0].Type())
+			}
+			delimObj, ok := args[1].(*String)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: second argument to 'join' must be STRING, got %s", args[1].Type())
+			}
+
+			var strElements []string
+			for _, el := range arrObj.Elements {
+				strEl, ok := el.(*String)
+				if !ok {
+					return nil, fmt.Errorf("semantic error: array elements must be STRING, got %s", el.Type())
+				}
+				strElements = append(strElements, strEl.Value)
+			}
+
+			return &String{Value: strings.Join(strElements, delimObj.Value)}, nil
+		}})
+
 	return &Module{
 		Name: moduleName,
 		Env:  stringEnv,
@@ -327,19 +354,19 @@ func (e *Environment) newDateModule() *Module {
 			return &Date{Value: today}, nil
 		}})
 
-	dateEnv.Set("parseDate", &Builtin{
-		Name: "date.parseDate",
+	dateEnv.Set("parse", &Builtin{
+		Name: "date.parse",
 		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 1 {
-				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'parseDate'. got=%d, want=1", len(args))
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'parse'. got=%d, want=1", len(args))
 			}
 			strObj, ok := args[0].(*String)
 			if !ok {
-				return nil, fmt.Errorf("semantic error: argument to 'parseDate' must be STRING, got %s", args[0].Type())
+				return nil, fmt.Errorf("semantic error: argument to 'parse' must be STRING, got %s", args[0].Type())
 			}
 			parsed, err := time.Parse("2006-01-02", strObj.Value)
 			if err != nil {
-				return nil, fmt.Errorf("runtime error: invalid date format for 'parseDate', expected 'YYYY-MM-DD'")
+				return nil, fmt.Errorf("runtime error: invalid date format for 'parse', expected 'YYYY-MM-DD'")
 			}
 			return &Date{Value: parsed}, nil
 		}})
@@ -378,17 +405,17 @@ func (e *Environment) newDateModule() *Module {
 			return &Number{Value: math.Abs(math.Round(diff))}, nil
 		}})
 
-	dateEnv.Set("newDate", &Builtin{
-		Name: "date.newDate",
+	dateEnv.Set("new", &Builtin{
+		Name: "date.new",
 		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 3 {
-				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'newDate'. got=%d, want=3", len(args))
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'new'. got=%d, want=3", len(args))
 			}
 			yearObj, ok1 := args[0].(*Number)
 			monthObj, ok2 := args[1].(*Number)
 			dayObj, ok3 := args[2].(*Number)
 			if !ok1 || !ok2 || !ok3 {
-				return nil, fmt.Errorf("semantic error: arguments to 'newDate' must be NUMBER")
+				return nil, fmt.Errorf("semantic error: arguments to 'new' must be NUMBER")
 			}
 
 			year := int(math.Floor(yearObj.Value))
@@ -396,14 +423,14 @@ func (e *Environment) newDateModule() *Module {
 			day := int(math.Floor(dayObj.Value))
 
 			if year < 1 || month < 1 || month > 12 || day < 1 || day > 31 {
-				return nil, fmt.Errorf("runtime error: invalid date boundaries for 'newDate'")
+				return nil, fmt.Errorf("runtime error: invalid date boundaries for 'new'")
 			}
 
 			d := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
 
 			// Check if the generated date matches the requested date to prevent rolling over (e.g., Feb 30 -> Mar 2)
 			if d.Year() != year || int(d.Month()) != month || d.Day() != day {
-				return nil, fmt.Errorf("runtime error: invalid date boundaries for 'newDate'")
+				return nil, fmt.Errorf("runtime error: invalid date boundaries for 'new'")
 			}
 
 			return &Date{Value: d}, nil
@@ -609,20 +636,38 @@ func (e *Environment) newArrayModule() *Module {
 			}
 		}})
 
-	arrayEnv.Set("append", &Builtin{
-		Name: "array.append",
+	arrayEnv.Set("push", &Builtin{
+		Name: "array.push",
 		Fn: func(env *Environment, args ...Object) (Object, error) {
 			if len(args) != 2 {
-				return nil, fmt.Errorf("semantic error: wrong number of arguments for append. got=%d, want=2", len(args))
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for push. got=%d, want=2", len(args))
 			}
 			arr, ok := args[0].(*Array)
 			if !ok {
-				return nil, fmt.Errorf("semantic error: argument to 'append' must be ARRAY, got %s", args[0].Type())
+				return nil, fmt.Errorf("semantic error: argument to 'push' must be ARRAY, got %s", args[0].Type())
 			}
 			newElements := make([]Object, len(arr.Elements), len(arr.Elements)+1)
 			copy(newElements, arr.Elements)
 			newElements = append(newElements, args[1])
 			return &Array{Elements: newElements}, nil
+		}})
+
+	arrayEnv.Set("pop", &Builtin{
+		Name: "array.pop",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for pop. got=%d, want=1", len(args))
+			}
+			arr, ok := args[0].(*Array)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: argument to 'pop' must be ARRAY, got %s", args[0].Type())
+			}
+			if len(arr.Elements) > 0 {
+				newElements := make([]Object, len(arr.Elements)-1)
+				copy(newElements, arr.Elements[:len(arr.Elements)-1])
+				return &Array{Elements: newElements}, nil
+			}
+			return &Array{Elements: []Object{}}, nil
 		}})
 
 	arrayEnv.Set("head", &Builtin{

@@ -25,7 +25,8 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 	case "array":
 		return map[string]Symbol{
 			"len":    NewBuiltinSymbol(1),
-			"append": NewBuiltinSymbol(2),
+			"push":   NewBuiltinSymbol(2),
+			"pop":    NewBuiltinSymbol(1),
 			"head":   NewBuiltinSymbol(1),
 			"tail":   NewBuiltinSymbol(1),
 			"last":   NewBuiltinSymbol(1),
@@ -41,14 +42,15 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 			"day":       NewBuiltinSymbol(1),
 			"weekday":   NewBuiltinSymbol(1),
 			"today":     NewBuiltinSymbol(0),
-			"parseDate": NewBuiltinSymbol(1),
+			"parse":     NewBuiltinSymbol(1),
 			"addDays":   NewBuiltinSymbol(2),
 			"diffDays":  NewBuiltinSymbol(2),
-			"newDate":   NewBuiltinSymbol(3),
+			"new":       NewBuiltinSymbol(3),
 		}, nil, true
 
 	case "string":
 		return map[string]Symbol{
+			"join":       NewBuiltinSymbol(2),
 			"charAt":     NewBuiltinSymbol(2),
 			"substring":  NewBuiltinSymbol(3),
 			"concat":     NewBuiltinSymbol(2),

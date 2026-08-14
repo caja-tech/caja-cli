@@ -571,13 +571,17 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input: "import array\nlet arr = [\"a\", \"b\"]\narray.len(arr)",
 		},
 		{
-			name:  "append() works with matching types",
-			input: "import array\nlet arr = [1, 2]\nlet newArr = array.append(arr, 3)",
+			name:  "push() works with matching types",
+			input: "import array\nlet arr = [1, 2]\nlet newArr = array.push(arr, 3)",
 		},
 		{
-			name:           "append() rejects mismatched types",
-			input:          "import array\nlet arr = [1, 2]\nlet newArr = array.append(arr, \"string\")",
-			expectedErrors: []string{"type error: cannot append STRING to array of NUMBER"},
+			name:           "push() rejects mismatched types",
+			input:          "import array\nlet arr = [1, 2]\nlet newArr = array.push(arr, \"string\")",
+			expectedErrors: []string{"type error: cannot push STRING to array of NUMBER"},
+		},
+		{
+			name:  "pop() returns array",
+			input: "import array\nlet arr = [1, 2]\nlet t = array.pop(arr)\nlet res = array.push(t, 3)",
 		},
 		{
 			name:  "head() works and infers type",
@@ -585,7 +589,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		},
 		{
 			name:  "tail() returns array",
-			input: "import array\nlet arr = [1, 2]\nlet t = array.tail(arr)\nlet res = array.append(t, 3)",
+			input: "import array\nlet arr = [1, 2]\nlet t = array.tail(arr)\nlet res = array.push(t, 3)",
 		},
 		{
 			name:  "last() works and infers type",
@@ -593,11 +597,11 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		},
 		{
 			name:  "copy() returns array",
-			input: "import array\nlet arr = [1, 2]\nlet c = array.copy(arr)\nlet res = array.append(c, 3)",
+			input: "import array\nlet arr = [1, 2]\nlet c = array.copy(arr)\nlet res = array.push(c, 3)",
 		},
 		{
 			name:  "slice() works",
-			input: "import array\nlet arr = [1, 2, 3]\nlet s = array.slice(arr, 0, 2)\nlet res = array.append(s, 4)",
+			input: "import array\nlet arr = [1, 2, 3]\nlet s = array.slice(arr, 0, 2)\nlet res = array.push(s, 4)",
 		},
 		{
 			name:           "slice() rejects non-number index",
@@ -639,6 +643,20 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			name:           "concat() rejects mismatched types",
 			input:          "import string\nreturn string.concat(10, 20)",
 			expectedErrors: []string{"type error: first argument to 'concat' must be STRING, got NUMBER", "type error: second argument to 'concat' must be STRING, got NUMBER"},
+		},
+		{
+			name:  "join() works with correct types",
+			input: "import string\nreturn string.join([\"hello\", \"world\"], \",\")",
+		},
+		{
+			name:           "join() rejects mismatched types",
+			input:          "import string\nreturn string.join([10, 20], 20)",
+			expectedErrors: []string{"type error: array elements for 'join' must be STRING, got NUMBER", "type error: second argument to 'join' must be STRING, got NUMBER"},
+		},
+		{
+			name:           "join() rejects invalid array element types",
+			input:          "import string\nreturn string.join([10, 20], \",\")",
+			expectedErrors: []string{"type error: array elements for 'join' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "split() works with correct types",
@@ -757,13 +775,13 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"arity error: expected 0 arguments for 'today', got 1"},
 		},
 		{
-			name:  "parseDate() works with correct types",
-			input: "import date\nreturn date.parseDate(\"2023-10-25\")",
+			name:  "parse() works with correct types",
+			input: "import date\nreturn date.parse(\"2023-10-25\")",
 		},
 		{
-			name:           "parseDate() rejects mismatched types",
-			input:          "import date\nreturn date.parseDate(2023)",
-			expectedErrors: []string{"type error: first argument to 'parseDate' must be STRING, got NUMBER"},
+			name:           "parse() rejects mismatched types",
+			input:          "import date\nreturn date.parse(2023)",
+			expectedErrors: []string{"type error: first argument to 'parse' must be STRING, got NUMBER"},
 		},
 		{
 			name:  "addDays() works with correct types",
@@ -784,13 +802,13 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: second argument to 'diffDays' must be DATE, got NUMBER"},
 		},
 		{
-			name:  "newDate() works with correct types",
-			input: "import date\nreturn date.newDate(2023, 1, 1)",
+			name:  "new() works with correct types",
+			input: "import date\nreturn date.new(2023, 1, 1)",
 		},
 		{
-			name:           "newDate() rejects mismatched types",
-			input:          "import date\nreturn date.newDate(\"2023\", 1, 1)",
-			expectedErrors: []string{"type error: first argument to 'newDate' must be NUMBER, got STRING"},
+			name:           "new() rejects mismatched types",
+			input:          "import date\nreturn date.new(\"2023\", 1, 1)",
+			expectedErrors: []string{"type error: first argument to 'new' must be NUMBER, got STRING"},
 		},
 		{
 			name:  "abs() works with correct types",

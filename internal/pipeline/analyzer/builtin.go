@@ -18,8 +18,10 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 	switch fullName {
 	case "array.len":
 		return a.analyzeArrayLenFunction(n), true
-	case "array.append":
-		return a.analyzeArrayAppendFunction(n), true
+	case "array.push":
+		return a.analyzeArrayPushFunction(n), true
+	case "array.pop":
+		return a.analyzeArrayPopFunction(n), true
 	case "array.head":
 		return a.analyzeArrayHeadFunction(n), true
 	case "array.tail":
@@ -48,18 +50,20 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeStringTransformFunction(functionName, n), true
 	case "string.len":
 		return a.analyzeStringLenFunction(n), true
+	case "string.join":
+		return a.analyzeStringJoinFunction(n), true
 	case "date.year", "date.month", "date.day", "date.weekday":
 		return a.analyzeDateComponentFunction(functionName, n), true
 	case "date.today":
 		return a.analyzeDateTodayFunction(n), true
-	case "date.parseDate":
-		return a.analyzeDateParseDateFunction(n), true
+	case "date.parse":
+		return a.analyzeDateParseFunction(n), true
 	case "date.addDays":
 		return a.analyzeDateAddDaysFunction(n), true
 	case "date.diffDays":
 		return a.analyzeDateDiffDaysFunction(n), true
-	case "date.newDate":
-		return a.analyzeDateNewDateFunction(n), true
+	case "date.new":
+		return a.analyzeDateNewFunction(n), true
 	case "math.abs", "math.sqrt", "math.floor", "math.ceil", "math.round":
 		return a.analyzeMathOneArgFunction(functionName, n), true
 	case "math.rand":
@@ -93,10 +97,10 @@ func (a *Analyzer) analyzeArrayLenFunction(n *ast.CallExpression) symbol.Symbol 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
 
-// analyzeArrayAppendFunction checks the arity and type for the builtin array 'append' function, returning the mutated ARRAY.
-func (a *Analyzer) analyzeArrayAppendFunction(n *ast.CallExpression) symbol.Symbol {
+// analyzeArrayPushFunction checks the arity and type for the builtin array 'push' function, returning the mutated ARRAY.
+func (a *Analyzer) analyzeArrayPushFunction(n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 2 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'append', got %d", len(n.Arguments)))
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'push', got %d", len(n.Arguments)))
 		return symbol.AnySymbol()
 	}
 
@@ -108,13 +112,34 @@ func (a *Analyzer) analyzeArrayAppendFunction(n *ast.CallExpression) symbol.Symb
 	elSymbol := a.analyze(n.Arguments[1])
 
 	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'append' must be an ARRAY, got %s", arrSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'push' must be an ARRAY, got %s", arrSymbol.Type()))
 		return symbol.AnySymbol()
 	}
 
 	if arrSymbol.Type() == environment.ARRAY_OBJ && arrSymbol.ElementSymbol() != nil && !arrSymbol.ElementSymbol().Equals(elSymbol) && arrSymbol.ElementSymbol().Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot append %s to array of %s", elSymbol.Type(), arrSymbol.ElementSymbol().Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: cannot push %s to array of %s", elSymbol.Type(), arrSymbol.ElementSymbol().Type()))
 	}
+	return arrSymbol
+}
+
+// analyzeArrayPopFunction checks the arity and type for the builtin array 'pop' function, returning a new ARRAY of the same type.
+func (a *Analyzer) analyzeArrayPopFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'pop', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
+		return symbol.AnySymbol()
+	}
+
+	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'pop' must be an ARRAY, got %s", arrSymbol.Type()))
+		return symbol.AnySymbol()
+	}
+
 	return arrSymbol
 }
 
@@ -422,6 +447,33 @@ func (a *Analyzer) analyzeStringLenFunction(n *ast.CallExpression) symbol.Symbol
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
 
+// analyzeStringJoinFunction checks the arity and type for the builtin string 'join' function, returning a STRING.
+func (a *Analyzer) analyzeStringJoinFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'join', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
+		return symbol.AnySymbol()
+	}
+	delimSymbol := a.analyze(n.Arguments[1])
+
+	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'join' must be an ARRAY, got %s", arrSymbol.Type()))
+	} else if arrSymbol.Type() == environment.ARRAY_OBJ && arrSymbol.ElementSymbol() != nil && arrSymbol.ElementSymbol().Type() != environment.STRING_OBJ && arrSymbol.ElementSymbol().Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: array elements for 'join' must be STRING, got %s", arrSymbol.ElementSymbol().Type()))
+	}
+
+	if delimSymbol.Type() != environment.STRING_OBJ && delimSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'join' must be STRING, got %s", delimSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.STRING_OBJ)
+}
+
 // analyzeDateComponentFunction checks the arity and type for date component accessors (e.g. year, month), returning a NUMBER.
 func (a *Analyzer) analyzeDateComponentFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 1 {
@@ -448,17 +500,17 @@ func (a *Analyzer) analyzeDateTodayFunction(n *ast.CallExpression) symbol.Symbol
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
 }
 
-// analyzeDateParseDateFunction checks the arity and type for the builtin date 'parseDate' function, returning a DATE.
-func (a *Analyzer) analyzeDateParseDateFunction(n *ast.CallExpression) symbol.Symbol {
+// analyzeDateParseFunction checks the arity and type for the builtin date 'parse' function, returning a DATE.
+func (a *Analyzer) analyzeDateParseFunction(n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'parseDate', got %d", len(n.Arguments)))
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'parse', got %d", len(n.Arguments)))
 		return symbol.AnySymbol()
 	}
 
 	strSymbol := a.analyze(n.Arguments[0])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'parseDate' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'parse' must be STRING, got %s", strSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
@@ -504,10 +556,10 @@ func (a *Analyzer) analyzeDateDiffDaysFunction(n *ast.CallExpression) symbol.Sym
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
 
-// analyzeDateNewDateFunction checks the arity and type for the builtin date 'newDate' function, returning a DATE.
-func (a *Analyzer) analyzeDateNewDateFunction(n *ast.CallExpression) symbol.Symbol {
+// analyzeDateNewFunction checks the arity and type for the builtin date 'new' function, returning a DATE.
+func (a *Analyzer) analyzeDateNewFunction(n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 3 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'newDate', got %d", len(n.Arguments)))
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'new', got %d", len(n.Arguments)))
 		return symbol.AnySymbol()
 	}
 
@@ -516,13 +568,13 @@ func (a *Analyzer) analyzeDateNewDateFunction(n *ast.CallExpression) symbol.Symb
 	daySymbol := a.analyze(n.Arguments[2])
 
 	if yearSymbol.Type() != environment.NUMBER_OBJ && yearSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'newDate' must be NUMBER, got %s", yearSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'new' must be NUMBER, got %s", yearSymbol.Type()))
 	}
 	if monthSymbol.Type() != environment.NUMBER_OBJ && monthSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'newDate' must be NUMBER, got %s", monthSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'new' must be NUMBER, got %s", monthSymbol.Type()))
 	}
 	if daySymbol.Type() != environment.NUMBER_OBJ && daySymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'newDate' must be NUMBER, got %s", daySymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'new' must be NUMBER, got %s", daySymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
