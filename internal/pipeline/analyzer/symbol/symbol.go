@@ -100,6 +100,13 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 		}, map[string]Symbol{
 			"KeyFunc": NewFunctionSymbol(0, nil, NewBasicSymbol(environment.STRING_OBJ)),
 		}, true
+	case "cast":
+		return map[string]Symbol{
+			"toNumber":  NewBuiltinSymbol(2),
+			"toString":  NewBuiltinSymbol(2),
+			"toBoolean": NewBuiltinSymbol(2),
+			"toDate":    NewBuiltinSymbol(2),
+		}, nil, true
 	}
 
 	return nil, nil, false

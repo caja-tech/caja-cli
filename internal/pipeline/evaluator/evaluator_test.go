@@ -854,6 +854,13 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"math rand", "import math\nlet r = math.rand()\nreturn r >= 0 and r < 1", true},
 		{"map containsKey true", "import map\ntype CustomStruct struct {\nkey map.KeyFunc\nvalue Number\n}\nlet d: map[CustomStruct]Number = {}\nlet s = CustomStruct{key: fn(): String { return \"a\" }, value: 10}\nd[s] = 100\nreturn map.containsKey(d, s)", true},
 		{"map containsKey false", "import map\nlet d: map[String]Number = {}\nd[\"a\"] = 1\nreturn map.containsKey(d, \"b\")", false},
+		// Cast tests
+		{"cast toNumber success", "import cast\nreturn cast.toNumber(\"123.45\", 0)", 123.45},
+		{"cast toNumber fallback", "import cast\nreturn cast.toNumber(\"abc\", 0 - 1)", -1.0},
+		{"cast toString from number", "import cast\nreturn cast.toString(123, \"err\")", "123"},
+		{"cast toString from boolean", "import cast\nreturn cast.toString(true, \"err\")", "true"},
+		{"cast toBoolean success", "import cast\nreturn cast.toBoolean(\"true\", false)", true},
+		{"cast toBoolean fallback", "import cast\nreturn cast.toBoolean(\"foo\", true)", true},
 	}
 	runTestScenarios(t, tests)
 }

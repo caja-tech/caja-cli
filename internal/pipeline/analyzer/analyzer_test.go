@@ -1277,6 +1277,58 @@ func TestSemanticNullableNavigation(t *testing.T) {
 			`,
 			expectedErrors: []string{"semantic error: unnecessary safe navigation on non-nullable type"},
 		},
+		{
+			name:           "cast.toNumber() rejects invalid fallback",
+			input:          "import cast\nreturn cast.toNumber(\"123\", \"err\")",
+			expectedErrors: []string{"type error: fallback argument to 'toNumber' must be NUMBER, got STRING"},
+		},
+		{
+			name:  "cast.toString() works with any first argument",
+			input: "import cast\nreturn cast.toString(123, \"fallback\")",
+		},
+		{
+			name:           "cast.toBoolean() rejects invalid fallback",
+			input:          "import cast\nreturn cast.toBoolean(\"true\", 1)",
+			expectedErrors: []string{"type error: fallback argument to 'toBoolean' must be BOOLEAN, got NUMBER"},
+		},
+		{
+			name: "assign invalid type to map.KeyFunc property",
+			input: `
+				import map
+				type CustomStruct struct { key map.KeyFunc }
+				let s = CustomStruct{key: 10}
+			`,
+			expectedErrors: []string{"type error: field 'key' expects FUNCTION, got NUMBER"},
+		},
+		{
+			name: "assign wrong function signature to map.KeyFunc property",
+			input: `
+				import map
+				type CustomStruct struct { key map.KeyFunc }
+				let s = CustomStruct{key: fn(): Number { return 10 }}
+			`,
+			expectedErrors: []string{"type error: field 'key' expects FUNCTION, got FUNCTION"},
+		},
+		{
+			name: "struct with duplicate fields of same type",
+			input: `
+				type CustomStruct struct {
+					name String
+					name String
+				}
+			`,
+			expectedErrors: []string{"semantic error: duplicate field 'name' in struct 'CustomStruct'"},
+		},
+		{
+			name: "struct with duplicate fields of different types",
+			input: `
+				type CustomStruct struct {
+					name String
+					name Number
+				}
+			`,
+			expectedErrors: []string{"semantic error: duplicate field 'name' in struct 'CustomStruct'"},
+		},
 	}
 	runTestScenarios(t, tests)
 }

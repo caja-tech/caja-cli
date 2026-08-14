@@ -70,6 +70,8 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeMathZeroArgFunction(functionName, n), true
 	case "math.pow", "math.min", "math.max", "math.log":
 		return a.analyzeMathTwoArgFunction(functionName, n), true
+	case "cast.toNumber", "cast.toString", "cast.toBoolean", "cast.toDate":
+		return a.analyzeCastFunction(functionName, n), true
 	case "log.info", "log.warn", "log.error":
 		return a.analyzeLogFunction(functionName, n), true
 	case "log.export":
@@ -672,4 +674,33 @@ func (a *Analyzer) analyzeMapContainsKeyFunction(n *ast.CallExpression) symbol.S
 	}
 
 	return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+}
+
+// analyzeCastFunction checks the arity and type for the builtin cast functions.
+func (a *Analyzer) analyzeCastFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	_ = a.analyze(n.Arguments[0]) // First argument can be ANY
+	fallbackSymbol := a.analyze(n.Arguments[1])
+
+	var expectedFallbackType environment.ObjectType
+	switch functionName {
+	case "toNumber":
+		expectedFallbackType = environment.NUMBER_OBJ
+	case "toString":
+		expectedFallbackType = environment.STRING_OBJ
+	case "toBoolean":
+		expectedFallbackType = environment.BOOLEAN_OBJ
+	case "toDate":
+		expectedFallbackType = environment.DATE_OBJ
+	}
+
+	if fallbackSymbol.Type() != expectedFallbackType && fallbackSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: fallback argument to '%s' must be %s, got %s", functionName, expectedFallbackType, fallbackSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(expectedFallbackType)
 }

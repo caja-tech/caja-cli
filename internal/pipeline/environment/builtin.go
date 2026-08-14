@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -868,5 +869,107 @@ func (e *Environment) newMapModule() *Module {
 	return &Module{
 		Name: moduleName,
 		Env:  mapEnv,
+	}
+}
+
+// newCastModule initializes and returns a builtin "cast" module.
+func (e *Environment) newCastModule() *Module {
+	moduleName := "cast"
+	castEnv := NewEnvironment(e.BaseDir, moduleName, true)
+
+	castEnv.Set("toNumber", &Builtin{
+		Name: "cast.toNumber",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'toNumber'. got=%d, want=2", len(args))
+			}
+			fallback, ok := args[1].(*Number)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: second argument to 'toNumber' must be NUMBER, got %s", args[1].Type())
+			}
+			switch arg := args[0].(type) {
+			case *Number:
+				return arg, nil
+			case *String:
+				if val, err := strconv.ParseFloat(arg.Value, 64); err == nil {
+					return &Number{Value: val}, nil
+				}
+			}
+			return fallback, nil
+		}})
+
+	castEnv.Set("toString", &Builtin{
+		Name: "cast.toString",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'toString'. got=%d, want=2", len(args))
+			}
+			fallback, ok := args[1].(*String)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: second argument to 'toString' must be STRING, got %s", args[1].Type())
+			}
+			switch arg := args[0].(type) {
+			case *String:
+				return arg, nil
+			case *Number:
+				return &String{Value: strconv.FormatFloat(arg.Value, 'f', -1, 64)}, nil
+			case *Boolean:
+				if arg.Value {
+					return &String{Value: "true"}, nil
+				}
+				return &String{Value: "false"}, nil
+			case *Date:
+				return &String{Value: arg.Value.Format(time.RFC3339)}, nil
+			}
+			return fallback, nil
+		}})
+
+	castEnv.Set("toBoolean", &Builtin{
+		Name: "cast.toBoolean",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'toBoolean'. got=%d, want=2", len(args))
+			}
+			fallback, ok := args[1].(*Boolean)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: second argument to 'toBoolean' must be BOOLEAN, got %s", args[1].Type())
+			}
+			switch arg := args[0].(type) {
+			case *Boolean:
+				return arg, nil
+			case *String:
+				if arg.Value == "true" {
+					return &Boolean{Value: true}, nil
+				} else if arg.Value == "false" {
+					return &Boolean{Value: false}, nil
+				}
+			}
+			return fallback, nil
+		}})
+
+	castEnv.Set("toDate", &Builtin{
+		Name: "cast.toDate",
+		Fn: func(env *Environment, args ...Object) (Object, error) {
+			if len(args) != 2 {
+				return nil, fmt.Errorf("semantic error: wrong number of arguments for 'toDate'. got=%d, want=2", len(args))
+			}
+			fallback, ok := args[1].(*Date)
+			if !ok {
+				return nil, fmt.Errorf("semantic error: second argument to 'toDate' must be DATE, got %s", args[1].Type())
+			}
+			switch arg := args[0].(type) {
+			case *Date:
+				return arg, nil
+			case *String:
+				if val, err := time.Parse(time.RFC3339, arg.Value); err == nil {
+					return &Date{Value: val}, nil
+				}
+			}
+			return fallback, nil
+		}})
+
+	return &Module{
+		Name: moduleName,
+		Env:  castEnv,
 	}
 }
