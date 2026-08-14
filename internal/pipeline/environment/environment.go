@@ -170,6 +170,8 @@ func (e *Environment) GetStandardModule(moduleName string) *Module {
 		return e.newLogModule()
 	case "map":
 		return e.newMapModule()
+	case "cast":
+		return e.newCastModule()
 	default:
 		return nil
 	}

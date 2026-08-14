@@ -562,6 +562,10 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 		a.types[n.Name.Value] = aliasedSymbol
 
 		for _, field := range n.StructDefinition.Fields {
+			if _, exists := fields[field.Name.Value]; exists {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: duplicate field '%s' in struct '%s'", field.Name.Value, n.Name.Value))
+				continue
+			}
 			fieldSym, ok := a.findTypeSymbolInTypes(field.Type)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", field.Type))
