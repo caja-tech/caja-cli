@@ -233,6 +233,16 @@ func TestEvaluateFunctions(t *testing.T) {
 			expected: 30.0,
 		},
 		{
+			name:     "Function returning Nothing implicitly",
+			input:    "let doNothing = fn(): Nothing { let a = 1 }\nreturn doNothing()",
+			expected: "Nothing {  }",
+		},
+		{
+			name:     "Function returning Nothing explicitly empty",
+			input:    "let doNothing = fn(): Nothing { return }\nreturn doNothing()",
+			expected: "Nothing {  }",
+		},
+		{
 			name: "Recursive function execution (factorial)",
 			input: `
 let factorial = fn(n: Number): Number {
@@ -1251,6 +1261,23 @@ func TestNullableTypesEvaluator(t *testing.T) {
 				return a.b?.c
 			`,
 			expected: 99.0,
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+// TestEvaluateNothingType verifies the runtime evaluation of the built-in Nothing type.
+func TestEvaluateNothingType(t *testing.T) {
+	var tests = []testScenario{
+		{
+			name:     "Return Nothing struct at top level",
+			input:    "return Nothing {}",
+			expected: "Nothing {  }",
+		},
+		{
+			name:     "Return Nothing implicitly at top level",
+			input:    "return",
+			expected: "Nothing {  }",
 		},
 	}
 	runTestScenarios(t, tests)

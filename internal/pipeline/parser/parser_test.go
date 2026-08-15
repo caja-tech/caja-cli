@@ -751,6 +751,16 @@ func TestFunctionParsing(t *testing.T) {
 			input:    "let ping = fn(): String { \"pong\" }",
 			expected: "let ping = fn(): String { ... }",
 		},
+		{
+			name:     "Function with implicit Nothing return type",
+			input:    "let f = fn() { 10 }",
+			expected: "let f = fn(): Nothing { ... }",
+		},
+		{
+			name:     "Function with parameters and implicit Nothing return type",
+			input:    "let f = fn(a: Number) { a }",
+			expected: "let f = fn(a: Number): Nothing { ... }",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -759,8 +769,6 @@ func TestFunctionParsing(t *testing.T) {
 // TestFunctionErrors verifies that invalid function literals (like missing return type) result in parse errors.
 func TestFunctionErrors(t *testing.T) {
 	tests := []string{
-		"let f = fn() { 10 }",          // Missing return type completely
-		"let f = fn(a: Number) { a }",  // Missing return type with parameters
 		"let f = fn(a: Number): { a }", // Missing return type identifier
 	}
 
@@ -829,6 +837,16 @@ func TestTypeAliasParsing(t *testing.T) {
 			input:    "type collection [Any]",
 			expected: "type collection [Any]",
 		},
+		{
+			name:     "Type alias function implicit Nothing return type",
+			input:    "type Runnable fn()",
+			expected: "type Runnable fn(): Nothing",
+		},
+		{
+			name:     "Type alias function with parameters implicit Nothing return type",
+			input:    "type Consumer fn(String)",
+			expected: "type Consumer fn(String): Nothing",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -839,8 +857,8 @@ func TestTypeAliasErrors(t *testing.T) {
 	tests := []string{
 		"type fn(Number): Number",                 // Missing alias name
 		"type BinaryOp (Number, Number): Number",  // Missing fn keyword
-		"type BinaryOp fn(Number, Number) Number", // Missing colon
 		"type BinaryOp fn(Number, Number):",       // Missing return type
+
 	}
 
 	for _, input := range tests {

@@ -122,6 +122,59 @@ return string.concat(dict["a"]("x"), dict["b"]("y"))
 `,
 			expectedErrors: []string{},
 		},
+		{
+			name: "Empty struct definition and instantiation",
+			input: `
+type EmptyStruct struct {}
+let a: EmptyStruct = EmptyStruct {}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Function returning Nothing with empty return",
+			input: `
+let f = fn(): Nothing {
+	return
+}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Function returning Nothing with implicit return",
+			input: `
+let f = fn(): Nothing {
+	let a = 1
+}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name:           "Top level return Nothing struct",
+			input:          `return Nothing {}`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Custom empty struct requires explicit return",
+			input: `
+type MyEmpty struct {}
+let f = fn(): MyEmpty {
+}
+`,
+			expectedErrors: []string{
+				"[Line 3, Column 9] semantic error: function is missing a guaranteed return statement. All code paths must return a value.",
+				"[Line 3, Column 9] type error: function declared to return MyEmpty, but body returns ANY",
+			},
+		},
+		{
+			name: "Custom empty struct with explicit return Nothing",
+			input: `
+type MyEmpty struct {}
+let f = fn(): MyEmpty {
+	return Nothing {}
+}
+`,
+			expectedErrors: []string{},
+		},
 	}
 	runTestScenarios(t, tests)
 }

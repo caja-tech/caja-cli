@@ -114,6 +114,7 @@ type Function struct {
 	Parameters []*ast.Parameter
 	Body       *ast.BlockStatement
 	Env        *Environment
+	ReturnType string
 }
 
 func (f *Function) Type() ObjectType { return FUNCTION_OBJ }
