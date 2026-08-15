@@ -9,6 +9,7 @@ import (
 type Symbol interface {
 	Equals(Symbol) bool
 	Type() environment.ObjectType
+	String() string
 }
 
 var anySymbol = &BasicSymbol{symbolType: environment.ANY_OBJ}

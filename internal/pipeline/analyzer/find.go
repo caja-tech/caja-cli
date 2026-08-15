@@ -41,6 +41,68 @@ func (a *Analyzer) findTypeSymbolInTypes(typeName string) (symbol.Symbol, bool) 
 // findTypeSymbolInTypesRaw handles the actual symbol lookup without nullable wrapping.
 func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, bool) {
 
+	if strings.HasPrefix(typeName, "fn(") {
+		depth := 0
+		paramsStr := ""
+		endParenIdx := -1
+		for i := 2; i < len(typeName); i++ {
+			if typeName[i] == '(' {
+				depth++
+			} else if typeName[i] == ')' {
+				depth--
+				if depth == 0 {
+					paramsStr = typeName[3:i]
+					endParenIdx = i
+					break
+				}
+			}
+		}
+
+		var params []string
+		current := ""
+		pDepth := 0
+		for i := 0; i < len(paramsStr); i++ {
+			c := paramsStr[i]
+			if c == '(' || c == '[' {
+				pDepth++
+				current += string(c)
+			} else if c == ')' || c == ']' {
+				pDepth--
+				current += string(c)
+			} else if c == ',' && pDepth == 0 {
+				params = append(params, strings.TrimSpace(current))
+				current = ""
+			} else {
+				current += string(c)
+			}
+		}
+		if strings.TrimSpace(current) != "" {
+			params = append(params, strings.TrimSpace(current))
+		}
+
+		returnType := "Nothing"
+		arrowIdx := strings.Index(typeName[endParenIdx:], "->")
+		if arrowIdx != -1 {
+			returnType = strings.TrimSpace(typeName[endParenIdx+arrowIdx+2:])
+		}
+
+		var paramSymbols []symbol.Symbol
+		allOk := true
+		for _, p := range params {
+			sym, ok := a.findTypeSymbolInTypes(p)
+			if !ok {
+				allOk = false
+			}
+			paramSymbols = append(paramSymbols, sym)
+		}
+		retSym, ok := a.findTypeSymbolInTypes(returnType)
+		if !ok {
+			allOk = false
+		}
+
+		return symbol.NewFunctionSymbol(len(params), paramSymbols, retSym), allOk
+	}
+
 	if strings.HasPrefix(typeName, "[") && strings.HasSuffix(typeName, "]") {
 		innerTypeStr := typeName[1 : len(typeName)-1]
 		innerSymbol, ok := a.findTypeSymbolInTypes(innerTypeStr)

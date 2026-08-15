@@ -170,6 +170,18 @@ func TestFullArithmeticExpression(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+func TestArrowToken(t *testing.T) {
+	input := "->"
+	tknzr := New(input)
+	
+	tests := []testScenario{
+		{"Arrow token", Token{ARROW, "->", 1, 1}},
+		{"End of file", Token{EOF, "", 1, 3}},
+	}
+	
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestExponentialExpression tokenizes an arithmetic expression involving
 // the power operator, asserting that the caret token is correctly parsed.
 func TestExponentialExpression(t *testing.T) {

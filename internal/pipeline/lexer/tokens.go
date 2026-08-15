@@ -17,6 +17,7 @@ const (
 	ASSIGN   TokenType = "ASSIGN"
 	PLUS     TokenType = "PLUS"
 	MINUS    TokenType = "MINUS"
+	ARROW    TokenType = "ARROW"
 	ASTERISK TokenType = "ASTERISK"
 	SLASH    TokenType = "SLASH"
 	POWER    TokenType = "POWER"

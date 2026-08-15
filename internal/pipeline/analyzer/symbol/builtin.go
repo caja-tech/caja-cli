@@ -44,3 +44,8 @@ func (bs *BuiltinSymbol) Equals(other Symbol) bool {
 func (bs *BuiltinSymbol) Type() environment.ObjectType {
 	return bs.symbolType
 }
+
+// String returns the string representation of the builtin type.
+func (bs *BuiltinSymbol) String() string {
+	return string(bs.Type())
+}

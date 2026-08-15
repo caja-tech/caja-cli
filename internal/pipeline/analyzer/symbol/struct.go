@@ -95,3 +95,13 @@ func (sis *StructInstanceSymbol) Equals(other Symbol) bool {
 
 	return sis.Def.Name == otherInstance.Def.Name
 }
+
+// String returns the string representation of the struct definition type.
+func (sds *StructDefSymbol) String() string {
+	return string(sds.Type())
+}
+
+// String returns the string representation of the struct instance type.
+func (sis *StructInstanceSymbol) String() string {
+	return string(sis.Type())
+}

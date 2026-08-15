@@ -324,7 +324,7 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 
 		valSym := a.analyze(expr)
 		if !fieldDef.Type.Equals(valSym) {
-			a.reportError(n.Token, fmt.Sprintf("type error: field '%s' expects %s, got %s", fieldName, fieldDef.Type.Type(), valSym.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: field '%s' expects %s, got %s", fieldName, fieldDef.Type.String(), valSym.String()))
 		}
 	}
 
@@ -775,7 +775,7 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 			expectedType := fnSymbol.ParamTypes()[i]
 
 			if !expectedType.Equals(argSymbol) {
-				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.Type(), argSymbol.Type()))
+				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.String(), argSymbol.String()))
 			}
 		}
 	}
@@ -958,7 +958,7 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 			// type check the assignment
 			valSym := a.analyze(n.Value)
 			if !fieldSym.Type.Equals(valSym) {
-				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to property '%s' of type %s", valSym.Type(), n.Property.Value, fieldSym.Type.Type()))
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to property '%s' of type %s", valSym.String(), n.Property.Value, fieldSym.Type.String()))
 			}
 			return symbol.AnySymbol()
 		}

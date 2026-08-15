@@ -1,7 +1,9 @@
 package symbol
 
-import "caja-cli/internal/pipeline/environment"
-
+import (
+	"caja-cli/internal/pipeline/environment"
+	"fmt"
+)
 // MapSymbol represents a map type in the semantic analysis.
 type MapSymbol struct {
 	Key   Symbol
@@ -43,4 +45,9 @@ func (ms *MapSymbol) Equals(other Symbol) bool {
 
 func (ms *MapSymbol) Type() environment.ObjectType {
 	return environment.MAP_OBJ
+}
+
+// String returns the string representation of the map type.
+func (ms *MapSymbol) String() string {
+	return fmt.Sprintf("map[%s]%s", ms.Key.String(), ms.Value.String())
 }

@@ -167,7 +167,7 @@ func (fl *FunctionLiteral) String() string {
 
 	out += ")"
 	if fl.ReturnType != "" {
-		out += ": " + fl.ReturnType
+		out += " -> " + fl.ReturnType
 	}
 	out += " { ... }"
 	return out
@@ -365,7 +365,7 @@ func (fs *FunctionSignature) String() string {
 
 	out += ")"
 	if fs.ReturnType != "" {
-		out += ": " + fs.ReturnType
+		out += " -> " + fs.ReturnType
 	}
 
 	return out

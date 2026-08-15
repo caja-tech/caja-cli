@@ -1,7 +1,9 @@
 package symbol
 
-import "caja-cli/internal/pipeline/environment"
-
+import (
+	"caja-cli/internal/pipeline/environment"
+	"fmt"
+)
 // NullableSymbol wraps an underlying Symbol, indicating that it can accept a null value.
 type NullableSymbol struct {
 	Underlying Symbol
@@ -29,4 +31,9 @@ func (ns *NullableSymbol) Equals(other Symbol) bool {
 	// If the other is NOT nullable (but we are), it's still acceptable to assign a non-null
 	// value to a nullable variable.
 	return ns.Underlying.Equals(other)
+}
+
+// String returns the string representation of the nullable type.
+func (ns *NullableSymbol) String() string {
+	return fmt.Sprintf("%s?", ns.Underlying.String())
 }

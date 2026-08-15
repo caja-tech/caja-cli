@@ -6,6 +6,6 @@ type MapKeyStruct struct {
 }
 
 let DefaultStruct = MapKeyStruct{
-	key: fn(): String { return "default" },
+	key: fn() -> String { return "default" },
 	value: 0
 }

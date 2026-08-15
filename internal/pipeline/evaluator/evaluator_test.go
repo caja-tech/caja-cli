@@ -219,33 +219,48 @@ func TestEvaluateFunctions(t *testing.T) {
 	var tests = []testScenario{
 		{
 			name:     "Simple function call",
-			input:    "let add = fn(x: Number, y: Number): Number { return x + y }\nreturn add(5, 5)",
+			input:    "let add = fn(x: Number, y: Number) -> Number { return x + y }\nreturn add(5, 5)",
 			expected: 10.0,
 		},
 		{
 			name:     "Function returning highest number",
-			input:    "let max = fn(a: Number, b: Number): Number { if (a > b) { return a } else { return b } }\nreturn max(10, 20)",
+			input:    "let max = fn(a: Number, b: Number) -> Number { if (a > b) { return a } else { return b } }\nreturn max(10, 20)",
 			expected: 20.0,
 		},
 		{
 			name:     "Higher order function with type alias",
-			input:    "type Op fn(Number, Number): Number\nlet applyOp = fn(a: Number, b: Number, op: Op): Number { return op(a, b) }\nlet add = fn(x: Number, y: Number): Number { return x + y }\nreturn applyOp(10, 20, add)",
+			input:    "type Op fn(Number, Number) -> Number\nlet applyOp = fn(a: Number, b: Number, op: Op) -> Number { return op(a, b) }\nlet add = fn(x: Number, y: Number) -> Number { return x + y }\nreturn applyOp(10, 20, add)",
 			expected: 30.0,
 		},
 		{
+			name:     "Higher order function with inline function parameter",
+			input:    "let applyOp = fn(a: Number, b: Number, op: fn(Number, Number) -> Number) -> Number { return op(a, b) }\nlet add = fn(x: Number, y: Number) -> Number { return x + y }\nreturn applyOp(10, 20, add)",
+			expected: 30.0,
+		},
+		{
+			name:     "Higher order function returning inline function",
+			input:    "let getMultiplier = fn(factor: Number) -> fn(Number) -> Number { return fn(x: Number) -> Number { return x * factor } }\nlet timesTwo = getMultiplier(2)\nreturn timesTwo(5)",
+			expected: 10.0,
+		},
+		{
+			name:     "Array of inline functions",
+			input:    "let funcs = [fn(x: Number) -> Number { return x * 2 }, fn(x: Number) -> Number { return x * 3 }]\nreturn funcs[1](5)",
+			expected: 15.0,
+		},
+		{
 			name:     "Function returning Nothing implicitly",
-			input:    "let doNothing = fn(): Nothing { let a = 1 }\nreturn doNothing()",
+			input:    "let doNothing = fn() -> Nothing { let a = 1 }\nreturn doNothing()",
 			expected: "Nothing {  }",
 		},
 		{
 			name:     "Function returning Nothing explicitly empty",
-			input:    "let doNothing = fn(): Nothing { return }\nreturn doNothing()",
+			input:    "let doNothing = fn() -> Nothing { return }\nreturn doNothing()",
 			expected: "Nothing {  }",
 		},
 		{
 			name: "Recursive function execution (factorial)",
 			input: `
-let factorial = fn(n: Number): Number {
+let factorial = fn(n: Number) -> Number {
 	if (n == 0) {
 		return 1
 	} else {
@@ -259,7 +274,7 @@ return factorial(5)
 		{
 			name: "Recursive function execution (fibonacci)",
 			input: `
-let fib = fn(n: Number): Number {
+let fib = fn(n: Number) -> Number {
 	if (n < 2) {
 		return n
 	} else {
@@ -273,7 +288,7 @@ return fib(6)
 		{
 			name: "Tail recursive function execution",
 			input: `
-let deepRecurse = fn(n: Number): Number {
+let deepRecurse = fn(n: Number) -> Number {
 	if (n == 0) {
 		return 0
 	} else {
@@ -324,7 +339,7 @@ func TestErrorHandling(t *testing.T) {
 		stackTraceLimit = 10
 		defer func() { stackTraceLimit = originalLimit }()
 
-		_, err := testEval("let deepRecurse = fn(n: Number): Number { if (n == 0) { return 0 } else { return 1 + deepRecurse(n - 1) } }\nreturn deepRecurse(20)")
+		_, err := testEval("let deepRecurse = fn(n: Number) -> Number { if (n == 0) { return 0 } else { return 1 + deepRecurse(n - 1) } }\nreturn deepRecurse(20)")
 		if err == nil {
 			t.Fatalf("expected an error but got none")
 		}
@@ -781,12 +796,12 @@ func TestEvaluateTypes(t *testing.T) {
 		},
 		{
 			name:     "Return string from function",
-			input:    "let greet = fn(): String { return \"hello\" }\nreturn greet()",
+			input:    "let greet = fn() -> String { return \"hello\" }\nreturn greet()",
 			expected: "hello",
 		},
 		{
 			name:     "Return boolean from function",
-			input:    "let isTrue = fn(): Boolean { return true }\nreturn isTrue()",
+			input:    "let isTrue = fn() -> Boolean { return true }\nreturn isTrue()",
 			expected: true,
 		},
 		{
@@ -796,7 +811,7 @@ func TestEvaluateTypes(t *testing.T) {
 		},
 		{
 			name:     "Return date from function",
-			input:    "let getToday = fn(): Date { return '2023-10-25' }\nreturn getToday()",
+			input:    "let getToday = fn() -> Date { return '2023-10-25' }\nreturn getToday()",
 			expected: "2023-10-25",
 		},
 	}
@@ -862,7 +877,7 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"math LOG2E", "import math\nreturn math.LOG2E", math.Log2E},
 		{"math LOG10E", "import math\nreturn math.LOG10E", math.Log10E},
 		{"math rand", "import math\nlet r = math.rand()\nreturn r >= 0 and r < 1", true},
-		{"map containsKey true", "import map\ntype CustomStruct struct {\nkey map.KeyFunc\nvalue Number\n}\nlet d: map[CustomStruct]Number = {}\nlet s = CustomStruct{key: fn(): String { return \"a\" }, value: 10}\nd[s] = 100\nreturn map.containsKey(d, s)", true},
+		{"map containsKey true", "import map\ntype CustomStruct struct {\nkey map.KeyFunc\nvalue Number\n}\nlet d: map[CustomStruct]Number = {}\nlet s = CustomStruct{key: fn() -> String { return \"a\" }, value: 10}\nd[s] = 100\nreturn map.containsKey(d, s)", true},
 		{"map containsKey false", "import map\nlet d: map[String]Number = {}\nd[\"a\"] = 1\nreturn map.containsKey(d, \"b\")", false},
 		// Cast tests
 		{"cast toNumber success", "import cast\nreturn cast.toNumber(\"123.45\", 0)", 123.45},
@@ -1028,17 +1043,17 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype flag Boolean\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, f: flag, c: custom): money { return m }\nreturn process(100, '2023-01-01', \"John\", true, 42)",
+			input:    "type money Number\ntype moment Date\ntype name String\ntype flag Boolean\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, f: flag, c: custom) -> money { return m }\nreturn process(100, '2023-01-01', \"John\", true, 42)",
 			expected: 100.0,
 		},
 		{
 			name:     "Type alias with array types",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection): prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
+			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection) -> prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
 			expected: 2.0,
 		},
 		{
 			name:     "Explicitly typed variable with function alias",
-			input:    "type CustomFunc fn(Number): Number\nlet f: CustomFunc = fn(x: Number): Number { return x + 2 }\nreturn f(5)",
+			input:    "type CustomFunc fn(Number) -> Number\nlet f: CustomFunc = fn(x: Number) -> Number { return x + 2 }\nreturn f(5)",
 			expected: 7.0,
 		},
 	}
@@ -1047,6 +1062,19 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 
 func TestStructs(t *testing.T) {
 	tests := []testScenario{
+		{
+			name: "Struct with inline function property",
+			input: `
+				type Action struct {
+					run fn(Number) -> Number
+				}
+				let a = Action {
+					run: fn(x: Number) -> Number { return x * 2 }
+				}
+				return a.run(5)
+			`,
+			expected: 10.0,
+		},
 		{
 			name: "Struct creation and property access",
 			input: `
@@ -1080,7 +1108,7 @@ func TestStructs(t *testing.T) {
 					x Number
 					y Number
 				}
-				let offset = fn(p: Point): Point {
+				let offset = fn(p: Point) -> Point {
 					return Point { x: p.x + 5, y: p.y + 5 }
 				}
 				let p1 = Point { x: 10, y: 10 }

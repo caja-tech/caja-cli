@@ -592,8 +592,8 @@ func TestReturnInsideBlockAllowed(t *testing.T) {
 		},
 		{
 			name:     "Return inside function block",
-			input:    "let f = fn(): Number { return 10 }",
-			expected: "let f = fn(): Number { ... }",
+			input:    "let f = fn() -> Number { return 10 }",
+			expected: "let f = fn() -> Number { ... }",
 		},
 	}
 	runTestScenarios(t, tests)
@@ -689,9 +689,9 @@ func TestConstStatementErrors(t *testing.T) {
 		"const",
 		"let const = 10",
 		"const const = 10",
-		"const type MyFunc fn(Number): Number",
-		"type const MyFunc fn(Number): Number",
-		"type const fn(Number): Number",
+		"const type MyFunc fn(Number) -> Number",
+		"type const MyFunc fn(Number) -> Number",
+		"type const fn(Number) -> Number",
 	}
 
 	for _, input := range tests {
@@ -733,33 +733,38 @@ func TestFunctionParsing(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Function with Number types",
-			input:    "let add = fn(a: Number, b: Number): Number { a + b }",
-			expected: "let add = fn(a: Number, b: Number): Number { ... }",
+			input:    "let add = fn(a: Number, b: Number) -> Number { a + b }",
+			expected: "let add = fn(a: Number, b: Number) -> Number { ... }",
 		},
 		{
 			name:     "Function with String and Boolean types",
-			input:    "let check = fn(name: String, isValid: Boolean): Boolean { isValid }",
-			expected: "let check = fn(name: String, isValid: Boolean): Boolean { ... }",
+			input:    "let check = fn(name: String, isValid: Boolean) -> Boolean { isValid }",
+			expected: "let check = fn(name: String, isValid: Boolean) -> Boolean { ... }",
 		},
 		{
 			name:     "Function with Date type and Date return type",
-			input:    "let log = fn(date: Date): Date { date }",
-			expected: "let log = fn(date: Date): Date { ... }",
+			input:    "let log = fn(date: Date) -> Date { date }",
+			expected: "let log = fn(date: Date) -> Date { ... }",
 		},
 		{
 			name:     "Function with no parameters",
-			input:    "let ping = fn(): String { \"pong\" }",
-			expected: "let ping = fn(): String { ... }",
+			input:    "let ping = fn() -> String { \"pong\" }",
+			expected: "let ping = fn() -> String { ... }",
 		},
 		{
 			name:     "Function with implicit Nothing return type",
 			input:    "let f = fn() { 10 }",
-			expected: "let f = fn(): Nothing { ... }",
+			expected: "let f = fn() -> Nothing { ... }",
 		},
 		{
 			name:     "Function with parameters and implicit Nothing return type",
 			input:    "let f = fn(a: Number) { a }",
-			expected: "let f = fn(a: Number): Nothing { ... }",
+			expected: "let f = fn(a: Number) -> Nothing { ... }",
+		},
+		{
+			name:     "Function taking an inline function as parameter",
+			input:    "let apply = fn(cb: fn(Number) -> String) -> String { cb(10) }",
+			expected: "let apply = fn(cb: fn(Number) -> String) -> String { ... }",
 		},
 	}
 
@@ -814,18 +819,18 @@ func TestTypeAliasParsing(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with parameters and return type",
-			input:    "type BinaryOp fn(Number, Number): Number",
-			expected: "type BinaryOp fn(Number, Number): Number",
+			input:    "type BinaryOp fn(Number, Number) -> Number",
+			expected: "type BinaryOp fn(Number, Number) -> Number",
 		},
 		{
 			name:     "Type alias with no parameters",
-			input:    "type Provider fn(): String",
-			expected: "type Provider fn(): String",
+			input:    "type Provider fn() -> String",
+			expected: "type Provider fn() -> String",
 		},
 		{
 			name:     "Type alias with Date",
-			input:    "type DateFactory fn(): Date",
-			expected: "type DateFactory fn(): Date",
+			input:    "type DateFactory fn() -> Date",
+			expected: "type DateFactory fn() -> Date",
 		},
 		{
 			name:     "Type alias with simple Number",
@@ -840,12 +845,17 @@ func TestTypeAliasParsing(t *testing.T) {
 		{
 			name:     "Type alias function implicit Nothing return type",
 			input:    "type Runnable fn()",
-			expected: "type Runnable fn(): Nothing",
+			expected: "type Runnable fn() -> Nothing",
 		},
 		{
 			name:     "Type alias function with parameters implicit Nothing return type",
 			input:    "type Consumer fn(String)",
-			expected: "type Consumer fn(String): Nothing",
+			expected: "type Consumer fn(String) -> Nothing",
+		},
+		{
+			name:     "Type alias struct with inline function property",
+			input:    "type MyStruct struct { run fn(Number) -> Number }",
+			expected: "type MyStruct struct {\n  run fn(Number) -> Number\n}",
 		},
 	}
 
@@ -855,8 +865,8 @@ func TestTypeAliasParsing(t *testing.T) {
 // TestTypeAliasErrors verifies that malformed type aliases produce syntax errors.
 func TestTypeAliasErrors(t *testing.T) {
 	tests := []string{
-		"type fn(Number): Number",                 // Missing alias name
-		"type BinaryOp (Number, Number): Number",  // Missing fn keyword
+		"type fn(Number) -> Number",                 // Missing alias name
+		"type BinaryOp (Number, Number) -> Number",  // Missing fn keyword
 		"type BinaryOp fn(Number, Number):",       // Missing return type
 
 	}
@@ -1104,8 +1114,8 @@ func TestPrivateModifierParsing(t *testing.T) {
 		},
 		{
 			name:     "Private type alias",
-			input:    "private type BinaryOp fn(Number, Number): Number",
-			expected: "private type BinaryOp fn(Number, Number): Number",
+			input:    "private type BinaryOp fn(Number, Number) -> Number",
+			expected: "private type BinaryOp fn(Number, Number) -> Number",
 		},
 	}
 
@@ -1182,13 +1192,13 @@ func TestTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types used in functions",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom): money { m }",
-			expected: "type money Numbertype moment Datetype name Stringtype custom Anylet process = fn(m: money, d: moment, n: name, c: custom): money { ... }",
+			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { m }",
+			expected: "type money Numbertype moment Datetype name Stringtype custom Anylet process = fn(m: money, d: moment, n: name, c: custom) -> money { ... }",
 		},
 		{
 			name:     "Type alias with array types used in functions",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection): prices { p }",
-			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Any]let addAll = fn(p: prices, n: names, h: holidays, c: collection): prices { ... }",
+			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { p }",
+			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Any]let addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { ... }",
 		},
 	}
 
@@ -1236,7 +1246,7 @@ func TestNullableTypesAndNavigation(t *testing.T) {
 	})
 
 	t.Run("Nullable Function Params and Return Type", func(t *testing.T) {
-		input := "let f = fn(node: Node?): Node? { return node }"
+		input := "let f = fn(node: Node?) -> Node? { return node }"
 		l := lexer.New(input)
 		p := New(l)
 		program := p.Parse()
