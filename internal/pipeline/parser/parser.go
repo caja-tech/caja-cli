@@ -206,16 +206,19 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 
 	lit.Parameters = p.parseFunctionParameters()
 
-	if !p.expectPeek(lexer.COLON) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected ':', got %s", p.currToken.Type))
-		return nil
-	}
-
-	lit.ReturnType = p.parseTypeSignature()
-
-	if !p.expectPeek(lexer.LBRACE) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.currToken.Type))
-		return nil
+	if p.peekToken.Type == lexer.LBRACE {
+		lit.ReturnType = "Nothing"
+		p.nextToken() // move to LBRACE
+	} else {
+		if !p.expectPeek(lexer.COLON) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected ':' or '{', got %s", p.peekToken.Type))
+			return nil
+		}
+		lit.ReturnType = p.parseTypeSignature()
+		if !p.expectPeek(lexer.LBRACE) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.peekToken.Type))
+			return nil
+		}
 	}
 
 	lit.Body = p.parseBlockStatement()
@@ -597,12 +600,12 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 			return nil
 		}
 
-		if !p.expectPeek(lexer.COLON) {
-			p.reportError(p.peekToken, fmt.Sprintf("expected colon got %s", p.currToken.Type))
-			return nil
+		if p.peekToken.Type == lexer.COLON {
+			p.nextToken() // consume ':'
+			statement.Signature.ReturnType = p.parseTypeSignature()
+		} else {
+			statement.Signature.ReturnType = "Nothing"
 		}
-
-		statement.Signature.ReturnType = p.parseTypeSignature()
 	} else if p.peekToken.Type == lexer.STRUCT {
 		p.nextToken() // move to struct
 
@@ -749,6 +752,10 @@ func (p *Parser) parseMapLiteral() ast.Expression {
 // return value expression with the lowest precedence.
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	statement := &ast.ReturnStatement{Token: p.currToken}
+	if p.peekToken.Type == lexer.RBRACE || p.peekToken.Type == lexer.EOF {
+		return statement
+	}
+
 	p.nextToken()
 	statement.ReturnValue = p.parseExpression(lexer.LOWEST_PRECEDENCE)
 

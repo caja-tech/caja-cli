@@ -25,21 +25,26 @@ func NewStructDefSymbol(name string, fields map[string]StructFieldSymbol) *Struc
 	}
 }
 
-// Type returns the ANY_OBJ type for struct definitions during semantic checking.
+// Type returns the specific struct name as an ObjectType for type-checking.
 func (sds *StructDefSymbol) Type() environment.ObjectType {
 	// A struct definition isn't an instantiated object type in the evaluator,
-	// but we can return ANY_OBJ or a special representation if needed.
-	// For semantic checking, this type is just used as a reference.
-	return environment.ANY_OBJ
+	// but we can return its name so that error messages correctly reflect the expected type.
+	return environment.ObjectType(sds.Name)
 }
 
 // Equals returns true if the other symbol represents the same struct definition.
 func (sds *StructDefSymbol) Equals(other Symbol) bool {
 	if otherInstance, ok := other.(*StructInstanceSymbol); ok {
+		if len(sds.Fields) == 0 && len(otherInstance.Def.Fields) == 0 {
+			return true
+		}
 		return sds.Name == otherInstance.Def.Name
 	}
 
 	if otherDef, ok := other.(*StructDefSymbol); ok {
+		if len(sds.Fields) == 0 && len(otherDef.Fields) == 0 {
+			return true
+		}
 		return sds.Name == otherDef.Name
 	}
 
@@ -75,7 +80,17 @@ func (sis *StructInstanceSymbol) Equals(other Symbol) bool {
 
 	otherInstance, ok := other.(*StructInstanceSymbol)
 	if !ok {
+		if otherDef, ok := other.(*StructDefSymbol); ok {
+			if len(sis.Def.Fields) == 0 && len(otherDef.Fields) == 0 {
+				return true
+			}
+			return sis.Def.Name == otherDef.Name
+		}
 		return false
+	}
+
+	if len(sis.Def.Fields) == 0 && len(otherInstance.Def.Fields) == 0 {
+		return true
 	}
 
 	return sis.Def.Name == otherInstance.Def.Name

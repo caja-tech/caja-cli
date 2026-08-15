@@ -36,6 +36,9 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		privates:  make(map[string]bool),
 	}
 
+	// Inject Nothing as a global builtin type
+	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", make(map[string]symbol.StructFieldSymbol))
+
 	return analyzer
 }
 
@@ -258,18 +261,31 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 
 	var expectedReturnSymbol symbol.Symbol
 	if n.ReturnType != "" {
-		if !ast.GuaranteesReturn(n.Body) {
-			a.reportError(n.Token, "semantic error: function is missing a guaranteed return statement. All code paths must return a value.")
-		}
-
 		resolvedReturn, ok := a.findTypeSymbolInTypes(n.ReturnType)
 		if !ok {
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.ReturnType))
 		}
 		expectedReturnSymbol = resolvedReturn
 
+		isNothing := false
+		if expectedReturnSymbol != nil {
+			if def, ok := expectedReturnSymbol.(*symbol.StructDefSymbol); ok && def.Name == "Nothing" {
+				isNothing = true
+			}
+		}
+
+		if !isNothing && !ast.GuaranteesReturn(n.Body) {
+			a.reportError(n.Token, "semantic error: function is missing a guaranteed return statement. All code paths must return a value.")
+		}
+
+		// If it's Nothing, and we returned Any (empty return) or Nothing, it's fine.
+		// If it's Nothing, and we returned something else, it's an error.
 		if !expectedReturnSymbol.Equals(actualReturnSymbol) {
-			a.reportError(n.Token, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnSymbol.Type(), actualReturnSymbol.Type()))
+			condition1 := isNothing && !ast.GuaranteesReturn(n.Body)
+			condition2 := isNothing && actualReturnSymbol.Type() == environment.RETURN_VALUE_OBJ
+			if !condition1 && !condition2 {
+				a.reportError(n.Token, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnSymbol.Type(), actualReturnSymbol.Type()))
+			}
 		}
 	}
 
@@ -488,7 +504,8 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStatement) symbol.Symbol 
 	if n.ReturnValue != nil {
 		return a.analyze(n.ReturnValue)
 	}
-	return symbol.AnySymbol()
+	// Return a special token for empty returns so it doesn't match normal types using AnySymbol
+	return symbol.NewBasicSymbol(environment.RETURN_VALUE_OBJ)
 }
 
 // analyzeAssignStatement ensures the assigned variable has been declared

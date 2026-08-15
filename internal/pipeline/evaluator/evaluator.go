@@ -394,6 +394,10 @@ func evalReturnStatement(node *ast.ReturnStatement, env *environment.Environment
 		}
 	}
 
+	if node.ReturnValue == nil {
+		return &environment.ReturnValue{Value: &environment.StructObject{StructName: "Nothing", Fields: make(map[string]environment.Object)}}, nil
+	}
+
 	val, err := Eval(node.ReturnValue, env)
 	if err != nil {
 		return nil, err
@@ -611,7 +615,7 @@ func evalMinusPrefixOperatorExpression(right environment.Object) (environment.Ob
 func evalFunctionLiteral(node *ast.FunctionLiteral, env *environment.Environment) (environment.Object, error) {
 	params := node.Parameters
 	body := node.Body
-	return &environment.Function{Parameters: params, Env: env, Body: body}, nil
+	return &environment.Function{Parameters: params, Env: env, Body: body, ReturnType: node.ReturnType}, nil
 }
 
 // evalCallExpression evaluates the function and its arguments, then executes the function body in an extended environment.
@@ -673,6 +677,10 @@ func evalCallExpression(node *ast.CallExpression, env *environment.Environment) 
 			// Unwrap any early return values so the whole program doesn't halt
 			if retVal, ok := evaluated.(*environment.ReturnValue); ok {
 				return retVal.Value, nil
+			}
+
+			if fn.ReturnType == "Nothing" {
+				return &environment.StructObject{StructName: "Nothing", Fields: make(map[string]environment.Object)}, nil
 			}
 
 			return evaluated, nil
