@@ -293,7 +293,7 @@ let myCb = fn(a: Number) -> Number { return a }
 apply(myCb)
 `,
 			expectedErrors: []string{
-				"type error: argument 1 expected FUNCTION, got FUNCTION",
+				"type error: argument 1 expected fn(NUMBER) -> STRING, got fn(NUMBER) -> NUMBER",
 			},
 		},
 		{
@@ -304,7 +304,7 @@ let myCb = fn(a: String) -> String { return a }
 apply(myCb)
 `,
 			expectedErrors: []string{
-				"type error: argument 1 expected FUNCTION, got FUNCTION",
+				"type error: argument 1 expected fn(NUMBER) -> STRING, got fn(STRING) -> STRING",
 			},
 		},
 		{
@@ -1227,7 +1227,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				}
 			`,
 			expectedErrors: []string{
-				"type error: field 'run' expects FUNCTION, got FUNCTION",
+				"type error: field 'run' expects fn(NUMBER) -> STRING, got fn(NUMBER) -> NUMBER",
 			},
 		},
 		{
@@ -1409,7 +1409,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 				type CustomStruct struct { key map.KeyFunc }
 				let s = CustomStruct{key: 10}
 			`,
-			expectedErrors: []string{"type error: field 'key' expects FUNCTION, got NUMBER"},
+			expectedErrors: []string{"type error: field 'key' expects fn() -> STRING, got NUMBER"},
 		},
 		{
 			name: "assign wrong function signature to map.KeyFunc property",
@@ -1418,7 +1418,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 				type CustomStruct struct { key map.KeyFunc }
 				let s = CustomStruct{key: fn() -> Number { return 10 }}
 			`,
-			expectedErrors: []string{"type error: field 'key' expects FUNCTION, got FUNCTION"},
+			expectedErrors: []string{"type error: field 'key' expects fn() -> STRING, got fn() -> NUMBER"},
 		},
 		{
 			name: "struct with duplicate fields of same type",
