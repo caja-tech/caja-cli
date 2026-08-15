@@ -233,6 +233,21 @@ func TestEvaluateFunctions(t *testing.T) {
 			expected: 30.0,
 		},
 		{
+			name:     "Higher order function with inline function parameter",
+			input:    "let applyOp = fn(a: Number, b: Number, op: fn(Number, Number) -> Number) -> Number { return op(a, b) }\nlet add = fn(x: Number, y: Number) -> Number { return x + y }\nreturn applyOp(10, 20, add)",
+			expected: 30.0,
+		},
+		{
+			name:     "Higher order function returning inline function",
+			input:    "let getMultiplier = fn(factor: Number) -> fn(Number) -> Number { return fn(x: Number) -> Number { return x * factor } }\nlet timesTwo = getMultiplier(2)\nreturn timesTwo(5)",
+			expected: 10.0,
+		},
+		{
+			name:     "Array of inline functions",
+			input:    "let funcs = [fn(x: Number) -> Number { return x * 2 }, fn(x: Number) -> Number { return x * 3 }]\nreturn funcs[1](5)",
+			expected: 15.0,
+		},
+		{
 			name:     "Function returning Nothing implicitly",
 			input:    "let doNothing = fn() -> Nothing { let a = 1 }\nreturn doNothing()",
 			expected: "Nothing {  }",
@@ -1047,6 +1062,19 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 
 func TestStructs(t *testing.T) {
 	tests := []testScenario{
+		{
+			name: "Struct with inline function property",
+			input: `
+				type Action struct {
+					run fn(Number) -> Number
+				}
+				let a = Action {
+					run: fn(x: Number) -> Number { return x * 2 }
+				}
+				return a.run(5)
+			`,
+			expected: 10.0,
+		},
 		{
 			name: "Struct creation and property access",
 			input: `
