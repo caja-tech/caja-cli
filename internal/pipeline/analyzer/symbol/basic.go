@@ -37,3 +37,8 @@ func (bs *BasicSymbol) Equals(other Symbol) bool {
 func (bs *BasicSymbol) Type() environment.ObjectType {
 	return bs.symbolType
 }
+
+// String returns the string representation of the basic type.
+func (bs *BasicSymbol) String() string {
+	return string(bs.Type())
+}

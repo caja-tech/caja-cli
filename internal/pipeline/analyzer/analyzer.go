@@ -7,7 +7,6 @@ import (
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/modules"
 	"fmt"
-	"strings"
 )
 
 // Analyzer performs semantic analysis on an AST.
@@ -325,7 +324,7 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 
 		valSym := a.analyze(expr)
 		if !fieldDef.Type.Equals(valSym) {
-			a.reportError(n.Token, fmt.Sprintf("type error: field '%s' expects %s, got %s", fieldName, symbolToString(fieldDef.Type), symbolToString(valSym)))
+			a.reportError(n.Token, fmt.Sprintf("type error: field '%s' expects %s, got %s", fieldName, fieldDef.Type.String(), valSym.String()))
 		}
 	}
 
@@ -776,7 +775,7 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 			expectedType := fnSymbol.ParamTypes()[i]
 
 			if !expectedType.Equals(argSymbol) {
-				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, symbolToString(expectedType), symbolToString(argSymbol)))
+				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.String(), argSymbol.String()))
 			}
 		}
 	}
@@ -959,7 +958,7 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 			// type check the assignment
 			valSym := a.analyze(n.Value)
 			if !fieldSym.Type.Equals(valSym) {
-				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to property '%s' of type %s", symbolToString(valSym), n.Property.Value, symbolToString(fieldSym.Type)))
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to property '%s' of type %s", valSym.String(), n.Property.Value, fieldSym.Type.String()))
 			}
 			return symbol.AnySymbol()
 		}
@@ -972,29 +971,4 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 // reportError formats and appends a semantic error with the token's line and column.
 func (a *Analyzer) reportError(token lexer.Token, msg string) {
 	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
-}
-
-// symbolToString provides a string representation of a symbol for error messages.
-func symbolToString(sym symbol.Symbol) string {
-	if fn, ok := sym.(*symbol.FunctionSymbol); ok {
-		var params []string
-		for _, p := range fn.ParamTypes() {
-			params = append(params, symbolToString(p))
-		}
-		ret := "Nothing"
-		if fn.ReturnType() != nil {
-			ret = symbolToString(fn.ReturnType())
-		}
-		return fmt.Sprintf("fn(%s) -> %s", strings.Join(params, ", "), ret)
-	}
-	if arr, ok := sym.(*symbol.ArraySymbol); ok {
-		return fmt.Sprintf("[%s]", symbolToString(arr.ElementSymbol()))
-	}
-	if m, ok := sym.(*symbol.MapSymbol); ok {
-		return fmt.Sprintf("map[%s]%s", symbolToString(m.Key), symbolToString(m.Value))
-	}
-	if nullable, ok := sym.(*symbol.NullableSymbol); ok {
-		return fmt.Sprintf("%s?", symbolToString(nullable.Underlying))
-	}
-	return string(sym.Type())
 }

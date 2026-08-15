@@ -1,7 +1,9 @@
 package symbol
 
-import "caja-cli/internal/pipeline/environment"
-
+import (
+	"caja-cli/internal/pipeline/environment"
+	"fmt"
+)
 // ArraySymbol represents an array type in the semantic analysis,
 // keeping track of the type of elements it contains.
 type ArraySymbol struct {
@@ -56,4 +58,12 @@ func (as *ArraySymbol) Type() environment.ObjectType {
 // ElementSymbol returns the Symbol representing the type of elements contained in the array.
 func (as *ArraySymbol) ElementSymbol() Symbol {
 	return as.elementSymbol
+}
+
+// String returns the string representation of the array type.
+func (as *ArraySymbol) String() string {
+	if as.elementSymbol != nil {
+		return fmt.Sprintf("[%s]", as.elementSymbol.String())
+	}
+	return "[]"
 }

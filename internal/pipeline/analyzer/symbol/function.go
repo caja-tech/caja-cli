@@ -1,7 +1,10 @@
 package symbol
 
-import "caja-cli/internal/pipeline/environment"
-
+import (
+	"caja-cli/internal/pipeline/environment"
+	"fmt"
+	"strings"
+)
 // FunctionSymbol represents a function type in the semantic analysis,
 // tracking its expected number of arguments (arity), parameter types, and return type.
 type FunctionSymbol struct {
@@ -76,4 +79,17 @@ func (fs *FunctionSymbol) ParamTypes() []Symbol {
 // ReturnType returns the symbol representing the function's return type.
 func (fs *FunctionSymbol) ReturnType() Symbol {
 	return fs.returnType
+}
+
+// String returns the string representation of the function type.
+func (fs *FunctionSymbol) String() string {
+	var params []string
+	for _, p := range fs.paramTypes {
+		params = append(params, p.String())
+	}
+	ret := "Nothing"
+	if fs.returnType != nil {
+		ret = fs.returnType.String()
+	}
+	return fmt.Sprintf("fn(%s) -> %s", strings.Join(params, ", "), ret)
 }
