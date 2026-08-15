@@ -5,6 +5,7 @@ import (
 	"caja-cli/internal/pipeline/lexer"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -210,8 +211,8 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		lit.ReturnType = "Nothing"
 		p.nextToken() // move to LBRACE
 	} else {
-		if !p.expectPeek(lexer.COLON) {
-			p.reportError(p.peekToken, fmt.Sprintf("expected ':' or '{', got %s", p.peekToken.Type))
+		if !p.expectPeek(lexer.ARROW) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected '->' or '{', got %s", p.peekToken.Type))
 			return nil
 		}
 		lit.ReturnType = p.parseTypeSignature()
@@ -600,8 +601,8 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 			return nil
 		}
 
-		if p.peekToken.Type == lexer.COLON {
-			p.nextToken() // consume ':'
+		if p.peekToken.Type == lexer.ARROW {
+			p.nextToken() // consume '->'
 			statement.Signature.ReturnType = p.parseTypeSignature()
 		} else {
 			statement.Signature.ReturnType = "Nothing"
@@ -660,6 +661,45 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 
 // parseTypeSignature parses a type identifier or array type like [Number] or [[Number]].
 func (p *Parser) parseTypeSignature() string {
+	if p.peekToken.Type == lexer.FN {
+		p.nextToken() // move to fn
+		if !p.expectPeek(lexer.LPAREN) {
+			return ""
+		}
+		
+		var params []string
+		if p.peekToken.Type != lexer.RPAREN {
+			paramType := p.parseTypeSignature()
+			if paramType != "" {
+				params = append(params, paramType)
+			}
+			for p.peekToken.Type == lexer.COMMA {
+				p.nextToken() // move to comma
+				paramType := p.parseTypeSignature()
+				if paramType != "" {
+					params = append(params, paramType)
+				}
+			}
+		}
+		
+		if !p.expectPeek(lexer.RPAREN) {
+			return ""
+		}
+		
+		returnType := "Nothing"
+		if p.peekToken.Type == lexer.ARROW {
+			p.nextToken() // move to ->
+			returnType = p.parseTypeSignature()
+		}
+		
+		typeName := "fn(" + strings.Join(params, ", ") + ") -> " + returnType
+		if p.peekToken.Type == lexer.QUESTION {
+			p.nextToken() // move to ?
+			typeName += "?"
+		}
+		return typeName
+	}
+
 	if p.peekToken.Type == lexer.LBRACKET {
 		p.nextToken() // move to [
 		innerType := p.parseTypeSignature()

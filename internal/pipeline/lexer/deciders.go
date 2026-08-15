@@ -65,9 +65,16 @@ func decidePlusToken(t *Lexer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
-// decideMinusToken matches the '-' character and produces a MINUS token.
+// decideMinusToken matches the '-' character and produces a MINUS token, or '->' for an ARROW token.
 func decideMinusToken(t *Lexer, line int, column int) deciderResult {
 	if t.ch == '-' {
+		if t.peekChar() == '>' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: ARROW, Literal: literal, Line: line, Column: column}}
+		}
 		return deciderResult{true, Token{Type: MINUS, Literal: string(t.ch), Line: line, Column: column}}
 	}
 

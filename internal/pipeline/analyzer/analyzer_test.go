@@ -76,7 +76,7 @@ if (a > 5) {
 		{
 			name: "Explicit type at variable declaration with custom type and structs",
 			input: `
-type MyType fn(Number):Number
+type MyType fn(Number) -> Number
 let a: MyType = nil
 
 type Person struct {
@@ -90,8 +90,8 @@ let b: Person = nil
 		{
 			name: "Type alias of a function signature",
 			input: `
-type CustomFunc fn(Number): Number
-let f: CustomFunc = fn(x: Number): Number { return x }
+type CustomFunc fn(Number) -> Number
+let f: CustomFunc = fn(x: Number) -> Number { return x }
 `,
 			expectedErrors: []string{},
 		},
@@ -111,11 +111,11 @@ let d: map[CustomStruct]Number = {}
 			name: "map with custom function value",
 			input: `
 import string
-type CustomFunc fn(String): String
+type CustomFunc fn(String) -> String
 
 let dict: map[String]CustomFunc = {
-	"a": fn(x: String): String { return string.concat("A", x) },
-	"b": fn(x: String): String { return string.concat("B", x) }
+	"a": fn(x: String) -> String { return string.concat("A", x) },
+	"b": fn(x: String) -> String { return string.concat("B", x) }
 }
 
 return string.concat(dict["a"]("x"), dict["b"]("y"))
@@ -133,7 +133,7 @@ let a: EmptyStruct = EmptyStruct {}
 		{
 			name: "Function returning Nothing with empty return",
 			input: `
-let f = fn(): Nothing {
+let f = fn() -> Nothing {
 	return
 }
 `,
@@ -142,7 +142,7 @@ let f = fn(): Nothing {
 		{
 			name: "Function returning Nothing with implicit return",
 			input: `
-let f = fn(): Nothing {
+let f = fn() -> Nothing {
 	let a = 1
 }
 `,
@@ -157,7 +157,7 @@ let f = fn(): Nothing {
 			name: "Custom empty struct requires explicit return",
 			input: `
 type MyEmpty struct {}
-let f = fn(): MyEmpty {
+let f = fn() -> MyEmpty {
 }
 `,
 			expectedErrors: []string{
@@ -169,7 +169,7 @@ let f = fn(): MyEmpty {
 			name: "Custom empty struct with explicit return Nothing",
 			input: `
 type MyEmpty struct {}
-let f = fn(): MyEmpty {
+let f = fn() -> MyEmpty {
 	return Nothing {}
 }
 `,
@@ -271,7 +271,7 @@ func TestSemanticAnalysisFunctions(t *testing.T) {
 		{
 			name: "Valid function declaration and call",
 			input: `
-let add = fn(a: Number, b: Number): Number { return a + b }
+let add = fn(a: Number, b: Number) -> Number { return a + b }
 let result = add(10, 20)
 `,
 			expectedErrors: []string{},
@@ -289,7 +289,7 @@ a()
 		{
 			name: "Incorrect arity",
 			input: `
-let add = fn(a: Number, b: Number): Number { return a + b }
+let add = fn(a: Number, b: Number) -> Number { return a + b }
 add(10)
 `,
 			expectedErrors: []string{
@@ -299,7 +299,7 @@ add(10)
 		{
 			name: "Incorrect argument type",
 			input: `
-let check = fn(name: String): Boolean { return true }
+let check = fn(name: String) -> Boolean { return true }
 check(10)
 `,
 			expectedErrors: []string{
@@ -309,7 +309,7 @@ check(10)
 		{
 			name: "Incorrect return type",
 			input: `
-let add = fn(a: Number, b: Number): String { return a + b }
+let add = fn(a: Number, b: Number) -> String { return a + b }
 `,
 			expectedErrors: []string{
 				"type error: function declared to return STRING, but body returns NUMBER",
@@ -318,7 +318,7 @@ let add = fn(a: Number, b: Number): String { return a + b }
 		{
 			name: "Missing return statement",
 			input: `
-let bad = fn(): Number {
+let bad = fn() -> Number {
 	let a = 10
 }
 `,
@@ -329,7 +329,7 @@ let bad = fn(): Number {
 		{
 			name: "Missing return in alternative path",
 			input: `
-let check = fn(a: Number): Boolean {
+let check = fn(a: Number) -> Boolean {
 	if (a > 0) {
 		return true
 	}
@@ -342,7 +342,7 @@ let check = fn(a: Number): Boolean {
 		{
 			name: "Valid return in all paths",
 			input: `
-let check = fn(a: Number): Boolean {
+let check = fn(a: Number) -> Boolean {
 	if (a > 0) {
 		return true
 	} else {
@@ -355,7 +355,7 @@ let check = fn(a: Number): Boolean {
 		{
 			name: "Valid recursive function",
 			input: `
-let factorial = fn(n: Number): Number {
+let factorial = fn(n: Number) -> Number {
 	if (n == 0) {
 		return 1
 	} else {
@@ -368,7 +368,7 @@ let factorial = fn(n: Number): Number {
 		{
 			name: "Invalid recursive function call (wrong argument type)",
 			input: `
-let loop = fn(n: Number): Number {
+let loop = fn(n: Number) -> Number {
 	if (n == 0) {
 		return 0
 	} else {
@@ -383,7 +383,7 @@ let loop = fn(n: Number): Number {
 		{
 			name: "Unconditional recursion (infinite loop)",
 			input: `
-let loop = fn(): Number {
+let loop = fn() -> Number {
 	return loop()
 }
 `,
@@ -394,7 +394,7 @@ let loop = fn(): Number {
 		{
 			name: "Unconditional recursion in all if-else branches",
 			input: `
-let alwaysLoops = fn(n: Number): Number {
+let alwaysLoops = fn(n: Number) -> Number {
 	if (n > 0) {
 		return alwaysLoops(n - 1)
 	} else {
@@ -409,7 +409,7 @@ let alwaysLoops = fn(n: Number): Number {
 		{
 			name: "Unconditional recursion in infix expression",
 			input: `
-let count = fn(n: Number): Number {
+let count = fn(n: Number) -> Number {
 	return 1 + count(n + 1)
 }
 `,
@@ -444,7 +444,7 @@ d = 10
 		{
 			name: "Function returning Date",
 			input: `
-let getDate = fn(): Date { return '2023-10-25' }
+let getDate = fn() -> Date { return '2023-10-25' }
 let d = getDate()
 d = '2023-12-01'
 `,
@@ -453,7 +453,7 @@ d = '2023-12-01'
 		{
 			name: "Function returning wrong type instead of Date",
 			input: `
-let getDate = fn(): Date { return 10 }
+let getDate = fn() -> Date { return 10 }
 `,
 			expectedErrors: []string{
 				"type error: function declared to return DATE, but body returns NUMBER",
@@ -524,7 +524,7 @@ let b = a[0][1]
 		{
 			name: "Array in function signature",
 			input: `
-let sum = fn(arr: [Number]): Number { return arr[0] }
+let sum = fn(arr: [Number]) -> Number { return arr[0] }
 let res = sum([1, 2, 3])
 `,
 			expectedErrors: []string{},
@@ -570,19 +570,19 @@ func TestSemanticAnalysisAnyType(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:  "Function accepting Any parameter",
-			input: "let f = fn(x: Any): Any { return x }\nf(10)\nf(\"hello\")\nf(true)",
+			input: "let f = fn(x: Any) -> Any { return x }\nf(10)\nf(\"hello\")\nf(true)",
 		},
 		{
 			name:  "Function returning Any",
-			input: "let a = fn(): Any { return 10 }\nlet b = fn(): Any { return \"string\" }",
+			input: "let a = fn() -> Any { return 10 }\nlet b = fn() -> Any { return \"string\" }",
 		},
 		{
 			name:  "Array of Any",
-			input: "let getAny = fn(x: Any): Any { return x }\nlet f = fn(arr: [Any]): Any { return arr[0] }\nf([getAny(1), getAny(\"string\"), getAny(true)])",
+			input: "let getAny = fn(x: Any) -> Any { return x }\nlet f = fn(arr: [Any]) -> Any { return arr[0] }\nf([getAny(1), getAny(\"string\"), getAny(true)])",
 		},
 		{
 			name:  "Assigning Any to concrete type is allowed statically",
-			input: "let f = fn(): Any { return 10 }\nlet n = f()\nlet x = 1\nx = n",
+			input: "let f = fn() -> Any { return 10 }\nlet n = f()\nlet x = 1\nx = n",
 		},
 	}
 
@@ -1099,7 +1099,7 @@ if (true) {
 		{
 			name: "Valid private type at top level",
 			input: `
-private type MyFunc fn(): Number
+private type MyFunc fn() -> Number
 `,
 			expectedErrors: []string{},
 		},
@@ -1107,7 +1107,7 @@ private type MyFunc fn(): Number
 			name: "Invalid private type inside block",
 			input: `
 if (true) {
-	private type MyFunc fn(): Number
+	private type MyFunc fn() -> Number
 }
 `,
 			expectedErrors: []string{
@@ -1117,7 +1117,7 @@ if (true) {
 		{
 			name: "Invalid private let inside function block",
 			input: `
-let a = fn(b: Number): Number {
+let a = fn(b: Number) -> Number {
 	private let c = 10
 	return b + c
 }
@@ -1134,20 +1134,20 @@ func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:  "Type alias with primitive types",
-			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom): money { return m }\nprocess(100, true, \"John\", 42)",
+			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { return m }\nprocess(100, true, \"John\", 42)",
 		},
 		{
 			name:  "Type alias with array types",
-			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection): prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
+			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
 		},
 		{
 			name:           "Type alias mismatch",
-			input:          "type money Number\nlet add = fn(a: money): money { return a }\nadd(\"string\")",
+			input:          "type money Number\nlet add = fn(a: money) -> money { return a }\nadd(\"string\")",
 			expectedErrors: []string{"type error: argument 1 expected NUMBER, got STRING"},
 		},
 		{
 			name:           "Undefined type in alias",
-			input:          "type someType Some\nlet doSomething = fn(a: someType): Number { return 1 }",
+			input:          "type someType Some\nlet doSomething = fn(a: someType) -> Number { return 1 }",
 			expectedErrors: []string{"type error: cannot resolve type name for Some"},
 		},
 	}
@@ -1358,7 +1358,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 			input: `
 				import map
 				type CustomStruct struct { key map.KeyFunc }
-				let s = CustomStruct{key: fn(): Number { return 10 }}
+				let s = CustomStruct{key: fn() -> Number { return 10 }}
 			`,
 			expectedErrors: []string{"type error: field 'key' expects FUNCTION, got FUNCTION"},
 		},
