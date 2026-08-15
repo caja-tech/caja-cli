@@ -7,7 +7,7 @@ type CustomStruct struct {
 
 let d: map[CustomStruct]Number = {}
 let s: CustomStruct = CustomStruct{
-	key: fn(): String { return "a" },
+	key: fn() -> String { return "a" },
 	value: 10
 }
 

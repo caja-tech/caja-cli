@@ -6,11 +6,11 @@ type CustomStruct struct {
 }
 
 let s = CustomStruct {
-	key: fn(): String { return "" },
+	key: fn() -> String { return "" },
 	value: "key"
 }
 
-s.key = fn(): String { return s.value }
+s.key = fn() -> String { return s.value }
 
 let d: map[CustomStruct]Number = {}
 d[s] = 10
