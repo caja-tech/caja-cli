@@ -761,6 +761,11 @@ func TestFunctionParsing(t *testing.T) {
 			input:    "let f = fn(a: Number) { a }",
 			expected: "let f = fn(a: Number) -> Nothing { ... }",
 		},
+		{
+			name:     "Function taking an inline function as parameter",
+			input:    "let apply = fn(cb: fn(Number) -> String) -> String { cb(10) }",
+			expected: "let apply = fn(cb: fn(Number) -> String) -> String { ... }",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -846,6 +851,11 @@ func TestTypeAliasParsing(t *testing.T) {
 			name:     "Type alias function with parameters implicit Nothing return type",
 			input:    "type Consumer fn(String)",
 			expected: "type Consumer fn(String) -> Nothing",
+		},
+		{
+			name:     "Type alias struct with inline function property",
+			input:    "type MyStruct struct { run fn(Number) -> Number }",
+			expected: "type MyStruct struct {\n  run fn(Number) -> Number\n}",
 		},
 	}
 
