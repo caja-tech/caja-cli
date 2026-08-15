@@ -277,6 +277,37 @@ let result = add(10, 20)
 			expectedErrors: []string{},
 		},
 		{
+			name: "Valid higher-order function receiving and returning an inline function",
+			input: `
+let apply = fn(cb: fn(Number) -> String) -> fn(Number) -> String { return cb }
+let myCb = fn(a: Number) -> String { return "test" }
+apply(myCb)
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Invalid argument for higher-order function (wrong return type)",
+			input: `
+let apply = fn(cb: fn(Number) -> String) -> String { return cb(10) }
+let myCb = fn(a: Number) -> Number { return a }
+apply(myCb)
+`,
+			expectedErrors: []string{
+				"type error: argument 1 expected FUNCTION, got FUNCTION",
+			},
+		},
+		{
+			name: "Invalid argument for higher-order function (wrong parameter type)",
+			input: `
+let apply = fn(cb: fn(Number) -> String) -> String { return cb(10) }
+let myCb = fn(a: String) -> String { return a }
+apply(myCb)
+`,
+			expectedErrors: []string{
+				"type error: argument 1 expected FUNCTION, got FUNCTION",
+			},
+		},
+		{
 			name: "Call non-function",
 			input: `
 let a = 10
@@ -1171,6 +1202,33 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				}
 				let n = p.user.name
 			`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Valid struct with inline function property",
+			input: `
+				type Action struct {
+					run fn(Number) -> String
+				}
+				let a = Action {
+					run: fn(n: Number) -> String { return "valid" }
+				}
+			`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Invalid struct with inline function property",
+			input: `
+				type Action struct {
+					run fn(Number) -> String
+				}
+				let a = Action {
+					run: fn(n: Number) -> Number { return 10 }
+				}
+			`,
+			expectedErrors: []string{
+				"type error: field 'run' expects FUNCTION, got FUNCTION",
+			},
 		},
 		{
 			name: "Recursive struct definition",
