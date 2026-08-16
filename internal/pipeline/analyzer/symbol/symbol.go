@@ -98,6 +98,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 	case "map":
 		return map[string]Symbol{
 			"containsKey": NewBuiltinSymbol(2),
+			"delete":      NewBuiltinSymbol(2),
 		}, map[string]Symbol{
 			"KeyFunc": NewFunctionSymbol(0, nil, NewBasicSymbol(environment.STRING_OBJ)),
 		}, true
