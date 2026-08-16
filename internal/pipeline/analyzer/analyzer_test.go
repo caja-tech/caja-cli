@@ -253,13 +253,49 @@ a["hello"] = 5
 				"type error: array index must be NUMBER, got STRING",
 			},
 		},
-		{
+	{
 			name: "Undefined custom type in variable declaration",
 			input: `
 let c: CustomType = nil
 `,
 			expectedErrors: []string{
 				"semantic error: variable 'c' type is not declared: 'CustomType'",
+			},
+		},
+		{
+			name: "Mismatched assignment to explicit Number variable",
+			input: `
+let x: Number = "hello"
+`,
+			expectedErrors: []string{
+				"type error: cannot assign STRING to NUMBER",
+			},
+		},
+		{
+			name: "Mismatched assignment to explicit String variable",
+			input: `
+let s: String = 42
+`,
+			expectedErrors: []string{
+				"type error: cannot assign NUMBER to STRING",
+			},
+		},
+		{
+			name: "Mismatched assignment to explicit Array variable",
+			input: `
+let a: [Number] = ["hello"]
+`,
+			expectedErrors: []string{
+				"type error: cannot assign [STRING] to [NUMBER]",
+			},
+		},
+		{
+			name: "Mismatched assignment to explicit Const variable",
+			input: `
+const b: Boolean = 1
+`,
+			expectedErrors: []string{
+				"type error: cannot assign NUMBER to BOOLEAN",
 			},
 		},
 	}
@@ -1049,6 +1085,25 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			name:           "log.export() rejects too many arguments",
 			input:          "import log\nreturn log.export(1, 2)",
 			expectedErrors: []string{"arity error: expected 1 argument for 'export', got 2"},
+		},
+		{
+			name:  "map.delete() works with correct types",
+			input: "import map\nlet m: map[String]Number = {}\nreturn map.delete(m, \"key\")",
+		},
+		{
+			name:           "map.delete() rejects mismatched key type",
+			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m, 42)",
+			expectedErrors: []string{"type error: map index must be STRING, got NUMBER"},
+		},
+		{
+			name:           "map.delete() rejects mismatched first argument type",
+			input:          "import map\nreturn map.delete(\"not a map\", \"key\")",
+			expectedErrors: []string{"type error: first argument to 'delete' must be MAP, got STRING"},
+		},
+		{
+			name:           "map.delete() rejects missing arguments",
+			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'delete', got 1"},
 		},
 	}
 

@@ -338,12 +338,6 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
 	}
 
-	if n.ValueType != "" {
-		if _, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
-		}
-	}
-
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		var paramTypes []symbol.Symbol
 		for _, param := range fnNode.Parameters {
@@ -372,9 +366,30 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 	}
 
 	var valType symbol.Symbol
+	var hasExplicitType bool
+	var explicitType symbol.Symbol
+
 	valType = symbol.AnySymbol()
+
+	if n.ValueType != "" {
+		if t, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+		} else {
+			explicitType = t
+			hasExplicitType = true
+			valType = explicitType
+		}
+	}
+
 	if n.Value != nil {
-		valType = a.analyze(n.Value)
+		rhsType := a.analyze(n.Value)
+		if hasExplicitType {
+			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to %s", rhsType.String(), explicitType.String()))
+			}
+		} else {
+			valType = rhsType
+		}
 	}
 
 	a.declare(n.Name.Value, valType, false)
@@ -395,12 +410,6 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	if _, exists := a.findVarSymbolInScope(n.Name.Value); exists {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
-	}
-
-	if n.ValueType != "" {
-		if _, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
-		}
 	}
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
@@ -431,9 +440,30 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	}
 
 	var valType symbol.Symbol
+	var hasExplicitType bool
+	var explicitType symbol.Symbol
+
 	valType = symbol.AnySymbol()
+
+	if n.ValueType != "" {
+		if t, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+		} else {
+			explicitType = t
+			hasExplicitType = true
+			valType = explicitType
+		}
+	}
+
 	if n.Value != nil {
-		valType = a.analyze(n.Value)
+		rhsType := a.analyze(n.Value)
+		if hasExplicitType {
+			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to %s", rhsType.String(), explicitType.String()))
+			}
+		} else {
+			valType = rhsType
+		}
 	}
 
 	a.declare(n.Name.Value, valType, true)

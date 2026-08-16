@@ -865,6 +865,7 @@ func (e *Environment) newMapModule() *Module {
 	mapEnv := NewEnvironment(e.BaseDir, moduleName, true)
 
 	mapEnv.Set("containsKey", &Builtin{Name: "map.containsKey"})
+	mapEnv.Set("delete", &Builtin{Name: "map.delete"})
 
 	return &Module{
 		Name: moduleName,

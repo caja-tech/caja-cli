@@ -78,6 +78,8 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeLogExportFunction(functionName, n), true
 	case "map.containsKey":
 		return a.analyzeMapContainsKeyFunction(n), true
+	case "map.delete":
+		return a.analyzeMapDeleteFunction(n), true
 	default:
 		return symbol.AnySymbol(), false
 
@@ -674,6 +676,29 @@ func (a *Analyzer) analyzeMapContainsKeyFunction(n *ast.CallExpression) symbol.S
 	}
 
 	return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+}
+
+// analyzeMapDeleteFunction checks the arity and type for map.delete, returning a MAP.
+func (a *Analyzer) analyzeMapDeleteFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'delete', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	mapSymbol := a.analyze(n.Arguments[0])
+	keySymbol := a.analyze(n.Arguments[1])
+
+	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'delete' must be MAP, got %s", mapSymbol.Type()))
+	}
+	
+	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
+		if !mapSym.Key.Equals(keySymbol) && keySymbol.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: map index must be %s, got %s", mapSym.Key.Type(), keySymbol.Type()))
+		}
+	}
+
+	return mapSymbol
 }
 
 // analyzeCastFunction checks the arity and type for the builtin cast functions.

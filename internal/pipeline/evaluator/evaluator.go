@@ -702,6 +702,29 @@ func evalCallExpression(node *ast.CallExpression, env *environment.Environment) 
 				return &environment.Boolean{Value: exists}, nil
 			}
 
+			if fn.Name == "map.delete" {
+				if len(args) != 2 {
+					return nil, fmt.Errorf("arity error: expected 2 arguments for 'delete', got %d", len(args))
+				}
+				mapObj, ok := args[0].(*environment.Map)
+				if !ok {
+					return nil, fmt.Errorf("type error: first argument to 'delete' must be MAP, got %s", args[0].Type())
+				}
+				keyObj := args[1]
+				hash, err := hashKey(keyObj)
+				if err != nil {
+					return nil, err
+				}
+				
+				newPairs := make(map[string]environment.MapPair)
+				for k, v := range mapObj.Pairs {
+					newPairs[k] = v
+				}
+				delete(newPairs, hash)
+				
+				return &environment.Map{Pairs: newPairs}, nil
+			}
+
 			result, err := fn.Fn(env, args...)
 			if err != nil {
 				return nil, err
