@@ -74,6 +74,7 @@ func New(t *lexer.Lexer) *Parser {
 	p.infixParseFuncs[lexer.EQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.NEQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.LPAREN] = p.parseFunctionCallExpression
+	p.infixParseFuncs[lexer.DOUBLE_COLON] = p.parseTurbofishExpression
 	p.infixParseFuncs[lexer.LBRACE] = p.parseStructLiteral
 	p.infixParseFuncs[lexer.LBRACKET] = p.parseIndexExpression
 	p.infixParseFuncs[lexer.DOT] = p.parsePropertyExpression
@@ -200,6 +201,11 @@ func (p *Parser) parseArrayLiteral() ast.Expression {
 func (p *Parser) parseFunctionLiteral() ast.Expression {
 	lit := &ast.FunctionLiteral{Token: p.currToken}
 
+	if p.peekToken.Type == lexer.LT {
+		p.nextToken() // move to <
+		lit.TypeParameters = p.parseTypeParameters()
+	}
+
 	if !p.expectPeek(lexer.LPAREN) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected '(', got %s", p.currToken.Type))
 		return nil
@@ -225,6 +231,43 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	lit.Body = p.parseBlockStatement()
 
 	return lit
+}
+
+// parseTypeParameters parses the comma-separated list of generic type variables
+// enclosed in angle brackets. Assumes the opening '<' has been consumed.
+func (p *Parser) parseTypeParameters() []string {
+	var typeParams []string
+
+	if p.peekToken.Type == lexer.GT {
+		p.reportError(p.peekToken, "expected at least one generic type parameter")
+		p.nextToken() // consume '>'
+		return typeParams
+	}
+
+	p.nextToken()
+	if p.currToken.Type != lexer.IDENT {
+		p.reportError(p.currToken, fmt.Sprintf("expected identifier for generic type parameter, got %s", p.currToken.Type))
+		return nil
+	}
+	typeParams = append(typeParams, p.currToken.Literal)
+
+	for p.peekToken.Type == lexer.COMMA {
+		p.nextToken() // consume ','
+		p.nextToken() // move to next identifier
+
+		if p.currToken.Type != lexer.IDENT {
+			p.reportError(p.currToken, fmt.Sprintf("expected identifier for generic type parameter, got %s", p.currToken.Type))
+			return nil
+		}
+		typeParams = append(typeParams, p.currToken.Literal)
+	}
+
+	if !p.expectPeek(lexer.GT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '>', got %s", p.peekToken.Type))
+		return nil
+	}
+
+	return typeParams
 }
 
 // parseFunctionParameters parses the comma-separated list of typed parameters
@@ -277,11 +320,15 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 	return parameters
 }
 
-// parseStructLiteral parses a struct instantiation of the form `MyStruct { a: 1, b: 2 }`.
+// parseStructLiteral parses a struct instantiation of the form `MyStruct { a: 1, b: 2 }` or `MyStruct::<Type> { a: 1 }`.
 func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 	var structName string
+	var typeArgs []string
 	if ident, ok := left.(*ast.Identifier); ok {
 		structName = ident.Value
+	} else if genIdent, ok := left.(*ast.GenericIdentifier); ok {
+		structName = genIdent.Identifier.Value
+		typeArgs = genIdent.TypeArguments
 	} else if prop, ok := left.(*ast.PropertyExpression); ok {
 		// e.g. "sm.User" -> "sm.User"
 		if modId, ok := prop.Object.(*ast.Identifier); ok {
@@ -296,9 +343,10 @@ func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 	}
 
 	literal := &ast.StructLiteral{
-		Token:      p.currToken, // The '{' token
-		StructName: structName,
-		Fields:     make(map[string]ast.Expression),
+		Token:         p.currToken, // The '{' token
+		StructName:    structName,
+		TypeArguments: typeArgs,
+		Fields:        make(map[string]ast.Expression),
 	}
 
 	if p.peekToken.Type == lexer.RBRACE {
@@ -573,6 +621,11 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 	}
 	statement.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
+	if p.peekToken.Type == lexer.LT {
+		p.nextToken() // move to <
+		statement.TypeParameters = p.parseTypeParameters()
+	}
+
 	if p.peekToken.Type == lexer.FN {
 		p.nextToken() // move to fn
 
@@ -717,6 +770,28 @@ func (p *Parser) parseTypeSignature() string {
 
 	if p.expectPeek(lexer.IDENT) {
 		typeName := p.currToken.Literal
+
+		if p.peekToken.Type == lexer.LT {
+			p.nextToken() // move to <
+			var typeArgs []string
+			if p.peekToken.Type != lexer.GT {
+				for {
+					typeArg := p.parseTypeSignature()
+					if typeArg != "" {
+						typeArgs = append(typeArgs, typeArg)
+					}
+					if p.peekToken.Type == lexer.COMMA {
+						p.nextToken() // move to comma
+					} else {
+						break
+					}
+				}
+			}
+			if !p.expectPeek(lexer.GT) {
+				return ""
+			}
+			typeName += "<" + strings.Join(typeArgs, ", ") + ">"
+		}
 
 		if typeName == "map" && p.peekToken.Type == lexer.LBRACKET {
 			p.nextToken() // move to [
@@ -985,6 +1060,38 @@ func (p *Parser) parseFunctionCallExpression(function ast.Expression) ast.Expres
 	exp := &ast.CallExpression{Token: p.currToken, Function: function}
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
 	return exp
+}
+
+// parseTurbofishExpression parses a turbofish operator `::` followed by `<Type>`.
+// It returns either a GenericIdentifier (if not followed by `(`) or a CallExpression.
+func (p *Parser) parseTurbofishExpression(left ast.Expression) ast.Expression {
+	tok := p.currToken // The '::' token
+
+	if !p.expectPeek(lexer.LT) {
+		return nil
+	}
+
+	typeArgs := p.parseTypeParameters()
+
+	// If the next token is `(`, it's a generic function call
+	if p.peekToken.Type == lexer.LPAREN {
+		p.nextToken() // move to '('
+		exp := &ast.CallExpression{Token: tok, Function: left, TypeArguments: typeArgs}
+		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+		return exp
+	}
+
+	// Otherwise, it's a generic identifier (e.g. for struct instantiation)
+	if ident, ok := left.(*ast.Identifier); ok {
+		return &ast.GenericIdentifier{
+			Token:         tok,
+			Identifier:    ident,
+			TypeArguments: typeArgs,
+		}
+	}
+
+	p.reportError(p.currToken, "invalid generic expression")
+	return nil
 }
 
 // reportError formats and appends a syntax error with the given token's line and column.

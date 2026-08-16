@@ -949,3 +949,22 @@ func TestQuestionTokens(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+// TestDoubleColonTokenization ensures that the turbofish generic syntax '::' is correctly identified.
+func TestDoubleColonTokenization(t *testing.T) {
+	input := "f::<Number>()"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Identifier f", Token{IDENT, "f", 1, 1}},
+		{"Double colon", Token{DOUBLE_COLON, "::", 1, 2}},
+		{"Left angle bracket (less than)", Token{LT, "<", 1, 4}},
+		{"Identifier Number", Token{IDENT, "Number", 1, 5}},
+		{"Right angle bracket (greater than)", Token{GT, ">", 1, 11}},
+		{"Left paren", Token{LPAREN, "(", 1, 12}},
+		{"Right paren", Token{RPAREN, ")", 1, 13}},
+		{"End of file", Token{EOF, "", 1, 14}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

@@ -37,7 +37,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 	}
 
 	// Inject Nothing as a global builtin type
-	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", make(map[string]symbol.StructFieldSymbol))
+	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol))
 
 	return analyzer
 }
@@ -244,6 +244,10 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	a.pushScope()
 	a.functionDepth++
 
+	for _, tParam := range n.TypeParameters {
+		a.types[tParam] = symbol.NewGenericSymbol(tParam)
+	}
+
 	var paramTypes []symbol.Symbol
 
 	for _, param := range n.Parameters {
@@ -256,6 +260,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	}
 
 	actualReturnSymbol := a.analyze(n.Body)
+	
 	a.functionDepth--
 	a.popScope()
 
@@ -289,7 +294,11 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 		}
 	}
 
-	return symbol.NewFunctionSymbol(len(n.Parameters), paramTypes, expectedReturnSymbol)
+	for _, tParam := range n.TypeParameters {
+		delete(a.types, tParam)
+	}
+
+	return symbol.NewFunctionSymbol(n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
 }
 
 // analyzeStructLiteral validates the fields of a struct instantiation
@@ -305,6 +314,25 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 	if !ok {
 		a.reportError(n.Token, fmt.Sprintf("type error: '%s' is not a struct", n.StructName))
 		return symbol.AnySymbol()
+	}
+
+	if len(n.TypeArguments) > 0 {
+		if len(n.TypeArguments) != len(structDef.TypeParameters) {
+			a.reportError(n.Token, fmt.Sprintf("type error: expected %d type arguments for struct '%s', got %d", len(structDef.TypeParameters), n.StructName, len(n.TypeArguments)))
+		} else {
+			inferred := make(map[string]symbol.Symbol)
+			for i, typeArg := range n.TypeArguments {
+				resolvedArg, ok := a.findTypeSymbolInTypes(typeArg)
+				if !ok {
+					a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", typeArg))
+					resolvedArg = symbol.AnySymbol()
+				}
+				inferred[structDef.TypeParameters[i]] = resolvedArg
+			}
+			structDef = substituteTypes(structDef, inferred).(*symbol.StructDefSymbol)
+		}
+	} else if len(structDef.TypeParameters) > 0 {
+		a.reportError(n.Token, fmt.Sprintf("type error: missing type arguments for generic struct '%s'", n.StructName))
 	}
 
 	// Check missing fields
@@ -339,6 +367,10 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 	}
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
+		for _, tParam := range fnNode.TypeParameters {
+			a.types[tParam] = symbol.NewGenericSymbol(tParam)
+		}
+
 		var paramTypes []symbol.Symbol
 		for _, param := range fnNode.Parameters {
 			typeName, ok := a.findTypeSymbolInTypes(param.Type)
@@ -357,11 +389,15 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 			returnType = resolvedReturnType
 		}
 
-		fnSymbol := symbol.NewFunctionSymbol(len(fnNode.Parameters), paramTypes, returnType)
+		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol, false)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
+		}
+
+		for _, tParam := range fnNode.TypeParameters {
+			delete(a.types, tParam)
 		}
 	}
 
@@ -413,6 +449,10 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	}
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
+		for _, tParam := range fnNode.TypeParameters {
+			a.types[tParam] = symbol.NewGenericSymbol(tParam)
+		}
+
 		var paramTypes []symbol.Symbol
 		for _, param := range fnNode.Parameters {
 			typeName, ok := a.findTypeSymbolInTypes(param.Type)
@@ -431,11 +471,15 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 			returnType = resolvedReturnType
 		}
 
-		fnSymbol := symbol.NewFunctionSymbol(len(fnNode.Parameters), paramTypes, returnType)
+		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol, true)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
+		}
+
+		for _, tParam := range fnNode.TypeParameters {
+			delete(a.types, tParam)
 		}
 	}
 
@@ -579,11 +623,19 @@ func (a *Analyzer) analyzeBlockStatement(n *ast.BlockStatement) symbol.Symbol {
 
 // analyzeTypeAliasStatement resolves the parameter and return types for a type alias
 // and registers the resulting function signature in the analyzer's type registry.
+// analyzeTypeAliasStatement resolves the parameter and return types for a type alias
+// and registers the resulting function signature in the analyzer's type registry.
 func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.Symbol {
 	var aliasedSymbol symbol.Symbol
 
+	// Temporarily register TypeParameters into the registry to support recursive lookups (e.g. fn(T) -> T)
+	for _, tp := range n.TypeParameters {
+		a.types[tp] = symbol.NewGenericSymbol(tp)
+	}
+
 	if n.Signature != nil {
 		var paramTypes []symbol.Symbol
+		
 		for _, pt := range n.Signature.ParamTypes {
 			paramSymbol, ok := a.findTypeSymbolInTypes(pt)
 			if !ok {
@@ -600,10 +652,15 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			}
 			returnType = resolvedReturn
 		}
-		aliasedSymbol = symbol.NewFunctionSymbol(len(n.Signature.ParamTypes), paramTypes, returnType)
+		
+		fnSym := symbol.NewFunctionSymbol(nil, len(n.Signature.ParamTypes), paramTypes, returnType)
+		if len(n.TypeParameters) > 0 {
+			fnSym.TypeParameters = n.TypeParameters
+		}
+		aliasedSymbol = fnSym
 	} else if n.StructDefinition != nil {
 		fields := make(map[string]symbol.StructFieldSymbol)
-		aliasedSymbol = symbol.NewStructDefSymbol(n.Name.Value, fields)
+		aliasedSymbol = symbol.NewStructDefSymbol(n.Name.Value, n.TypeParameters, fields)
 
 		// Pre-register the struct in the type registry to allow recursive definitions
 		a.types[n.Name.Value] = aliasedSymbol
@@ -628,6 +685,11 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.TargetType))
 		}
 		aliasedSymbol = resolvedSymbol
+	}
+
+	// Clean up temporary TypeParameters
+	for _, tp := range n.TypeParameters {
+		delete(a.types, tp)
 	}
 
 	a.types[n.Name.Value] = aliasedSymbol
@@ -798,20 +860,60 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity(), len(n.Arguments)))
 	}
 
+	inferredTypes := make(map[string]symbol.Symbol)
+	argSymbols := make([]symbol.Symbol, len(n.Arguments))
+
 	for i, arg := range n.Arguments {
-		argSymbol := a.analyze(arg)
+		argSymbols[i] = a.analyze(arg)
+	}
+
+	// First pass: resolve explicit type arguments or infer generic type parameters
+	if len(fnSymbol.TypeParameters) > 0 {
+		if len(n.TypeArguments) > 0 {
+			if len(n.TypeArguments) != len(fnSymbol.TypeParameters) {
+				a.reportError(n.Token, fmt.Sprintf("arity error: expected %d generic type arguments, got %d", len(fnSymbol.TypeParameters), len(n.TypeArguments)))
+			} else {
+				for i, typeArgName := range n.TypeArguments {
+					resolvedArg, ok := a.findTypeSymbolInTypes(typeArgName)
+					if !ok {
+						a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", typeArgName))
+						resolvedArg = symbol.AnySymbol()
+					}
+					tParam := fnSymbol.TypeParameters[i]
+					inferredTypes[tParam] = resolvedArg
+				}
+			}
+		} else {
+			for i := range n.Arguments {
+				if i < len(fnSymbol.ParamTypes()) {
+					expectedType := fnSymbol.ParamTypes()[i]
+					err := inferTypes(expectedType, argSymbols[i], inferredTypes)
+					if err != nil {
+						a.reportError(n.Token, fmt.Sprintf("type inference error: %v", err))
+					}
+				}
+			}
+		}
+	} else if len(n.TypeArguments) > 0 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 0 generic type arguments, got %d", len(n.TypeArguments)))
+	}
+
+	for i := range n.Arguments {
+		argSymbol := argSymbols[i]
 
 		if i < len(fnSymbol.ParamTypes()) {
 			expectedType := fnSymbol.ParamTypes()[i]
+			// Substitute inferred types
+			finalExpected := substituteTypes(expectedType, inferredTypes)
 
-			if !expectedType.Equals(argSymbol) {
-				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, expectedType.String(), argSymbol.String()))
+			if !finalExpected.Equals(argSymbol) {
+				a.reportError(n.Token, fmt.Sprintf("type error: argument %d expected %s, got %s", i+1, finalExpected.String(), argSymbol.String()))
 			}
 		}
 	}
 
 	if fnSymbol.ReturnType() != nil {
-		return fnSymbol.ReturnType()
+		return substituteTypes(fnSymbol.ReturnType(), inferredTypes)
 	}
 
 	return symbol.AnySymbol()

@@ -8,19 +8,21 @@ import (
 // FunctionSymbol represents a function type in the semantic analysis,
 // tracking its expected number of arguments (arity), parameter types, and return type.
 type FunctionSymbol struct {
-	symbolType environment.ObjectType
-	arity      int
-	paramTypes []Symbol
-	returnType Symbol
+	symbolType     environment.ObjectType
+	TypeParameters []string
+	arity          int
+	paramTypes     []Symbol
+	returnType     Symbol
 }
 
-// NewFunctionSymbol creates and returns a new FunctionSymbol with the specified arity, parameter types, and return type.
-func NewFunctionSymbol(arity int, paramTypes []Symbol, returnType Symbol) *FunctionSymbol {
+// NewFunctionSymbol creates and returns a new FunctionSymbol with the specified generic type parameters, arity, parameter types, and return type.
+func NewFunctionSymbol(typeParams []string, arity int, paramTypes []Symbol, returnType Symbol) *FunctionSymbol {
 	return &FunctionSymbol{
-		symbolType: environment.FUNCTION_OBJ,
-		arity:      arity,
-		paramTypes: paramTypes,
-		returnType: returnType,
+		symbolType:     environment.FUNCTION_OBJ,
+		TypeParameters: typeParams,
+		arity:          arity,
+		paramTypes:     paramTypes,
+		returnType:     returnType,
 	}
 }
 

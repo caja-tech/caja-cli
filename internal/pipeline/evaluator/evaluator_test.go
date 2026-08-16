@@ -201,7 +201,46 @@ func TestEvaluateConst(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
-func TestEvaluateVariables(t *testing.T) {
+func TestGenericFunctions(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Generic function with turbofish syntax",
+			input: `
+			let identity = fn<T>(x: T) -> T {
+				return x
+			}
+			return identity::<Number>(10)
+			`,
+			expected: 10.0,
+		},
+		{
+			name: "Generic function without turbofish syntax (inferred)",
+			input: `
+			let wrap = fn<T>(x: T) -> [T] {
+				return [x]
+			}
+			return wrap("caja")[0]
+			`,
+			expected: "caja",
+		},
+		{
+			name: "Generic struct instantiation (simulated with function)",
+			input: `
+			type Box struct {
+				value Any
+			}
+			let makeBox = fn<T>(val: T) -> Box {
+				return Box { value: val }
+			}
+			return makeBox::<String>("hello").value
+			`,
+			expected: "hello",
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestEvaluateLetStatements(t *testing.T) {
 	var tests = []testScenario{
 		{"Assign and return", "let rate = 15.5\nreturn rate", 15.5},
 		{"Math with variables", "let rate = 10\nlet tax = 5\nreturn rate * tax", 50.0},

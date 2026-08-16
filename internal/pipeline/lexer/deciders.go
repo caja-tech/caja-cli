@@ -271,6 +271,13 @@ func decideCommaToken(t *Lexer, line int, column int) deciderResult {
 // decideColonToken matches the ':' character and produces a COLON token.
 func decideColonToken(t *Lexer, line int, column int) deciderResult {
 	if t.ch == ':' {
+		if t.peekChar() == ':' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: DOUBLE_COLON, Literal: literal, Line: line, Column: column}}
+		}
 		return deciderResult{true, Token{Type: COLON, Literal: string(t.ch), Line: line, Column: column}}
 	}
 

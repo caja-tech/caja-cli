@@ -1260,6 +1260,24 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 			expectedErrors: []string{},
 		},
 		{
+			name: "Type alias generic struct instantiation success",
+			input: `
+				type CustomStruct<T> struct { f fn(T) -> T }
+				let c = CustomStruct::<String> { f: fn(x: String) -> String { return x } }
+			`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Type alias generic struct instantiation type error",
+			input: `
+				type CustomStruct<T> struct { f fn(T) -> T }
+				let c = CustomStruct::<String> { f: fn(x: Number) -> Number { return x } }
+			`,
+			expectedErrors: []string{
+				"[Line 3, Column 36] type error: field 'f' expects fn(STRING) -> STRING, got fn(NUMBER) -> NUMBER",
+			},
+		},
+		{
 			name: "Valid struct with inline function property",
 			input: `
 				type Action struct {

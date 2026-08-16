@@ -144,16 +144,22 @@ func (p *Parameter) String() string {
 // FunctionLiteral is an expression node that represents a function definition.
 // It includes the parameters, optional return type, and the function body.
 type FunctionLiteral struct {
-	Token      lexer.Token
-	Parameters []*Parameter
-	ReturnType string
-	Body       *BlockStatement
+	Token          lexer.Token
+	TypeParameters []string
+	Parameters     []*Parameter
+	ReturnType     string
+	Body           *BlockStatement
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
 func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
 func (fl *FunctionLiteral) String() string {
 	out := fl.Token.Literal
+
+	if len(fl.TypeParameters) > 0 {
+		out += "<" + strings.Join(fl.TypeParameters, ", ") + ">"
+	}
+
 	out += "("
 
 	if len(fl.Parameters) > 0 {
@@ -176,16 +182,21 @@ func (fl *FunctionLiteral) String() string {
 // StructLiteral is an expression node representing a struct instantiation.
 // It holds the struct name identifier and a map of provided field values.
 type StructLiteral struct {
-	Token      lexer.Token // The '{' token
-	StructName string
-	Fields     map[string]Expression
+	Token         lexer.Token // The '{' token
+	StructName    string
+	TypeArguments []string
+	Fields        map[string]Expression
 }
 
 func (sl *StructLiteral) expressionNode()      {}
 func (sl *StructLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StructLiteral) String() string {
 	var out string
-	out += sl.StructName + " {"
+	structName := sl.StructName
+	if len(sl.TypeArguments) > 0 {
+		structName += "::<" + strings.Join(sl.TypeArguments, ", ") + ">"
+	}
+	out += structName + " {"
 	var fields []string
 	for name, val := range sl.Fields {
 		fields = append(fields, name+": "+val.String())
@@ -409,6 +420,7 @@ func (sd *StructDefinition) String() string {
 type TypeAliasStatement struct {
 	Token            lexer.Token
 	Name             *Identifier
+	TypeParameters   []string           // Used for generic aliases like type Map<K, V> ...
 	Signature        *FunctionSignature // Used for fn(...) types
 	TargetType       string             // Used for simple alias types like Number, [String], etc.
 	StructDefinition *StructDefinition  // Used for struct types
@@ -423,12 +435,17 @@ func (ts *TypeAliasStatement) String() string {
 		out += "private "
 	}
 
+	namePart := ts.Name.String()
+	if len(ts.TypeParameters) > 0 {
+		namePart += "<" + strings.Join(ts.TypeParameters, ", ") + ">"
+	}
+
 	if ts.Signature != nil {
-		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.Signature.String()
+		out += ts.TokenLiteral() + " " + namePart + " " + ts.Signature.String()
 	} else if ts.StructDefinition != nil {
-		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.StructDefinition.String()
+		out += ts.TokenLiteral() + " " + namePart + " " + ts.StructDefinition.String()
 	} else {
-		out += ts.TokenLiteral() + " " + ts.Name.String() + " " + ts.TargetType
+		out += ts.TokenLiteral() + " " + namePart + " " + ts.TargetType
 	}
 
 	return out
@@ -454,15 +471,28 @@ func (e *ExpressionStatement) String() string {
 // Token carries the original tokenizer.Token and Value holds the identifier's
 // name as a plain string.
 type Identifier struct {
-	Token lexer.Token
+	Token lexer.Token // The lexer.IDENT token
 	Value string
 }
 
-func (i *Identifier) expressionNode() {}
-func (i *Identifier) TokenLiteral() string {
-	return i.Token.Literal
+func (i *Identifier) expressionNode()      {}
+func (i *Identifier) TokenLiteral() string { return i.Token.Literal }
+func (i *Identifier) String() string       { return i.Value }
+
+// GenericIdentifier represents an identifier with generic type arguments,
+// e.g. CustomStruct::<String>. Used temporarily during parsing to pass
+// turbofish arguments to StructLiteral.
+type GenericIdentifier struct {
+	Token         lexer.Token // The '::' token
+	Identifier    *Identifier
+	TypeArguments []string
 }
-func (i *Identifier) String() string { return i.Value }
+
+func (gi *GenericIdentifier) expressionNode()      {}
+func (gi *GenericIdentifier) TokenLiteral() string { return gi.Token.Literal }
+func (gi *GenericIdentifier) String() string {
+	return gi.Identifier.Value + "::<" + strings.Join(gi.TypeArguments, ", ") + ">"
+}
 
 // PrefixExpression represents a prefix operator and its operand expression.
 type PrefixExpression struct {
@@ -520,15 +550,28 @@ func (ie *IfExpression) String() string {
 // CallExpression is an expression node that represents a function invocation.
 // It contains the function being called and the list of argument expressions.
 type CallExpression struct {
-	Token     lexer.Token
-	Function  Expression
-	Arguments []Expression
+	Token         lexer.Token // The '(' token or the '::' token
+	Function      Expression  // Identifier or FunctionLiteral
+	TypeArguments []string    // Generic type arguments e.g., f::<Number>()
+	Arguments     []Expression
 }
 
 func (ce *CallExpression) expressionNode()      {}
 func (ce *CallExpression) TokenLiteral() string { return ce.Token.Literal }
 func (ce *CallExpression) String() string {
 	out := ce.Function.String()
+	
+	if len(ce.TypeArguments) > 0 {
+		out += "::<"
+		for i, t := range ce.TypeArguments {
+			out += t
+			if i != len(ce.TypeArguments)-1 {
+				out += ", "
+			}
+		}
+		out += ">"
+	}
+	
 	out += "("
 
 	if len(ce.Arguments) > 0 {
