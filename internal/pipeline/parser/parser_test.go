@@ -839,9 +839,9 @@ func TestTypeAliasParsing(t *testing.T) {
 			expected: "type money Number",
 		},
 		{
-			name:     "Type alias with array Any",
-			input:    "type collection [Any]",
-			expected: "type collection [Any]",
+			name:     "Type alias with array Number",
+			input:    "type collection [Number]",
+			expected: "type collection [Number]",
 		},
 		{
 			name:     "Type alias function implicit Nothing return type",
@@ -1217,13 +1217,13 @@ func TestTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types used in functions",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { m }",
-			expected: "type money Numbertype moment Datetype name Stringtype custom Anylet process = fn(m: money, d: moment, n: name, c: custom) -> money { ... }",
+			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { m }",
+			expected: "type money Numbertype moment Datetype name Stringtype custom Numberlet process = fn(m: money, d: moment, n: name, c: custom) -> money { ... }",
 		},
 		{
 			name:     "Type alias with array types used in functions",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { p }",
-			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Any]let addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { ... }",
+			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { p }",
+			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Number]let addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { ... }",
 		},
 	}
 

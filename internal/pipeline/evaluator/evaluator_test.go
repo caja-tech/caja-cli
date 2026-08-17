@@ -226,11 +226,11 @@ func TestGenericFunctions(t *testing.T) {
 		{
 			name: "Generic struct instantiation (simulated with function)",
 			input: `
-			type Box struct {
-				value Any
+			type Box<T> struct {
+				value T
 			}
-			let makeBox = fn<T>(val: T) -> Box {
-				return Box { value: val }
+			let makeBox = fn<T>(val: T) -> Box<T> {
+				return Box::<T> { value: val }
 			}
 			return makeBox::<String>("hello").value
 			`,
@@ -1108,12 +1108,12 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype flag Boolean\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, f: flag, c: custom) -> money { return m }\nreturn process(100, '2023-01-01', \"John\", true, 42)",
+			input:    "type money Number\ntype moment Date\ntype name String\ntype flag Boolean\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, f: flag, c: custom) -> money { return m }\nreturn process(100, '2023-01-01', \"John\", true, 42)",
 			expected: 100.0,
 		},
 		{
 			name:     "Type alias with array types",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection) -> prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
+			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection) -> prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
 			expected: 2.0,
 		},
 		{
@@ -1268,7 +1268,7 @@ func TestStructErrors(t *testing.T) {
 			input: `
 				type Node struct {
 					value Number
-					next Any
+					next Node?
 				}
 				let n = Node {
 					value: 1,
@@ -1276,7 +1276,7 @@ func TestStructErrors(t *testing.T) {
 				}
 				return n.next.value
 			`,
-			expectedError: "null pointer exception: cannot read property 'value' of nil",
+			expectedError: "semantic errors: [[Line 10, Column 18] semantic error: property access on nullable type requires safe navigation operator '?.' (property: value)]",
 		},
 		{
 			name: "Missing struct field",

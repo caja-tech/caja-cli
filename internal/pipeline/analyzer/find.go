@@ -32,6 +32,14 @@ func (a *Analyzer) findTypeSymbolInTypes(typeName string) (symbol.Symbol, bool) 
 	}
 
 	resultSymbol, ok := a.findTypeSymbolInTypesRaw(typeName)
+
+	if structSym, ok := resultSymbol.(*symbol.StructDefSymbol); ok && len(structSym.TypeParameters) > 0 {
+		return symbol.AnySymbol(), false
+	}
+	if fnSym, ok := resultSymbol.(*symbol.FunctionSymbol); ok && len(fnSym.TypeParameters) > 0 {
+		return symbol.AnySymbol(), false
+	}
+
 	if isNullable {
 		resultSymbol = &symbol.NullableSymbol{Underlying: resultSymbol}
 	}
@@ -71,8 +79,15 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 			}
 
 			if aliasSym, exists := a.types[baseName]; exists {
-				if fnSym, ok := aliasSym.(*symbol.FunctionSymbol); ok && len(fnSym.TypeParameters) > 0 {
-					if len(typeArgs) != len(fnSym.TypeParameters) {
+				var typeParams []string
+				if fnSym, ok := aliasSym.(*symbol.FunctionSymbol); ok {
+					typeParams = fnSym.TypeParameters
+				} else if structSym, ok := aliasSym.(*symbol.StructDefSymbol); ok {
+					typeParams = structSym.TypeParameters
+				}
+
+				if len(typeParams) > 0 {
+					if len(typeArgs) != len(typeParams) {
 						return symbol.AnySymbol(), false
 					}
 					
@@ -83,10 +98,10 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 						if !argOk {
 							allOk = false
 						}
-						inferredTypes[fnSym.TypeParameters[i]] = argSym
+						inferredTypes[typeParams[i]] = argSym
 					}
 					
-					return substituteTypes(fnSym, inferredTypes), allOk
+					return substituteTypes(aliasSym, inferredTypes), allOk
 				}
 			}
 			return symbol.AnySymbol(), false
@@ -176,8 +191,6 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 	}
 
 	switch typeName {
-	case "Any":
-		return symbol.AnySymbol(), true
 	case "Number":
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ), true
 	case "String":
