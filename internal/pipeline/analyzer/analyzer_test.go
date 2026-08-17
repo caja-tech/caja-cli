@@ -484,6 +484,35 @@ let count = fn(n: Number) -> Number {
 				"semantic error: function 'count' contains unconditional recursion and will infinitely loop",
 			},
 		},
+		{
+			name: "Generic map passed as argument (happy path)",
+			input: `
+				let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }
+				let m: map[String]Number = { "1": 10 }
+				let a = f::<String, Number>("1", m)
+			`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Generic map passed as argument (implicit binding happy path)",
+			input: `
+				let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }
+				let m: map[String]Number = { "1": 10 }
+				let a = f("1", m)
+			`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Generic map passed as argument (invalid generic instantiation mismatch)",
+			input: `
+				let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }
+				let m: map[String]Number = { "1": 10 }
+				let a = f::<Boolean, Number>(true, m)
+			`,
+			expectedErrors: []string{
+				"[Line 4, Column 14] type error: argument 2 expected map[BOOLEAN]NUMBER, got map[STRING]NUMBER",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -697,7 +726,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "push() rejects mismatched types",
 			input:          "import array\nlet arr = [1, 2]\nlet newArr = array.push(arr, \"string\")",
-			expectedErrors: []string{"type error: cannot push STRING to array of NUMBER"},
+			expectedErrors: []string{"type inference error: conflicting types for T: NUMBER and STRING", "type error: argument 2 expected NUMBER, got STRING"},
 		},
 		{
 			name:  "pop() returns array",
@@ -726,7 +755,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "slice() rejects non-number index",
 			input:          "import array\nlet arr = [1, 2]\nlet s = array.slice(arr, \"0\", 2)",
-			expectedErrors: []string{"type error: second argument to 'slice' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: argument 2 expected NUMBER, got STRING"},
 		},
 		{
 			name:  "join() works with matching types",
@@ -735,7 +764,29 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "join() rejects mismatched types",
 			input:          "import array\nlet arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = array.join(arrOne, arrTwo)",
-			expectedErrors: []string{"type error: cannot join array of NUMBER with array of STRING"},
+			expectedErrors: []string{"type inference error: conflicting types for T: NUMBER and STRING", "type error: argument 2 expected [NUMBER], got [STRING]"},
+		},
+		{
+			name:  "array generic function assignment to variable",
+			input: "import array\nlet pushFunc = array.push\nlet arr = [1, 2]\npushFunc(arr, 3)",
+		},
+		{
+			name:           "array generic function assignment to variable enforces types",
+			input:          "import array\nlet pushFunc = array.push\nlet arr = [1, 2]\npushFunc(arr, \"string\")",
+			expectedErrors: []string{"type inference error: conflicting types for T: NUMBER and STRING", "type error: argument 2 expected NUMBER, got STRING"},
+		},
+		{
+			name:  "explicit generic turbofish instantiation of array function",
+			input: "import array\nlet arr = [1, 2]\narray.push::<Number>(arr, 3)",
+		},
+		{
+			name:           "explicit generic turbofish instantiation enforces explicit type",
+			input:          "import array\nlet arr = [\"a\", \"b\"]\narray.push::<Number>(arr, \"c\")",
+			expectedErrors: []string{"type error: argument 1 expected [NUMBER], got [STRING]", "type error: argument 2 expected NUMBER, got STRING"},
+		},
+		{
+			name:  "array generic functions on array of generic structs",
+			input: "import array\ntype Container<T> struct { val T }\nlet arr = [Container::<Number> { val: 1 }]\nlet pushFunc = array.push\nlet res = pushFunc(arr, Container::<Number> { val: 2 })\nlet item = array.head(res)",
 		},
 		{
 			name:  "charAt() works with correct types",
@@ -1260,6 +1311,40 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 			expectedErrors: []string{},
 		},
 		{
+			name: "Generic map in generic struct instantiation success",
+			input: `
+				type CustomStruct<T, P> struct { m map[T]P }
+				let c = CustomStruct::<String, Number> { m: {} }
+				let mapInstance = c.m
+				mapInstance["a"] = 100
+			`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Generic map in generic struct invalid assignment (key mismatch)",
+			input: `
+				type CustomStruct<T, P> struct { m map[T]P }
+				let c = CustomStruct::<String, Number> { m: {} }
+				let mapInstance = c.m
+				mapInstance[10] = 100
+			`,
+			expectedErrors: []string{
+				"[Line 5, Column 21] type error: map index must be STRING, got NUMBER",
+			},
+		},
+		{
+			name: "Generic map in generic struct invalid assignment (value mismatch)",
+			input: `
+				type CustomStruct<T, P> struct { m map[T]P }
+				let c = CustomStruct::<String, Number> { m: {} }
+				let mapInstance = c.m
+				mapInstance["a"] = "hello"
+			`,
+			expectedErrors: []string{
+				"[Line 5, Column 22] type error: cannot assign STRING to map with value type NUMBER",
+			},
+		},
+		{
 			name: "Type alias generic struct instantiation success",
 			input: `
 				type CustomStruct<T> struct { f fn(T) -> T }
@@ -1524,18 +1609,18 @@ func TestSemanticNullableNavigation(t *testing.T) {
 			expectedErrors: []string{"semantic error: unnecessary safe navigation on non-nullable type"},
 		},
 		{
-			name:           "cast.toNumber() rejects invalid fallback",
-			input:          "import cast\nreturn cast.toNumber(\"123\", \"err\")",
-			expectedErrors: []string{"type error: fallback argument to 'toNumber' must be NUMBER, got STRING"},
+			name:           "cast.to::<String, Number>() rejects invalid fallback",
+			input:          "import cast\nreturn cast.to::<String, Number>(\"123\", \"err\")",
+			expectedErrors: []string{"type error: argument 2 expected NUMBER, got STRING"},
 		},
 		{
-			name:  "cast.toString() works with any first argument",
-			input: "import cast\nreturn cast.toString(123, \"fallback\")",
+			name:  "cast.to() works with any first argument without turbofish due to implicit generic binding of fallback",
+			input: "import cast\nreturn cast.to(123, \"fallback\")",
 		},
 		{
-			name:           "cast.toBoolean() rejects invalid fallback",
-			input:          "import cast\nreturn cast.toBoolean(\"true\", 1)",
-			expectedErrors: []string{"type error: fallback argument to 'toBoolean' must be BOOLEAN, got NUMBER"},
+			name:           "cast.to::<String, Boolean>() rejects invalid fallback",
+			input:          "import cast\nreturn cast.to::<String, Boolean>(\"true\", 1)",
+			expectedErrors: []string{"type error: argument 2 expected BOOLEAN, got NUMBER"},
 		},
 		{
 			name: "assign invalid type to map.KeyFunc property",

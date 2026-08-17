@@ -16,24 +16,6 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 	}
 
 	switch fullName {
-	case "array.len":
-		return a.analyzeArrayLenFunction(n), true
-	case "array.push":
-		return a.analyzeArrayPushFunction(n), true
-	case "array.pop":
-		return a.analyzeArrayPopFunction(n), true
-	case "array.head":
-		return a.analyzeArrayHeadFunction(n), true
-	case "array.tail":
-		return a.analyzeArrayTailFunction(n), true
-	case "array.last":
-		return a.analyzeArrayLastFunction(n), true
-	case "array.copy":
-		return a.analyzeArrayCopyFunction(n), true
-	case "array.slice":
-		return a.analyzeArraySliceFunction(n), true
-	case "array.join":
-		return a.analyzeArrayJoinFunction(n), true
 	case "string.charAt":
 		return a.analyzeStringCharAtFunction(n), true
 	case "string.substring":
@@ -70,8 +52,6 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeMathZeroArgFunction(functionName, n), true
 	case "math.pow", "math.min", "math.max", "math.log":
 		return a.analyzeMathTwoArgFunction(functionName, n), true
-	case "cast.toNumber", "cast.toString", "cast.toBoolean", "cast.toDate":
-		return a.analyzeCastFunction(functionName, n), true
 	case "log.info", "log.warn", "log.error":
 		return a.analyzeLogFunction(functionName, n), true
 	case "log.export":
@@ -84,211 +64,6 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return symbol.AnySymbol(), false
 
 	}
-}
-
-// analyzeArrayLenFunction checks the arity and type for the builtin array 'len' function, returning a NUMBER.
-func (a *Analyzer) analyzeArrayLenFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'len', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	argSymbol := a.analyze(n.Arguments[0])
-	if argSymbol.Type() != environment.ARRAY_OBJ && argSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'len' must be an ARRAY, got %s", argSymbol.Type()))
-	}
-
-	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
-}
-
-// analyzeArrayPushFunction checks the arity and type for the builtin array 'push' function, returning the mutated ARRAY.
-func (a *Analyzer) analyzeArrayPushFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 2 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'push', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-	elSymbol := a.analyze(n.Arguments[1])
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'push' must be an ARRAY, got %s", arrSymbol.Type()))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.Type() == environment.ARRAY_OBJ && arrSymbol.ElementSymbol() != nil && !arrSymbol.ElementSymbol().Equals(elSymbol) && arrSymbol.ElementSymbol().Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot push %s to array of %s", elSymbol.Type(), arrSymbol.ElementSymbol().Type()))
-	}
-	return arrSymbol
-}
-
-// analyzeArrayPopFunction checks the arity and type for the builtin array 'pop' function, returning a new ARRAY of the same type.
-func (a *Analyzer) analyzeArrayPopFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'pop', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'pop' must be an ARRAY, got %s", arrSymbol.Type()))
-		return symbol.AnySymbol()
-	}
-
-	return arrSymbol
-}
-
-// analyzeArrayHeadFunction checks the arity and type for the builtin array 'head' function, returning its element type.
-func (a *Analyzer) analyzeArrayHeadFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'head', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'head' must be an ARRAY, got %s", arrSymbol.Type()))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.ElementSymbol() != nil {
-		return arrSymbol.ElementSymbol()
-	}
-
-	return symbol.AnySymbol()
-}
-
-// analyzeArrayTailFunction checks the arity and type for the builtin array 'tail' function, returning a new ARRAY of the same type.
-func (a *Analyzer) analyzeArrayTailFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'tail', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'tail' must be an ARRAY, got %s", arrSymbol.Type()))
-		return symbol.AnySymbol()
-	}
-
-	return arrSymbol
-}
-
-// analyzeArrayLastFunction checks the arity and type for the builtin array 'last' function, returning its element type.
-func (a *Analyzer) analyzeArrayLastFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'last', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'last' must be an ARRAY, got %s", arrSymbol.Type()))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.ElementSymbol() != nil {
-		return arrSymbol.ElementSymbol()
-	}
-
-	return symbol.AnySymbol()
-}
-
-// analyzeArrayCopyFunction checks the arity and type for the builtin array 'copy' function, returning a new ARRAY of the same type.
-func (a *Analyzer) analyzeArrayCopyFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 1 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'copy', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol, ok := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	if !ok {
-		a.reportError(n.Token, fmt.Sprintf("type error: cannot parse array symbol, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'copy' must be an ARRAY, got %s", arrSymbol.Type()))
-		return symbol.AnySymbol()
-	}
-
-	return arrSymbol
-}
-
-// analyzeArraySliceFunction checks the arity and type for the builtin array 'slice' function, returning a new ARRAY of the same type.
-func (a *Analyzer) analyzeArraySliceFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 3 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 3 arguments for 'slice', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arrSymbol := a.analyze(n.Arguments[0])
-	startSymbol := a.analyze(n.Arguments[1])
-	endSymbol := a.analyze(n.Arguments[2])
-
-	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'slice' must be an ARRAY, got %s", arrSymbol.Type()))
-	}
-	if startSymbol.Type() != environment.NUMBER_OBJ && startSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'slice' must be NUMBER, got %s", startSymbol.Type()))
-	}
-	if endSymbol.Type() != environment.NUMBER_OBJ && endSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'slice' must be NUMBER, got %s", endSymbol.Type()))
-	}
-
-	return arrSymbol
-}
-
-// analyzeArrayJoinFunction checks the arity and type for the builtin array 'join' function, validating element types match.
-func (a *Analyzer) analyzeArrayJoinFunction(n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 2 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'join', got %d", len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	arr1Symbol, ok1 := a.analyze(n.Arguments[0]).(*symbol.ArraySymbol)
-	arr2Symbol, ok2 := a.analyze(n.Arguments[1]).(*symbol.ArraySymbol)
-
-	if !ok1 {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'join' must be an ARRAY, got %s", n.Arguments[0]))
-		return symbol.AnySymbol()
-	}
-	if !ok2 {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'join' must be an ARRAY, got %s", n.Arguments[1]))
-		return symbol.AnySymbol()
-	}
-
-	if arr1Symbol.Type() == environment.ARRAY_OBJ && arr2Symbol.Type() == environment.ARRAY_OBJ {
-		if arr1Symbol.ElementSymbol() != nil && arr2Symbol.ElementSymbol() != nil && !arr1Symbol.ElementSymbol().Equals(arr2Symbol.ElementSymbol()) && arr1Symbol.ElementSymbol().Type() != environment.ANY_OBJ && arr2Symbol.ElementSymbol().Type() != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot join array of %s with array of %s", arr1Symbol.ElementSymbol().Type(), arr2Symbol.ElementSymbol().Type()))
-		}
-	}
-
-	return arr1Symbol
 }
 
 // analyzeStringCharAtFunction checks the arity and type for the builtin string 'charAt' function, returning a STRING.
@@ -668,7 +443,7 @@ func (a *Analyzer) analyzeMapContainsKeyFunction(n *ast.CallExpression) symbol.S
 	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
 		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'containsKey' must be MAP, got %s", mapSymbol.Type()))
 	}
-	
+
 	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
 		if !mapSym.Key.Equals(keySymbol) && keySymbol.Type() != environment.ANY_OBJ {
 			a.reportError(n.Token, fmt.Sprintf("type error: map index must be %s, got %s", mapSym.Key.Type(), keySymbol.Type()))
@@ -691,7 +466,7 @@ func (a *Analyzer) analyzeMapDeleteFunction(n *ast.CallExpression) symbol.Symbol
 	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
 		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'delete' must be MAP, got %s", mapSymbol.Type()))
 	}
-	
+
 	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
 		if !mapSym.Key.Equals(keySymbol) && keySymbol.Type() != environment.ANY_OBJ {
 			a.reportError(n.Token, fmt.Sprintf("type error: map index must be %s, got %s", mapSym.Key.Type(), keySymbol.Type()))
@@ -702,30 +477,3 @@ func (a *Analyzer) analyzeMapDeleteFunction(n *ast.CallExpression) symbol.Symbol
 }
 
 // analyzeCastFunction checks the arity and type for the builtin cast functions.
-func (a *Analyzer) analyzeCastFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
-	if len(n.Arguments) != 2 {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
-		return symbol.AnySymbol()
-	}
-
-	_ = a.analyze(n.Arguments[0]) // First argument can be ANY
-	fallbackSymbol := a.analyze(n.Arguments[1])
-
-	var expectedFallbackType environment.ObjectType
-	switch functionName {
-	case "toNumber":
-		expectedFallbackType = environment.NUMBER_OBJ
-	case "toString":
-		expectedFallbackType = environment.STRING_OBJ
-	case "toBoolean":
-		expectedFallbackType = environment.BOOLEAN_OBJ
-	case "toDate":
-		expectedFallbackType = environment.DATE_OBJ
-	}
-
-	if fallbackSymbol.Type() != expectedFallbackType && fallbackSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: fallback argument to '%s' must be %s, got %s", functionName, expectedFallbackType, fallbackSymbol.Type()))
-	}
-
-	return symbol.NewBasicSymbol(expectedFallbackType)
-}

@@ -236,6 +236,24 @@ func TestGenericFunctions(t *testing.T) {
 			`,
 			expected: "hello",
 		},
+		{
+			name: "Generic map passed as argument with turbofish",
+			input: `
+			let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }
+			let m: map[String]Number = { "1": 10 }
+			return f::<String, Number>("1", m)
+			`,
+			expected: 10.0,
+		},
+		{
+			name: "Generic map passed as argument implicitly",
+			input: `
+			let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }
+			let m: map[String]Number = { "1": 10 }
+			return f("1", m)
+			`,
+			expected: 10.0,
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -368,6 +386,11 @@ func TestErrorHandling(t *testing.T) {
 		{"Undefined variable", "10 + rate", "semantic error: undeclared variable 'rate'"},
 		{"Division by zero", "10 / 0", "division by zero"},
 		{"Modulo by zero", "10 % 0", "modulo by zero"},
+		{
+			"Generic map passed as argument (invalid generic instantiation mismatch)", 
+			"let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }\nlet m: map[String]Number = { \"1\": 10 }\nlet a = f::<Boolean, Number>(true, m)", 
+			"[Line 3, Column 10] type error: argument 2 expected map[BOOLEAN]NUMBER, got map[STRING]NUMBER",
+		},
 	}
 
 	runTestErrorScenarios(t, tests)
@@ -874,6 +897,9 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"copy of array", "import array\nlet arr = [1, 2]\nlet c = array.copy(arr)\narray.push(c, 3)\nreturn array.len(arr)", 2.0},
 		{"slice of array", "import array\nlet s = array.slice([1, 2, 3, 4], 1, 3)\nreturn s[1]", 3.0},
 		{"join of arrays", "import array\nlet j = array.join([1, 2], [3, 4])\nreturn j[2]", 3.0},
+		{"generic array function variable assignment", "import array\nlet p = array.push\nlet arr = [1, 2]\nlet res = p(arr, 3)\nreturn res[2]", 3.0},
+		{"explicit generic array turbofish", "import array\nlet arr = [1, 2]\nlet res = array.push::<Number>(arr, 3)\nreturn res[2]", 3.0},
+		{"generic array function on array of generic structs", "import array\ntype Container<T> struct { val T }\nlet arr = [Container::<Number> { val: 1 }]\nlet pushFunc = array.push\nlet res = pushFunc(arr, Container::<Number> { val: 2 })\nreturn array.len(res)", 2.0},
 		{"join strings", "import string\nreturn string.join([\"a\", \"b\"], \",\")", "a,b"},
 		{"join strings empty delimiter", "import string\nreturn string.join([\"a\", \"b\"], \"\")", "ab"},
 		{"charAt string", "import string\nreturn string.charAt(\"hello\", 1)", "e"},
@@ -919,12 +945,12 @@ func TestEvaluateBuiltins(t *testing.T) {
 		{"map containsKey true", "import map\ntype CustomStruct struct {\nkey map.KeyFunc\nvalue Number\n}\nlet d: map[CustomStruct]Number = {}\nlet s = CustomStruct{key: fn() -> String { return \"a\" }, value: 10}\nd[s] = 100\nreturn map.containsKey(d, s)", true},
 		{"map containsKey false", "import map\nlet d: map[String]Number = {}\nd[\"a\"] = 1\nreturn map.containsKey(d, \"b\")", false},
 		// Cast tests
-		{"cast toNumber success", "import cast\nreturn cast.toNumber(\"123.45\", 0)", 123.45},
-		{"cast toNumber fallback", "import cast\nreturn cast.toNumber(\"abc\", 0 - 1)", -1.0},
-		{"cast toString from number", "import cast\nreturn cast.toString(123, \"err\")", "123"},
-		{"cast toString from boolean", "import cast\nreturn cast.toString(true, \"err\")", "true"},
-		{"cast toBoolean success", "import cast\nreturn cast.toBoolean(\"true\", false)", true},
-		{"cast toBoolean fallback", "import cast\nreturn cast.toBoolean(\"foo\", true)", true},
+		{"cast to success", "import cast\nreturn cast.to(\"123.45\", 0)", 123.45},
+		{"cast to fallback", "import cast\nreturn cast.to(\"abc\", 0 - 1)", -1.0},
+		{"cast to string from number", "import cast\nreturn cast.to(123, \"err\")", "123"},
+		{"cast to string from boolean", "import cast\nreturn cast.to(true, \"err\")", "true"},
+		{"cast to boolean success", "import cast\nreturn cast.to(\"true\", false)", true},
+		{"cast to boolean fallback", "import cast\nreturn cast.to(\"foo\", true)", true},
 	}
 	runTestScenarios(t, tests)
 }

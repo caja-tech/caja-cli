@@ -24,16 +24,20 @@ func AnySymbol() *BasicSymbol {
 func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol, bool) {
 	switch moduleName {
 	case "array":
+		tSym := NewGenericSymbol("T")
+		arrTSym := NewArraySymbol(tSym)
+		numSym := NewBasicSymbol(environment.NUMBER_OBJ)
+
 		return map[string]Symbol{
-			"len":    NewBuiltinSymbol(1),
-			"push":   NewBuiltinSymbol(2),
-			"pop":    NewBuiltinSymbol(1),
-			"head":   NewBuiltinSymbol(1),
-			"tail":   NewBuiltinSymbol(1),
-			"last":   NewBuiltinSymbol(1),
-			"copy":   NewBuiltinSymbol(1),
-			"slice":  NewBuiltinSymbol(3),
-			"join":   NewBuiltinSymbol(2),
+			"len":   NewFunctionSymbol([]string{"T"}, 1, []Symbol{arrTSym}, numSym),
+			"push":  NewFunctionSymbol([]string{"T"}, 2, []Symbol{arrTSym, tSym}, arrTSym),
+			"pop":   NewFunctionSymbol([]string{"T"}, 1, []Symbol{arrTSym}, arrTSym),
+			"head":  NewFunctionSymbol([]string{"T"}, 1, []Symbol{arrTSym}, tSym),
+			"tail":  NewFunctionSymbol([]string{"T"}, 1, []Symbol{arrTSym}, arrTSym),
+			"last":  NewFunctionSymbol([]string{"T"}, 1, []Symbol{arrTSym}, tSym),
+			"copy":  NewFunctionSymbol([]string{"T"}, 1, []Symbol{arrTSym}, arrTSym),
+			"slice": NewFunctionSymbol([]string{"T"}, 3, []Symbol{arrTSym, numSym, numSym}, arrTSym),
+			"join":  NewFunctionSymbol([]string{"T"}, 2, []Symbol{arrTSym, arrTSym}, arrTSym),
 		}, nil, true
 
 	case "date":
@@ -104,10 +108,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 		}, true
 	case "cast":
 		return map[string]Symbol{
-			"toNumber":  NewBuiltinSymbol(2),
-			"toString":  NewBuiltinSymbol(2),
-			"toBoolean": NewBuiltinSymbol(2),
-			"toDate":    NewBuiltinSymbol(2),
+			"to": NewFunctionSymbol([]string{"T", "R"}, 2, []Symbol{NewGenericSymbol("T"), NewGenericSymbol("R")}, NewGenericSymbol("R")),
 		}, nil, true
 	}
 
