@@ -968,3 +968,15 @@ func TestDoubleColonTokenization(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+func TestPipeToken(t *testing.T) {
+	input := "|>"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Pipe operator", Token{PIPE, "|>", 1, 1}},
+		{"End of file", Token{EOF, "", 1, 3}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

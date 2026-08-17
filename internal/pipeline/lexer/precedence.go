@@ -4,6 +4,7 @@ const (
 	_ int = iota
 	LOWEST_PRECEDENCE
 	ASSIGN_PRECEDENCE
+	PIPE_PRECEDENCE
 	LOGICAL_PRECEDENCE
 	COMPARISON_PRECEDENCE
 	SUM_PRECEDENCE
@@ -37,6 +38,7 @@ var precedences = map[TokenType]int{
 	AND:         LOGICAL_PRECEDENCE,
 	OR:          LOGICAL_PRECEDENCE,
 	XOR:         LOGICAL_PRECEDENCE,
+	PIPE:        PIPE_PRECEDENCE,
 }
 
 // VerifyPrecedenceLevel returns the precedence level associated with the given

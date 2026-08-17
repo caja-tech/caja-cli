@@ -82,6 +82,7 @@ func New(t *lexer.Lexer) *Parser {
 	p.infixParseFuncs[lexer.AND] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.OR] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.XOR] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.PIPE] = p.parsePipeExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -1052,6 +1053,23 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	}
 
 	return groupedExpression
+}
+
+// parsePipeExpression rewrites A |> f(B) to f(A, B)
+func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
+	p.nextToken() // Move past '|>'
+
+	right := p.parseExpression(lexer.PIPE_PRECEDENCE)
+
+	if callExp, ok := right.(*ast.CallExpression); ok {
+		callExp.Arguments = append([]ast.Expression{left}, callExp.Arguments...)
+		return callExp
+	}
+
+	return &ast.CallExpression{
+		Function:  right,
+		Arguments: []ast.Expression{left},
+	}
 }
 
 // parseFunctionCallExpression parses a function call, capturing the function
