@@ -104,7 +104,7 @@ func substituteTypesWithVisited(target symbol.Symbol, inferred map[string]symbol
 		for _, p := range fn.ParamTypes() {
 			newParams = append(newParams, substituteTypesWithVisited(p, inferred, visited))
 		}
-		return symbol.NewFunctionSymbol(fn.TypeParameters, fn.Arity(), newParams, substituteTypesWithVisited(fn.ReturnType(), inferred, visited))
+		return symbol.NewFunctionSymbol(nil, fn.Arity(), newParams, substituteTypesWithVisited(fn.ReturnType(), inferred, visited))
 	}
 
 	if nullType, ok := target.(*symbol.NullableSymbol); ok {
@@ -114,7 +114,7 @@ func substituteTypesWithVisited(target symbol.Symbol, inferred map[string]symbol
 	if structDef, ok := target.(*symbol.StructDefSymbol); ok {
 		newStruct := &symbol.StructDefSymbol{
 			Name:           structDef.Name,
-			TypeParameters: structDef.TypeParameters,
+			TypeParameters: nil, // fully instantiated
 			Fields:         make(map[string]symbol.StructFieldSymbol),
 		}
 		visited[target] = newStruct

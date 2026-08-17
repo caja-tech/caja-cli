@@ -304,7 +304,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 // analyzeStructLiteral validates the fields of a struct instantiation
 // against its struct definition, checking for missing or mismatched fields.
 func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
-	defSym, ok := a.findTypeSymbolInTypes(n.StructName)
+	defSym, ok := a.findTypeSymbolInTypesRaw(n.StructName)
 	if !ok {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: undefined struct '%s'", n.StructName))
 		return symbol.AnySymbol()

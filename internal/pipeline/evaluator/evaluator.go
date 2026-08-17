@@ -446,7 +446,7 @@ func evalConstStatement(node *ast.ConstStatement, env *environment.Environment) 
 }
 
 func checkTypeMatches(expected string, obj environment.Object) error {
-	if expected == "" || expected == "Any" {
+	if expected == "" {
 		return nil
 	}
 	if obj.Type() == environment.NULL_OBJ {

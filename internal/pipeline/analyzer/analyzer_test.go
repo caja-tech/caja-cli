@@ -298,6 +298,25 @@ const b: Boolean = 1
 				"type error: cannot assign NUMBER to BOOLEAN",
 			},
 		},
+		{
+			name: "Using Any as a variable type throws an error",
+			input: `
+let x: Any = 10
+`,
+			expectedErrors: []string{
+				"semantic error: variable 'x' type is not declared: 'Any'",
+			},
+		},
+		{
+			name: "Using Any as a function return type throws an error",
+			input: `
+let f = fn() -> Any { return 10 }
+`,
+			expectedErrors: []string{
+				"semantic error: function return type is not declared: 'Any'",
+				"type error: cannot resolve type name for Any",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -662,23 +681,15 @@ a[1 + 1] = 5
 	runTestScenarios(t, tests)
 }
 
-func TestSemanticAnalysisAnyType(t *testing.T) {
+func TestSemanticAnalysisGenericsReplaceAny(t *testing.T) {
 	tests := []testScenario{
 		{
-			name:  "Function accepting Any parameter",
-			input: "let f = fn(x: Any) -> Any { return x }\nf(10)\nf(\"hello\")\nf(true)",
+			name:  "Generic function replacing Any parameter",
+			input: "let f = fn<T>(x: T) -> T { return x }\nf(10)\nf(\"hello\")\nf(true)",
 		},
 		{
-			name:  "Function returning Any",
-			input: "let a = fn() -> Any { return 10 }\nlet b = fn() -> Any { return \"string\" }",
-		},
-		{
-			name:  "Array of Any",
-			input: "let getAny = fn(x: Any) -> Any { return x }\nlet f = fn(arr: [Any]) -> Any { return arr[0] }\nf([getAny(1), getAny(\"string\"), getAny(true)])",
-		},
-		{
-			name:  "Assigning Any to concrete type is allowed statically",
-			input: "let f = fn() -> Any { return 10 }\nlet n = f()\nlet x = 1\nx = n",
+			name:  "Generic array",
+			input: "let f = fn<T>(arr: [T]) -> T { return arr[0] }\nf([1, 2, 3])",
 		},
 	}
 
@@ -1271,11 +1282,11 @@ func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:  "Type alias with primitive types",
-			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Any\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { return m }\nprocess(100, true, \"John\", 42)",
+			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { return m }\nprocess(100, true, \"John\", 42)",
 		},
 		{
 			name:  "Type alias with array types",
-			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Any]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
+			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
 		},
 		{
 			name:           "Type alias mismatch",
