@@ -68,8 +68,19 @@ func inferTypes(expected symbol.Symbol, actual symbol.Symbol, inferred map[strin
 
 // substituteTypes replaces all GenericSymbols in the target with their bound concrete types.
 func substituteTypes(target symbol.Symbol, inferred map[string]symbol.Symbol) symbol.Symbol {
+	if len(inferred) == 0 {
+		return target
+	}
+	return substituteTypesWithVisited(target, inferred, make(map[symbol.Symbol]symbol.Symbol))
+}
+
+func substituteTypesWithVisited(target symbol.Symbol, inferred map[string]symbol.Symbol, visited map[symbol.Symbol]symbol.Symbol) symbol.Symbol {
 	if target == nil {
 		return nil
+	}
+
+	if cached, ok := visited[target]; ok {
+		return cached
 	}
 
 	if gen, ok := target.(*symbol.GenericSymbol); ok {
@@ -81,34 +92,40 @@ func substituteTypes(target symbol.Symbol, inferred map[string]symbol.Symbol) sy
 	}
 
 	if arr, ok := target.(*symbol.ArraySymbol); ok {
-		return symbol.NewArraySymbol(substituteTypes(arr.ElementSymbol(), inferred))
+		return symbol.NewArraySymbol(substituteTypesWithVisited(arr.ElementSymbol(), inferred, visited))
 	}
 
 	if m, ok := target.(*symbol.MapSymbol); ok {
-		return symbol.NewMapSymbol(substituteTypes(m.Key, inferred), substituteTypes(m.Value, inferred))
+		return symbol.NewMapSymbol(substituteTypesWithVisited(m.Key, inferred, visited), substituteTypesWithVisited(m.Value, inferred, visited))
 	}
 
 	if fn, ok := target.(*symbol.FunctionSymbol); ok {
 		var newParams []symbol.Symbol
 		for _, p := range fn.ParamTypes() {
-			newParams = append(newParams, substituteTypes(p, inferred))
+			newParams = append(newParams, substituteTypesWithVisited(p, inferred, visited))
 		}
-		return symbol.NewFunctionSymbol(fn.TypeParameters, fn.Arity(), newParams, substituteTypes(fn.ReturnType(), inferred))
+		return symbol.NewFunctionSymbol(fn.TypeParameters, fn.Arity(), newParams, substituteTypesWithVisited(fn.ReturnType(), inferred, visited))
 	}
 
 	if nullType, ok := target.(*symbol.NullableSymbol); ok {
-		return &symbol.NullableSymbol{Underlying: substituteTypes(nullType.Underlying, inferred)}
+		return &symbol.NullableSymbol{Underlying: substituteTypesWithVisited(nullType.Underlying, inferred, visited)}
 	}
 
 	if structDef, ok := target.(*symbol.StructDefSymbol); ok {
-		newFields := make(map[string]symbol.StructFieldSymbol)
+		newStruct := &symbol.StructDefSymbol{
+			Name:           structDef.Name,
+			TypeParameters: structDef.TypeParameters,
+			Fields:         make(map[string]symbol.StructFieldSymbol),
+		}
+		visited[target] = newStruct
+
 		for name, field := range structDef.Fields {
-			newFields[name] = symbol.StructFieldSymbol{
-				Type:       substituteTypes(field.Type, inferred),
+			newStruct.Fields[name] = symbol.StructFieldSymbol{
+				Type:       substituteTypesWithVisited(field.Type, inferred, visited),
 				IsConstant: field.IsConstant,
 			}
 		}
-		return symbol.NewStructDefSymbol(structDef.Name, nil, newFields)
+		return newStruct
 	}
 
 	return target
