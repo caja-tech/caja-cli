@@ -41,6 +41,58 @@ func (a *Analyzer) findTypeSymbolInTypes(typeName string) (symbol.Symbol, bool) 
 // findTypeSymbolInTypesRaw handles the actual symbol lookup without nullable wrapping.
 func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, bool) {
 
+	// Check for generic alias instantiation: BaseName<Arg1, Arg2>
+	if !strings.HasPrefix(typeName, "fn(") && !strings.HasPrefix(typeName, "map[") {
+		if ltIdx := strings.Index(typeName, "<"); ltIdx != -1 && strings.HasSuffix(typeName, ">") {
+			baseName := typeName[:ltIdx]
+			
+			// We must split type arguments safely, respecting nested `< >` and `[ ]`
+			typeArgsStr := typeName[ltIdx+1 : len(typeName)-1]
+			var typeArgs []string
+			current := ""
+			depth := 0
+			for i := 0; i < len(typeArgsStr); i++ {
+				c := typeArgsStr[i]
+				if c == '<' || c == '[' {
+					depth++
+					current += string(c)
+				} else if c == '>' || c == ']' {
+					depth--
+					current += string(c)
+				} else if c == ',' && depth == 0 {
+					typeArgs = append(typeArgs, strings.TrimSpace(current))
+					current = ""
+				} else {
+					current += string(c)
+				}
+			}
+			if strings.TrimSpace(current) != "" {
+				typeArgs = append(typeArgs, strings.TrimSpace(current))
+			}
+
+			if aliasSym, exists := a.types[baseName]; exists {
+				if fnSym, ok := aliasSym.(*symbol.FunctionSymbol); ok && len(fnSym.TypeParameters) > 0 {
+					if len(typeArgs) != len(fnSym.TypeParameters) {
+						return symbol.AnySymbol(), false
+					}
+					
+					inferredTypes := make(map[string]symbol.Symbol)
+					allOk := true
+					for i, argStr := range typeArgs {
+						argSym, argOk := a.findTypeSymbolInTypes(argStr)
+						if !argOk {
+							allOk = false
+						}
+						inferredTypes[fnSym.TypeParameters[i]] = argSym
+					}
+					
+					return substituteTypes(fnSym, inferredTypes), allOk
+				}
+			}
+			return symbol.AnySymbol(), false
+		}
+	}
+
 	if strings.HasPrefix(typeName, "fn(") {
 		depth := 0
 		paramsStr := ""
@@ -100,7 +152,7 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 			allOk = false
 		}
 
-		return symbol.NewFunctionSymbol(len(params), paramSymbols, retSym), allOk
+		return symbol.NewFunctionSymbol(nil, len(params), paramSymbols, retSym), allOk
 	}
 
 	if strings.HasPrefix(typeName, "[") && strings.HasSuffix(typeName, "]") {

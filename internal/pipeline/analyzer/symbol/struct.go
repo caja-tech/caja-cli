@@ -13,15 +13,17 @@ type StructFieldSymbol struct {
 // StructDefSymbol represents a struct type definition (the blueprint).
 // It maps field names to their respective field definitions.
 type StructDefSymbol struct {
-	Name   string
-	Fields map[string]StructFieldSymbol
+	Name           string
+	TypeParameters []string
+	Fields         map[string]StructFieldSymbol
 }
 
 // NewStructDefSymbol creates and returns a new StructDefSymbol.
-func NewStructDefSymbol(name string, fields map[string]StructFieldSymbol) *StructDefSymbol {
+func NewStructDefSymbol(name string, typeParams []string, fields map[string]StructFieldSymbol) *StructDefSymbol {
 	return &StructDefSymbol{
-		Name:   name,
-		Fields: fields,
+		Name:           name,
+		TypeParameters: typeParams,
+		Fields:         fields,
 	}
 }
 

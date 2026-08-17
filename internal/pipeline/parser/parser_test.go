@@ -775,6 +775,7 @@ func TestFunctionParsing(t *testing.T) {
 func TestFunctionErrors(t *testing.T) {
 	tests := []string{
 		"let f = fn(a: Number): { a }", // Missing return type identifier
+		"let f = fn<type>(x: type) -> String {return \"a\"}", // Keyword in generic type parameters
 	}
 
 	for _, input := range tests {
@@ -854,8 +855,28 @@ func TestTypeAliasParsing(t *testing.T) {
 		},
 		{
 			name:     "Type alias struct with inline function property",
-			input:    "type MyStruct struct { run fn(Number) -> Number }",
-			expected: "type MyStruct struct {\n  run fn(Number) -> Number\n}",
+			input:    "type Logger struct {\n  log fn(String)\n}",
+			expected: "type Logger struct {\n  log fn(String) -> Nothing\n}",
+		},
+		{
+			name:     "Generic type alias with type parameters",
+			input:    "type CustomFunc<T, R> fn(T) -> R",
+			expected: "type CustomFunc<T, R> fn(T) -> R",
+		},
+		{
+			name:     "Using generic type alias with arguments",
+			input:    "let f: CustomFunc<Number, String> = nil",
+			expected: "let f: CustomFunc<Number, String> = nil",
+		},
+		{
+			name:     "Using generic type alias in an array",
+			input:    "let arr: [CustomFunc<Number, String>] = []",
+			expected: "let arr: [CustomFunc<Number, String>] = []",
+		},
+		{
+			name:     "Complex nested generic type alias",
+			input:    "let complexMap: map[String]CustomFunc<Number, CustomFunc<String, Boolean>> = {}",
+			expected: "let complexMap: map[String]CustomFunc<Number, CustomFunc<String, Boolean>> = {}",
 		},
 	}
 
@@ -868,7 +889,11 @@ func TestTypeAliasErrors(t *testing.T) {
 		"type fn(Number) -> Number",                 // Missing alias name
 		"type BinaryOp (Number, Number) -> Number",  // Missing fn keyword
 		"type BinaryOp fn(Number, Number):",       // Missing return type
-
+		"type CustomFunc<T, R fn(T) -> R",           // Missing closing bracket in alias definition
+		"let f: CustomFunc<Number, String = nil",    // Missing closing bracket in variable instantiation
+		"let f: CustomFunc<Number String> = nil",    // Missing comma separation
+		"type CustomType<fn> fn(fn) -> String",      // Keyword in generic parameters
+		"type CustomType<T, type> fn(T, type) -> String", // Keyword in second generic parameter
 	}
 
 	for _, input := range tests {
@@ -1321,4 +1346,42 @@ func contains(s, substr string) bool {
 		}
 		return false
 	}())
+}
+
+// TestStructLiteralParsing verifies that struct literals parse correctly, including turbofish type arguments.
+func TestStructLiteralParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Struct literal with trailing comma",
+			input:    "let u = User { name: \"John\", }",
+			expected: "let u = User {name: \"John\"}",
+		},
+		{
+			name:     "Generic struct literal instantiation with turbofish",
+			input:    "let u = CustomStruct::<String> { f: fn(x: String) -> String { return x } }",
+			expected: "let u = CustomStruct::<String> {f: fn(x: String) -> String { ... }}",
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+// TestStructLiteralErrors verifies that invalid struct literal instantiations are rejected.
+func TestStructLiteralErrors(t *testing.T) {
+	tests := []string{
+		"let u = CustomStruct::<String { f: 1 }", // Missing closing angle bracket in turbofish
+		"let u = CustomStruct::<String> f: 1 }",  // Missing curly brace in struct literal
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
 }
