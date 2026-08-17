@@ -1385,3 +1385,55 @@ func TestStructLiteralErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestPipeOperatorParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"A |> f(B)",
+			"f(A, B)",
+		},
+		{
+			"A |> f",
+			"f(A)",
+		},
+		{
+			"A |> obj.method",
+			"(obj.method)(A)",
+		},
+		{
+			"A |> f(B) |> g(C)",
+			"g(f(A, B), C)",
+		},
+		{
+			"[1, 2, 3] |> query.where(is_even) |> query.select(times_ten)",
+			"(query.select)((query.where)([1, 2, 3], is_even), times_ten)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			lexer := lexer.New(tt.input)
+			parser := New(lexer)
+			program := parser.Parse()
+			if parser.HasErrors() {
+				t.Fatalf("parser errors: %v", parser.Errors())
+			}
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statements. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			}
+
+			if stmt.Expression.String() != tt.expected {
+				t.Errorf("expression string wrong. expected %q, got %q", tt.expected, stmt.Expression.String())
+			}
+		})
+	}
+}

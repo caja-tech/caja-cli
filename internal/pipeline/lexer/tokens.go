@@ -59,6 +59,7 @@ const (
 	AND     TokenType = "AND"
 	OR      TokenType = "OR"
 	XOR     TokenType = "XOR"
+	PIPE    TokenType = "PIPE"
 	PRIVATE TokenType = "PRIVATE"
 	STRUCT  TokenType = "STRUCT"
 	NIL     TokenType = "NIL"
