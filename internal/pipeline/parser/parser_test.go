@@ -1364,3 +1364,24 @@ func TestStructLiteralParsing(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+
+// TestStructLiteralErrors verifies that invalid struct literal instantiations are rejected.
+func TestStructLiteralErrors(t *testing.T) {
+	tests := []string{
+		"let u = CustomStruct::<String { f: 1 }", // Missing closing angle bracket in turbofish
+		"let u = CustomStruct::<String> f: 1 }",  // Missing curly brace in struct literal
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}

@@ -1278,6 +1278,52 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 			},
 		},
 		{
+			name: "Type alias generic struct instantiation missing turbofish arguments",
+			input: `
+				type CustomStruct<T> struct { f fn(T) -> T }
+				let c = CustomStruct { f: fn(x: String) -> String { return x } }
+			`,
+			expectedErrors: []string{
+				"[Line 3, Column 26] type error: missing type arguments for generic struct 'CustomStruct'",
+				"[Line 3, Column 26] type error: field 'f' expects fn(T) -> T, got fn(STRING) -> STRING",
+			},
+		},
+		{
+			name: "Type alias generic struct instantiation incorrect turbofish arguments count",
+			input: `
+				type CustomStruct<T> struct { f fn(T) -> T }
+				let c = CustomStruct::<String, Number> { f: fn(x: String) -> String { return x } }
+			`,
+			expectedErrors: []string{
+				"[Line 3, Column 44] type error: expected 1 type arguments for struct 'CustomStruct', got 2",
+				"[Line 3, Column 44] type error: field 'f' expects fn(T) -> T, got fn(STRING) -> STRING",
+			},
+		},
+		{
+			name: "Type alias generic struct instantiation with undefined type argument",
+			input: `
+				type CustomStruct<T> struct { f fn(T) -> T }
+				let c = CustomStruct::<Unknown> { f: fn(x: String) -> String { return x } }
+			`,
+			expectedErrors: []string{
+				"[Line 3, Column 37] type error: cannot resolve type name for Unknown",
+			},
+		},
+		{
+			name: "Multiple type parameters generic struct instantiation success",
+			input: `
+				type MapLike<K, V> struct {
+					key fn() -> K
+					val fn() -> V
+				}
+				let m = MapLike::<String, Number> {
+					key: fn() -> String { return "test" },
+					val: fn() -> Number { return 42 }
+				}
+			`,
+			expectedErrors: []string{},
+		},
+		{
 			name: "Valid struct with inline function property",
 			input: `
 				type Action struct {

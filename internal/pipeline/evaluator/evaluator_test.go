@@ -1115,6 +1115,19 @@ func TestStructs(t *testing.T) {
 			expected: 10.0,
 		},
 		{
+			name: "Generic struct with turbofish instantiation",
+			input: `
+				type CustomStruct<T> struct {
+					run fn(T) -> T
+				}
+				let a = CustomStruct::<Number> {
+					run: fn(x: Number) -> Number { return x * 3 }
+				}
+				return a.run(5)
+			`,
+			expected: 15.0,
+		},
+		{
 			name: "Struct creation and property access",
 			input: `
 				type User struct {
