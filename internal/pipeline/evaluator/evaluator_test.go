@@ -1128,6 +1128,22 @@ func TestStructs(t *testing.T) {
 			expected: 15.0,
 		},
 		{
+			name: "Generic struct instantiated inside a generic function",
+			input: `
+				type CustomStruct<T> struct {
+					p T
+				}
+
+				let f = fn<T>(x: T) -> T {
+					let cs = CustomStruct::<T> { p: x }
+					return cs.p
+				}
+
+				return f::<String>("hello")
+			`,
+			expected: "hello",
+		},
+		{
 			name: "Struct creation and property access",
 			input: `
 				type User struct {

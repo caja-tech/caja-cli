@@ -1324,6 +1324,22 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 			expectedErrors: []string{},
 		},
 		{
+			name: "Generic struct instantiated inside a generic function",
+			input: `
+				type CustomStruct<T> struct {
+					p T
+				}
+
+				let f = fn<T>(x: T) -> T {
+					let cs = CustomStruct::<T> { p: x }
+					return cs.p
+				}
+
+				let result = f::<String>("hello")
+			`,
+			expectedErrors: []string{},
+		},
+		{
 			name: "Valid struct with inline function property",
 			input: `
 				type Action struct {
