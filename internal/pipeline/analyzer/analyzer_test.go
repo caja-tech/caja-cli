@@ -317,6 +317,70 @@ let f = fn() -> Any { return 10 }
 				"type error: cannot resolve type name for Any",
 			},
 		},
+		{
+			name: "Mutating property of const struct throws error",
+			input: `
+type MyStruct struct { val Number }
+const obj = MyStruct{ val: 1 }
+obj.val = 2
+`,
+			expectedErrors: []string{
+				"semantic error: cannot mutate property/index of constant variable 'obj'",
+			},
+		},
+		{
+			name: "Mutating index of const array throws error",
+			input: `
+const arr = [1, 2]
+arr[0] = 10
+`,
+			expectedErrors: []string{
+				"semantic error: cannot mutate property/index of constant variable 'arr'",
+			},
+		},
+		{
+			name: "Mutating parameter struct property throws error",
+			input: `
+type MyStruct struct { value Number }
+let myStruct: MyStruct = MyStruct{ value: 0 }
+let f = fn(s: MyStruct) -> MyStruct {
+    s.value = 10
+    return s
+}
+f(myStruct)
+return myStruct.value
+`,
+			expectedErrors: []string{
+				"semantic error: cannot mutate property/index of constant variable 's'",
+			},
+		},
+		{
+			name: "Mutating outer scope variable inside a function",
+			input: `
+let counter = 0
+
+let add_to_counter = fn() -> Number {
+    counter = counter + 1 
+    return counter
+}
+`,
+			expectedErrors: []string{
+				"semantic error: cannot mutate outer scope variable 'counter' inside a function",
+			},
+		},
+		{
+			name: "Mutating outer scope array inside a function",
+			input: `
+let arr = [1, 2, 3]
+let mutate_arr = fn() -> [Number] {
+    arr[0] = 10
+    return arr
+}
+`,
+			expectedErrors: []string{
+				"semantic error: cannot mutate outer scope variable 'arr' inside a function",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }

@@ -64,8 +64,8 @@ func TestModules(t *testing.T) {
 		{
 			name:        "Let Module Import Reassign",
 			file:        "let_import_reassign.caja",
-			expectError: false,
-			expectVal:   20,
+			expectError: true,
+			errorMsg:    "cannot mutate property/index of constant variable 'let_module'",
 		},
 		{
 			name:        "Type Alias Simple",
@@ -76,8 +76,8 @@ func TestModules(t *testing.T) {
 		{
 			name:        "Const Array Mutation",
 			file:        "const_array_mutation.caja",
-			expectError: false,
-			expectVal:   5,
+			expectError: true,
+			errorMsg:    "cannot mutate property/index of constant variable 'test_const_array'",
 		},
 		{
 			name:        "Const Module Import Reassign",
