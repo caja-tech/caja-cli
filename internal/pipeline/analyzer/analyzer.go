@@ -597,6 +597,7 @@ func (a *Analyzer) analyzeAssignStatement(n *ast.AssignStatement) symbol.Symbol 
 	} else if entry.IsConstant {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant variable '%s'", n.Name.Value))
 	} else {
+		a.enforcePurity(n.Name, n.Token)
 		expectedType := entry.Sym
 		if expectedType.Type() != sym.Type() && expectedType.Type() != environment.ANY_OBJ && sym.Type() != environment.ANY_OBJ {
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type(), n.Name.Value, expectedType.Type()))
@@ -948,6 +949,7 @@ func (a *Analyzer) analyzeIndexExpression(n *ast.IndexExpression) symbol.Symbol 
 // analyzeIndexAssignmentStatement ensures that the indexed target is an array,
 // the index is a number, and then evaluates the assigned value.
 func (a *Analyzer) analyzeIndexAssignmentStatement(n *ast.IndexAssignmentStatement) symbol.Symbol {
+	a.enforcePurity(n.Left, n.Token)
 	leftSym := a.analyze(n.Left)
 	idxSym := a.analyze(n.Index)
 	valSym := a.analyze(n.Value)
@@ -1048,6 +1050,7 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 // checks that the property exists, is not private and is not constant,
 // and evaluates the assigned value.
 func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentStatement) symbol.Symbol {
+	a.enforcePurity(n.Object, n.Token)
 	leftSym := a.analyze(n.Object)
 
 	isNullable := false
@@ -1103,4 +1106,25 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 // reportError formats and appends a semantic error with the token's line and column.
 func (a *Analyzer) reportError(token lexer.Token, msg string) {
 	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+}
+
+// enforcePurity checks if the given expression is mutating an outer scope variable.
+// It recursively traverses down PropertyExpression and IndexExpression to find the root Identifier.
+func (a *Analyzer) enforcePurity(node ast.Node, token lexer.Token) {
+	switch n := node.(type) {
+	case *ast.Identifier:
+		entry, exists := a.findVarSymbolInScope(n.Value)
+		if exists {
+			if entry.FunctionDepth < a.functionDepth {
+				a.reportError(token, fmt.Sprintf("semantic error: cannot mutate outer scope variable '%s' inside a function", n.Value))
+			}
+			if entry.IsConstant {
+				a.reportError(token, fmt.Sprintf("semantic error: cannot mutate property/index of constant variable '%s'", n.Value))
+			}
+		}
+	case *ast.PropertyExpression:
+		a.enforcePurity(n.Object, token)
+	case *ast.IndexExpression:
+		a.enforcePurity(n.Left, token)
+	}
 }

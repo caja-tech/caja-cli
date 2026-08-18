@@ -42,6 +42,9 @@ func GuaranteesRecursiveCall(node Node, targetName string) bool {
 			if GuaranteesRecursiveCall(stmt, targetName) {
 				return true
 			}
+			if MightReturn(stmt) {
+				return false
+			}
 		}
 		return false
 
@@ -93,6 +96,30 @@ func GuaranteesRecursiveCall(node Node, targetName string) bool {
 	case *IndexExpression:
 		return GuaranteesRecursiveCall(n.Left, targetName) || GuaranteesRecursiveCall(n.Index, targetName)
 
+	default:
+		return false
+	}
+}
+
+// MightReturn returns true if the node contains a return statement that might execute.
+func MightReturn(node Node) bool {
+	if node == nil {
+		return false
+	}
+	switch n := node.(type) {
+	case *ReturnStatement:
+		return true
+	case *IfExpression:
+		return MightReturn(n.Consequence) || MightReturn(n.Alternative)
+	case *BlockStatement:
+		for _, stmt := range n.Statements {
+			if MightReturn(stmt) {
+				return true
+			}
+		}
+		return false
+	case *ExpressionStatement:
+		return MightReturn(n.Expression)
 	default:
 		return false
 	}

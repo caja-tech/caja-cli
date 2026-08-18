@@ -4,8 +4,9 @@ import "caja-cli/internal/pipeline/analyzer/symbol"
 
 // ScopeEntry represents a symbol declared in a scope and tracks if it is a constant.
 type ScopeEntry struct {
-	Sym        symbol.Symbol
-	IsConstant bool
+	Sym           symbol.Symbol
+	IsConstant    bool
+	FunctionDepth int
 }
 
 // globalScope returns the top-level scope of this analyzer
@@ -29,5 +30,5 @@ func (a *Analyzer) popScope() {
 // declare registers a variable name in the current (innermost) scope.
 func (a *Analyzer) declare(name string, sym symbol.Symbol, isConstant bool) {
 	last := len(a.scopes) - 1
-	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant}
+	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth}
 }
