@@ -23,78 +23,77 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Extract version
+      - name: Extract version and determine NPM tag
         id: extract_version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Building version $VERSION"
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            
+            # If the version contains a hyphen, it's a pre-release (e.g., 0.1.0-alpha.1)
+            if [[ "$VERSION" == *"-"* ]]; then
+              echo "NPM_TAG=next" >> $GITHUB_ENV
+              echo "Building PRE-RELEASE version $VERSION with tag @next"
+            else
+              echo "NPM_TAG=latest" >> $GITHUB_ENV
+              echo "Building STABLE version $VERSION with tag @latest"
+            fi
 
       - name: Build and Publish Architecture Packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # Map Node OS/Arch to Go OS/Arch
-          declare -A os_map=( ["darwin"]="darwin" ["linux"]="linux" ["win32"]="windows" )
-          declare -A arch_map=( ["x64"]="amd64" ["arm64"]="arm64" )
-
-          for os in darwin linux win32; do
-            for arch in x64 arm64; do
-              # Configure Go environment variables
-              GOOS=${os_map[$os]}
-              GOARCH=${arch_map[$arch]}
-              
-              # Set binary name
-              BIN_NAME="cajac"
-              if [ "$os" == "win32" ]; then
-                BIN_NAME="cajac.exe"
-              fi
-              
-              # Output directory for this specific package
-              PKG_DIR="dist/@caja/cli-${os}-${arch}"
-              mkdir -p "$PKG_DIR/bin"
-              
-              echo "Building for $os $arch (GOOS=$GOOS GOARCH=$GOARCH)..."
-              
-              # Compile binary
-              CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o "$PKG_DIR/bin/$BIN_NAME" ./cmd/cli
-              
-              # Generate package.json for the architecture-specific package
-              cat <<EOF > "$PKG_DIR/package.json"
-          {
-            "name": "@caja/cli-${os}-${arch}",
-            "version": "${VERSION}",
-            "description": "Caja CLI Tool (${os} ${arch})",
-            "os": ["${os}"],
-            "cpu": ["${arch}"]
-          }
-          EOF
-              
-              # Publish the architecture-specific package
-              echo "Publishing @caja/cli-${os}-${arch}..."
-              cd "$PKG_DIR"
-              npm publish --access public
-              cd - > /dev/null
+            declare -A os_map=( ["darwin"]="darwin" ["linux"]="linux" ["win32"]="windows" )
+            declare -A arch_map=( ["x64"]="amd64" ["arm64"]="arm64" )
+            
+            for os in darwin linux win32; do
+              for arch in x64 arm64; do
+                GOOS=${os_map[$os]}
+                GOARCH=${arch_map[$arch]}
+            
+                BIN_NAME="cajac"
+                if [ "$os" == "win32" ]; then
+                  BIN_NAME="cajac.exe"
+                fi
+            
+                PKG_DIR="dist/@caja/cli-${os}-${arch}"
+                mkdir -p "$PKG_DIR/bin"
+            
+                echo "Building for $os $arch (GOOS=$GOOS GOARCH=$GOARCH)..."
+            
+                CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o "$PKG_DIR/bin/$BIN_NAME" ./cmd/cli
+            
+                cat <<EOF > "$PKG_DIR/package.json"
+            {
+              "name": "@caja/cli-${os}-${arch}",
+              "version": "${VERSION}",
+              "description": "Caja CLI Tool (${os} ${arch})",
+              "os": ["${os}"],
+              "cpu": ["${arch}"]
+            }
+            EOF
+            
+                echo "Publishing @caja/cli-${os}-${arch} with tag ${NPM_TAG}..."
+                cd "$PKG_DIR"
+                npm publish --access public --tag ${NPM_TAG}
+                cd - > /dev/null
+              done
             done
-          done
 
       - name: Publish Main Wrapper Package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cd npm
-          
-          # Update the version in the main wrapper package.json using jq
-          # We update both the top-level version and the optionalDependencies versions
-          jq ".version = \"${VERSION}\" | \
-              .optionalDependencies[\"@caja/cli-darwin-arm64\"] = \"${VERSION}\" | \
-              .optionalDependencies[\"@caja/cli-darwin-x64\"] = \"${VERSION}\" | \
-              .optionalDependencies[\"@caja/cli-linux-arm64\"] = \"${VERSION}\" | \
-              .optionalDependencies[\"@caja/cli-linux-x64\"] = \"${VERSION}\" | \
-              .optionalDependencies[\"@caja/cli-win32-arm64\"] = \"${VERSION}\" | \
-              .optionalDependencies[\"@caja/cli-win32-x64\"] = \"${VERSION}\"" package.json > package.tmp.json
-          
-          mv package.tmp.json package.json
-          
-          echo "Publishing @caja/cli wrapper..."
-          npm publish --access public
+            cd npm
+            
+            jq ".version = \"${VERSION}\" | \
+                .optionalDependencies[\"@caja/cli-darwin-arm64\"] = \"${VERSION}\" | \
+                .optionalDependencies[\"@caja/cli-darwin-x64\"] = \"${VERSION}\" | \
+                .optionalDependencies[\"@caja/cli-linux-arm64\"] = \"${VERSION}\" | \
+                .optionalDependencies[\"@caja/cli-linux-x64\"] = \"${VERSION}\" | \
+                .optionalDependencies[\"@caja/cli-win32-arm64\"] = \"${VERSION}\" | \
+                .optionalDependencies[\"@caja/cli-win32-x64\"] = \"${VERSION}\"" package.json > package.tmp.json
+            
+            mv package.tmp.json package.json
+            
+            echo "Publishing @caja/cli wrapper with tag ${NPM_TAG}..."
+            npm publish --access public --tag ${NPM_TAG}
