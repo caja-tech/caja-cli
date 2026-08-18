@@ -24,6 +24,7 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Extract version and determine NPM tag
         id: extract_version
@@ -67,6 +68,11 @@ jobs:
               "name": "@caja/cli-${os}-${arch}",
               "version": "${VERSION}",
               "description": "Caja CLI Tool (${os} ${arch})",
+              ${os} ${arch})",
+              "repository": {
+                "type": "git",
+                "url": "git+https://github.com/${{ github.repository }}.git"
+              },
               "os": ["${os}"],
               "cpu": ["${arch}"]
             }

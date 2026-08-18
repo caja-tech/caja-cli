@@ -2,8 +2,12 @@
   "name": "@caja/cli",
   "version": "0.0.0-development",
   "description": "Caja CLI Tool",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caja-tech/caja-cli.git"
+  },
   "bin": {
-    "cajac": "bin/cajac.js"
+    "caja": "bin/caja.js"
   },
   "optionalDependencies": {
     "@caja/cli-darwin-arm64": "0.0.0-development",
