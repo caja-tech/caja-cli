@@ -2,9 +2,10 @@
 go = "1.25.5"
 
 [env]
-BINARY_NAME = "cajac"
+BINARY_NAME = "caja"
 BIN_DIR = "bin"
 CMD_PATH = "./cmd/cli"
+VERSION = "v0.1.0-alpha.2"
 
 # Go tools
 [tasks.fmt]
@@ -15,11 +16,11 @@ go fmt ./...
 """
 
 [tasks.build]
-description = "Build the binary to bin/cajac"
+description = "Build the binary to bin/caja"
 run = """
 echo "Building {{env.BINARY_NAME}}..."
 mkdir -p {{env.BIN_DIR}}
-go build -o {{env.BIN_DIR}}/{{env.BINARY_NAME}} {{env.CMD_PATH}}
+go build -ldflags "-X main.Version={{env.VERSION}}" -o {{env.BIN_DIR}}/{{env.BINARY_NAME}} {{env.CMD_PATH}}
 """
 
 [tasks.test]
@@ -56,4 +57,12 @@ description = "Tidy go modules"
 run = """
 echo "Tidying go modules..."
 go mod tidy
+"""
+
+# Release Tag
+[tasks.release-tag]
+description = "Create a new release tag"
+run = """
+git tag {{env.VERSION}}
+git push origin {{env.VERSION}}
 """
