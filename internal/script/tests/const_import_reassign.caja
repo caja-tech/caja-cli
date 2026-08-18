@@ -1,0 +1,4 @@
+import const_module
+
+const_module.val = 20
+return const_module.val

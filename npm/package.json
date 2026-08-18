@@ -1,0 +1,16 @@
+{
+  "name": "@caja/cli",
+  "version": "0.0.0-development",
+  "description": "Caja CLI Tool",
+  "bin": {
+    "cajac": "bin/cajac.js"
+  },
+  "optionalDependencies": {
+    "@caja/cli-darwin-arm64": "0.0.0-development",
+    "@caja/cli-darwin-x64": "0.0.0-development",
+    "@caja/cli-linux-arm64": "0.0.0-development",
+    "@caja/cli-linux-x64": "0.0.0-development",
+    "@caja/cli-win32-arm64": "0.0.0-development",
+    "@caja/cli-win32-x64": "0.0.0-development"
+  }
+}

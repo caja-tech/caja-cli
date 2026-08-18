@@ -1,0 +1,5 @@
+import "transitive_three" as t
+
+let get_value = fn() -> Number {
+    return t.value + 50
+}

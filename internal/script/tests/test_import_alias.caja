@@ -1,0 +1,2 @@
+import "utils/math" as mymath
+return mymath.add(10, 5)

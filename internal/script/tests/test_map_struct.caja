@@ -1,0 +1,15 @@
+import map
+
+type CustomStruct struct {
+	key map.KeyFunc
+	value Number
+}
+
+let d: map[CustomStruct]Number = {}
+let s: CustomStruct = CustomStruct{
+	key: fn() -> String { return "a" },
+	value: 10
+}
+
+d[s] = 100
+return d[s]

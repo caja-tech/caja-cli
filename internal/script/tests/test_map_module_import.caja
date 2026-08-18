@@ -1,0 +1,9 @@
+import test_map_module_export
+
+let d: map[test_map_module_export.MapKeyStruct]Number = {}
+let s = test_map_module_export.MapKeyStruct{
+	key: fn() -> String { return "a" },
+	value: 42
+}
+d[s] = 200
+return d[s]

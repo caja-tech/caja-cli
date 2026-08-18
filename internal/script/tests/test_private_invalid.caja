@@ -1,0 +1,2 @@
+import "test_private_export"
+return test_private_export.secret

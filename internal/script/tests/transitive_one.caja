@@ -1,0 +1,3 @@
+import "transitive_two" as two
+
+return two.get_value() + 10

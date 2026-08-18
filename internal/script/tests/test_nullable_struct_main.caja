@@ -1,0 +1,19 @@
+import "./test_nullable_struct_module" as mod
+
+let n = mod.createNode()
+
+n.next = mod.Node { val: 42, next: nil, info: mod.Info { msg: "hello" } }
+
+n.next?.next = mod.Node { val: 100, next: nil, info: nil }
+
+let x = n.next?.next?.val
+
+n.next?.info = nil
+
+let y = n.next?.next?.next?.val
+
+if (y != nil) {
+	return 0
+}
+
+return x

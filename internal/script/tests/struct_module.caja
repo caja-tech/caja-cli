@@ -1,0 +1,8 @@
+type User struct {
+	name String
+	const id Number
+}
+
+private type Secret struct {
+	token String
+}

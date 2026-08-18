@@ -1,0 +1,6 @@
+import "log"
+log.info("App starting", true)
+log.warn("Value is low", 5)
+log.error("Failed to fetch", [1, 2, 3])
+return 1
+

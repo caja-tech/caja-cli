@@ -1,0 +1,11 @@
+import map
+
+type MapKeyStruct struct {
+	key map.KeyFunc
+	value Number
+}
+
+let DefaultStruct = MapKeyStruct{
+	key: fn() -> String { return "default" },
+	value: 0
+}

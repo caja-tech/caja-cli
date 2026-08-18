@@ -1,0 +1,4 @@
+import test_const_array
+
+test_const_array.a[1] = 5
+return test_const_array.a[1]
