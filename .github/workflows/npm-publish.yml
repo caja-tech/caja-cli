@@ -77,6 +77,7 @@ jobs:
             EOF
             
                 echo "Publishing @caja/cli-${os}-${arch} with tag ${NPM_TAG}..."
+                cp README.md "$PKG_DIR/"
                 cd "$PKG_DIR"
                 npm publish --access public --tag ${NPM_TAG}
                 cd - > /dev/null
@@ -85,6 +86,7 @@ jobs:
 
       - name: Publish Main Wrapper Package
         run: |
+            cp README.md npm/
             cd npm
             
             jq ".version = \"${VERSION}\" | \
