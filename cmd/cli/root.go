@@ -13,9 +13,10 @@ import (
 // NewRootCmd creates and returns the root command for the cajac CLI application.
 func NewRootCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
-		Use:           "cajac [token]",
-		Short:         "A encoder for the custom financial caja language.",
-		Long:          fmt.Sprintf("cajac encode/decode custom financial algorithms from a '%s' script file into a token or vice-versa.", file.EXTENSION),
+		Use:           "caja [token]",
+		Short:         "A cli for the caja language.",
+		Long:          fmt.Sprintf("caja can be used to run '%s' script files, also encode/decode them into a token.", file.EXTENSION),
+		Version:       Version,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
