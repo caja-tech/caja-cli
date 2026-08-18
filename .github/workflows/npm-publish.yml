@@ -68,7 +68,6 @@ jobs:
               "name": "@caja/cli-${os}-${arch}",
               "version": "${VERSION}",
               "description": "Caja CLI Tool (${os} ${arch})",
-              ${os} ${arch})",
               "repository": {
                 "type": "git",
                 "url": "git+https://github.com/${{ github.repository }}.git"
