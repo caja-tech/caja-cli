@@ -8,17 +8,20 @@ on:
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Required for NPM to verify GitHub's identity
+      contents: read  # Required to checkout the code
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.21' # Or whichever version your project uses
+          go-version: '1.25.5' # Or whichever version your project uses
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -39,8 +42,6 @@ jobs:
             fi
 
       - name: Build and Publish Architecture Packages
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
             declare -A os_map=( ["darwin"]="darwin" ["linux"]="linux" ["win32"]="windows" )
             declare -A arch_map=( ["x64"]="amd64" ["arm64"]="arm64" )
@@ -50,9 +51,9 @@ jobs:
                 GOOS=${os_map[$os]}
                 GOARCH=${arch_map[$arch]}
             
-                BIN_NAME="cajac"
+                BIN_NAME="caja"
                 if [ "$os" == "win32" ]; then
-                  BIN_NAME="cajac.exe"
+                  BIN_NAME="caja.exe"
                 fi
             
                 PKG_DIR="dist/@caja/cli-${os}-${arch}"
@@ -60,7 +61,7 @@ jobs:
             
                 echo "Building for $os $arch (GOOS=$GOOS GOARCH=$GOARCH)..."
             
-                CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -o "$PKG_DIR/bin/$BIN_NAME" ./cmd/cli
+                CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-X main.Version=${VERSION}" -o "$PKG_DIR/bin/$BIN_NAME" ./cmd/cli
             
                 cat <<EOF > "$PKG_DIR/package.json"
             {
@@ -74,14 +75,12 @@ jobs:
             
                 echo "Publishing @caja/cli-${os}-${arch} with tag ${NPM_TAG}..."
                 cd "$PKG_DIR"
-                npm publish --access public --tag ${NPM_TAG}
+                npm publish --access public --tag ${NPM_TAG} --provenance
                 cd - > /dev/null
               done
             done
 
       - name: Publish Main Wrapper Package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
             cd npm
             
@@ -96,4 +95,4 @@ jobs:
             mv package.tmp.json package.json
             
             echo "Publishing @caja/cli wrapper with tag ${NPM_TAG}..."
-            npm publish --access public --tag ${NPM_TAG}
+            npm publish --access public --tag ${NPM_TAG} --provenance

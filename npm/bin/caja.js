@@ -16,8 +16,8 @@ try {
   const packagePath = require.resolve(`${packageName}/package.json`);
   const packageDir = path.dirname(packagePath);
   
-  // The binary name is 'cajac' (or 'cajac.exe' on Windows)
-  const binName = platform === 'win32' ? 'cajac.exe' : 'cajac';
+  // The binary name is 'caja' (or 'caja.exe' on Windows)
+  const binName = platform === 'win32' ? 'caja.exe' : 'caja';
   binPath = path.join(packageDir, 'bin', binName);
 } catch (error) {
   console.error(`Error: Unsupported platform or architecture: ${platform}-${arch}`);

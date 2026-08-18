@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+var Version = "dev" // Overridden at build time
+
 func main() {
 	root, err := NewRootCmd()
 	if err != nil {
