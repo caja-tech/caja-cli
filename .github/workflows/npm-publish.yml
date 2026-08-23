@@ -79,7 +79,7 @@ jobs:
                 echo "Publishing @caja/cli-${os}-${arch} with tag ${NPM_TAG}..."
                 cp README.md "$PKG_DIR/"
                 cd "$PKG_DIR"
-                npm publish --access public --tag ${NPM_TAG}
+                npm publish --access public --tag ${NPM_TAG} --provenance
                 cd - > /dev/null
               done
             done
@@ -100,4 +100,4 @@ jobs:
             mv package.tmp.json package.json
             
             echo "Publishing @caja/cli wrapper with tag ${NPM_TAG}..."
-            npm publish --access public --tag ${NPM_TAG}
+            npm publish --access public --tag ${NPM_TAG} --provenance
