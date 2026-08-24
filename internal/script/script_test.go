@@ -187,6 +187,12 @@ func TestModules(t *testing.T) {
 			expectError: false,
 			expectVal:   10.0,
 		},
+		{
+			name:        "Node Modules Test",
+			file:        "test_node_modules.caja",
+			expectError: false,
+			expectVal:   220.0,
+		},
 	}
 
 	for _, tc := range testCases {
