@@ -20,7 +20,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	encode, err := NewEncodeCmd()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	decode, err := NewDecodeCmd()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	root.AddCommand(run)
+	root.AddCommand(encode)
+	root.AddCommand(decode)
 
 	if err := root.Execute(); err != nil {
 		fmt.Println(err)

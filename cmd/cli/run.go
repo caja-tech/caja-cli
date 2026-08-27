@@ -25,6 +25,11 @@ func NewRunCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to retrieve 'file' flag: %w", err)
 			}
 
+			if filePath == "" {
+				_ = cmd.Help()
+				return fmt.Errorf("the --file flag is required to run a script")
+			}
+
 			ext := filepath.Ext(filePath)
 			if ext != file.EXTENSION {
 				return fmt.Errorf("invalid file type: expected a %s file, but got '%s'", file.EXTENSION, ext)
@@ -86,10 +91,6 @@ func NewRunCmd() (*cobra.Command, error) {
 
 	cmd.Flags().StringP("file", "f", "", "File path of the script to run")
 	cmd.Flags().StringP("export", "e", "", "File name to export log values to (e.g. data.csv)")
-	err := cmd.MarkFlagRequired("file")
-	if err != nil {
-		return nil, err
-	}
 
 	return cmd, nil
 }
