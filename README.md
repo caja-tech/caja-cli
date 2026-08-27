@@ -1,6 +1,6 @@
 # Caja CLI
 
-[![NPM Version](https://img.shields.io/npm/v/@caja/cli?style=for-the-badge&logo=npm)](https://www.npmjs.com/package/@caja/cli)
+[![NPM Version](https://img.shields.io/npm/v/@caja/cli?style=for-the-badge&logo=npm)](https://www.npmjs.com/package/@caja/cli) [![Official Docs](https://img.shields.io/badge/docs-cajalang.com-orange?style=for-the-badge)](https://www.cajalang.com)
 
 A command-line interface for the Caja language. The `caja` CLI allows you to execute `.caja` scripts, as well as encode and decode them into transportable token strings.
 
@@ -27,7 +27,7 @@ caja run -f <file.caja>
 Encode a `.caja` script file and its dependencies into a single base64-like token string.
 
 ```bash
-caja -f <file.caja>
+caja encode -f <file.caja>
 ```
 - `-f, --file`: The path to the script to encode.
 
@@ -35,7 +35,7 @@ caja -f <file.caja>
 Decode a token string back into its original `.caja` script modules and save them to a directory.
 
 ```bash
-caja <token> -o <output_dir>
+caja decode <token> -o <output_dir>
 ```
 - `-o, --output`: Directory path to save the decoded scripts (use `-o .` for the current directory).
 
@@ -51,8 +51,8 @@ caja --version
 Create a file named `test.caja`:
 
 ```caja
-import stdlib
-import query
+import "@caja/std"
+import "@caja/query"
 
 let isEven = fn(x: Number) -> Boolean {
     return x % 2 == 0
@@ -66,7 +66,7 @@ let add_numbers = fn(acc: Number, current: Number) -> Number {
     return acc + current
 }
 
-let result = stdlib.range(1, 10)
+let result = std.range(1, 10)
     |> query.filter(isEven) 
     |> query.map(powerTwo)
     |> query.reduce(add_numbers, 0)
