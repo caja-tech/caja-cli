@@ -13,27 +13,28 @@ import (
 // It manages variable scopes and tracks semantic errors such as
 // undeclared variables and variable redeclarations.
 type Analyzer struct {
-	scopes        []map[string]ScopeEntry
-	types         map[string]symbol.Symbol
-	errors        []string
-	functionDepth int
-	globalEnv     *environment.Environment
-	cache         map[string]*Analyzer
-	loading       map[string]bool
-	privates      map[string]bool
+	scopes           []map[string]ScopeEntry
+	types            map[string]symbol.Symbol
+	diagnosticErrors []ast.DiagnosticError
+	functionDepth    int
+	globalEnv        *environment.Environment
+	cache            map[string]*Analyzer
+	loading          map[string]bool
+	privates         map[string]bool
 }
+
 
 // New creates and returns a new Analyzer with an initial global scope.
 func New(globalEnv *environment.Environment) *Analyzer {
 	globalScope := make(map[string]ScopeEntry)
 	analyzer := &Analyzer{
-		scopes:    []map[string]ScopeEntry{globalScope},
-		types:     make(map[string]symbol.Symbol),
-		errors:    make([]string, 0),
-		globalEnv: globalEnv,
-		cache:     make(map[string]*Analyzer),
-		loading:   make(map[string]bool),
-		privates:  make(map[string]bool),
+		scopes:           []map[string]ScopeEntry{globalScope},
+		types:            make(map[string]symbol.Symbol),
+		diagnosticErrors: make([]ast.DiagnosticError, 0),
+		globalEnv:        globalEnv,
+		cache:            make(map[string]*Analyzer),
+		loading:          make(map[string]bool),
+		privates:         make(map[string]bool),
 	}
 
 	// Inject Nothing as a global builtin type
@@ -59,12 +60,21 @@ func (a *Analyzer) PrintErrors() {
 
 // Errors returns the list of semantic errors found during analysis.
 func (a *Analyzer) Errors() []string {
-	return a.errors
+	var errs []string
+	for _, e := range a.diagnosticErrors {
+		errs = append(errs, e.String())
+	}
+	return errs
+}
+
+// DiagnosticErrors returns the structured diagnostic errors.
+func (a *Analyzer) DiagnosticErrors() []ast.DiagnosticError {
+	return a.diagnosticErrors
 }
 
 // HasErrors returns true if any semantic errors were found.
 func (a *Analyzer) HasErrors() bool {
-	return len(a.errors) > 0
+	return len(a.diagnosticErrors) > 0
 }
 
 // analyze traverses the AST starting from the given node and performs
@@ -559,9 +569,9 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	modAnalyzer := New(modEnv)
 	modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
 	modSymbol := modAnalyzer.analyze(modProgram)
-	if len(modAnalyzer.errors) > 0 {
+	if len(modAnalyzer.diagnosticErrors) > 0 {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: failed to analyze module %s", modPath))
-		a.errors = append(a.errors, modAnalyzer.errors...)
+		a.diagnosticErrors = append(a.diagnosticErrors, modAnalyzer.diagnosticErrors...)
 		return symbol.AnySymbol()
 	}
 
@@ -1105,7 +1115,7 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 
 // reportError formats and appends a semantic error with the token's line and column.
 func (a *Analyzer) reportError(token lexer.Token, msg string) {
-	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+	a.diagnosticErrors = append(a.diagnosticErrors, ast.DiagnosticError{Token: token, Message: msg})
 }
 
 // enforcePurity checks if the given expression is mutating an outer scope variable.

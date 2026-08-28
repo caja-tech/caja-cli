@@ -32,7 +32,7 @@ type Parser struct {
 	prefixParseFuncs map[lexer.TokenType]prefixParseFunc
 	infixParseFuncs  map[lexer.TokenType]infixParseFunc
 
-	errors []string
+	diagnosticErrors []ast.DiagnosticError
 }
 
 // New creates a Parser for the given Tokenizer, registers the built-in prefix
@@ -124,9 +124,15 @@ func (p *Parser) PrintErrors() {
 // parser, in the order they were encountered.
 func (p *Parser) Errors() []string {
 	allErrors := append([]string{}, p.tknzr.Errors...)
-	allErrors = append(allErrors, p.errors...)
-
+	for _, err := range p.diagnosticErrors {
+		allErrors = append(allErrors, err.String())
+	}
 	return allErrors
+}
+
+// DiagnosticErrors returns the structured diagnostic errors.
+func (p *Parser) DiagnosticErrors() []ast.DiagnosticError {
+	return p.diagnosticErrors
 }
 
 // HasErrors returns true if the parser or tokenizer encountered any errors.
@@ -1114,7 +1120,7 @@ func (p *Parser) parseTurbofishExpression(left ast.Expression) ast.Expression {
 
 // reportError formats and appends a syntax error with the given token's line and column.
 func (p *Parser) reportError(token lexer.Token, msg string) {
-	p.errors = append(p.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+	p.diagnosticErrors = append(p.diagnosticErrors, ast.DiagnosticError{Token: token, Message: msg})
 }
 
 // nextToken advances the parser's two-token window by shifting peekToken into
