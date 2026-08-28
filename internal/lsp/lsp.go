@@ -6,6 +6,8 @@ import (
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/parser"
+	"net/url"
+	"path/filepath"
 
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
@@ -15,11 +17,12 @@ import (
 
 var (
 	lsName    = "caja-lsp"
-	lsVersion = "0.0.1"
 	documents = make(map[string]string)
+	serverVer string // Stores the injected version
 )
 
-func Run() error {
+func Run(version string) error {
+	serverVer = version
 	commonlog.Configure(1, nil)
 	
 	handler := protocol.Handler{
@@ -29,6 +32,8 @@ func Run() error {
 		TextDocumentDidChange:  textDocumentDidChange,
 		TextDocumentDidClose:   textDocumentDidClose,
 		TextDocumentDidSave:    textDocumentDidSave,
+		TextDocumentHover:      textDocumentHover,
+		TextDocumentDefinition: textDocumentDefinition,
 	}
 
 	srv := server.NewServer(&handler, lsName, false)
@@ -37,14 +42,16 @@ func Run() error {
 
 func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	capabilities := protocol.ServerCapabilities{
-		TextDocumentSync: protocol.TextDocumentSyncKindFull,
+		TextDocumentSync:   protocol.TextDocumentSyncKindFull,
+		HoverProvider:      true,
+		DefinitionProvider: true,
 	}
 	
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    lsName,
-			Version: &lsVersion,
+			Version: &serverVer,
 		},
 	}, nil
 }
@@ -87,7 +94,9 @@ func validateDocument(context *glsp.Context, uri string, text string) {
 	}
 
 	if !p.HasErrors() {
-		globalEnv := environment.NewEnvironment("", "", false)
+		filePath := uriToPath(uri)
+		baseDir := filepath.Dir(filePath)
+		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
 		a := analyzer.New(globalEnv)
 		a.Run(prog)
 
@@ -128,4 +137,92 @@ func toLSPDiagnostic(err ast.DiagnosticError) protocol.Diagnostic {
 		Source:   &lsName,
 		Message:  err.Message,
 	}
+}
+
+func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	text, ok := documents[params.TextDocument.URI]
+	if !ok {
+		return nil, nil
+	}
+
+	tknzr := lexer.New(text)
+	p := parser.New(tknzr)
+	prog := p.Parse()
+
+	filePath := uriToPath(params.TextDocument.URI)
+	baseDir := filepath.Dir(filePath)
+	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
+	a := analyzer.New(globalEnv)
+	a.Run(prog) // we run it even if there are syntax errors to try to get symbol info
+
+	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
+	if node == nil {
+		return nil, nil
+	}
+
+	sym, ok := a.GetSymbol(node)
+	if !ok {
+		return nil, nil
+	}
+
+	markdown := "```caja\n" + sym.String() + "\n```"
+	
+	return &protocol.Hover{
+		Contents: protocol.MarkupContent{
+			Kind:  protocol.MarkupKindMarkdown,
+			Value: markdown,
+		},
+	}, nil
+}
+
+func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+	text, ok := documents[params.TextDocument.URI]
+	if !ok {
+		return nil, nil
+	}
+
+	tknzr := lexer.New(text)
+	p := parser.New(tknzr)
+	prog := p.Parse()
+
+	filePath := uriToPath(params.TextDocument.URI)
+	baseDir := filepath.Dir(filePath)
+	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
+	a := analyzer.New(globalEnv)
+	a.Run(prog)
+
+	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
+	if node == nil {
+		return nil, nil
+	}
+
+	defToken, ok := a.GetDefinition(node)
+	if !ok || defToken.Line == 0 {
+		return nil, nil
+	}
+
+	line := protocol.UInteger(defToken.Line - 1)
+	col := protocol.UInteger(defToken.Column)
+	length := protocol.UInteger(len(defToken.Literal))
+	if length == 0 {
+		length = 1
+	}
+
+	return []protocol.Location{
+		{
+			URI: params.TextDocument.URI,
+			Range: protocol.Range{
+				Start: protocol.Position{Line: line, Character: col},
+				End:   protocol.Position{Line: line, Character: col + length},
+			},
+		},
+	}, nil
+}
+
+func uriToPath(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil {
+		return ""
+	}
+	return u.Path
 }

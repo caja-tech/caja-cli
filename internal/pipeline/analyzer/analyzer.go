@@ -16,6 +16,8 @@ type Analyzer struct {
 	scopes           []map[string]ScopeEntry
 	types            map[string]symbol.Symbol
 	diagnosticErrors []ast.DiagnosticError
+	nodeSymbols      map[ast.Node]symbol.Symbol
+	nodeDefinitions  map[ast.Node]lexer.Token
 	functionDepth    int
 	globalEnv        *environment.Environment
 	cache            map[string]*Analyzer
@@ -31,6 +33,8 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		scopes:           []map[string]ScopeEntry{globalScope},
 		types:            make(map[string]symbol.Symbol),
 		diagnosticErrors: make([]ast.DiagnosticError, 0),
+		nodeSymbols:      make(map[ast.Node]symbol.Symbol),
+		nodeDefinitions:  make(map[ast.Node]lexer.Token),
 		globalEnv:        globalEnv,
 		cache:            make(map[string]*Analyzer),
 		loading:          make(map[string]bool),
@@ -72,6 +76,18 @@ func (a *Analyzer) DiagnosticErrors() []ast.DiagnosticError {
 	return a.diagnosticErrors
 }
 
+// GetSymbol retrieves the semantic symbol evaluated for the given AST node.
+func (a *Analyzer) GetSymbol(node ast.Node) (symbol.Symbol, bool) {
+	sym, ok := a.nodeSymbols[node]
+	return sym, ok
+}
+
+// GetDefinition retrieves the token where the symbol in the given AST node was declared.
+func (a *Analyzer) GetDefinition(node ast.Node) (lexer.Token, bool) {
+	tok, ok := a.nodeDefinitions[node]
+	return tok, ok
+}
+
 // HasErrors returns true if any semantic errors were found.
 func (a *Analyzer) HasErrors() bool {
 	return len(a.diagnosticErrors) > 0
@@ -80,6 +96,15 @@ func (a *Analyzer) HasErrors() bool {
 // analyze traverses the AST starting from the given node and performs
 // semantic checks, populating the errors slice if any issues are found.
 func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
+	if node == nil {
+		return symbol.AnySymbol()
+	}
+	sym := a.analyzeNode(node)
+	a.nodeSymbols[node] = sym
+	return sym
+}
+
+func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 	switch n := node.(type) {
 	case *ast.Program:
 		return a.analyzeProgram(n)
@@ -266,7 +291,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
 		}
 		paramTypes = append(paramTypes, paramSymbol)
-		a.declare(param.Name, paramSymbol, true)
+		a.declare(param.Name, paramSymbol, true, n.Token)
 	}
 
 	actualReturnSymbol := a.analyze(n.Body)
@@ -400,7 +425,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 
 		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
-		a.declare(n.Name.Value, fnSymbol, false)
+		a.declare(n.Name.Value, fnSymbol, false, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
@@ -438,7 +463,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 	}
 
-	a.declare(n.Name.Value, valType, false)
+	a.declare(n.Name.Value, valType, false, n.Name.Token)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -482,7 +507,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 
 		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
-		a.declare(n.Name.Value, fnSymbol, true)
+		a.declare(n.Name.Value, fnSymbol, true, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
@@ -520,7 +545,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 	}
 
-	a.declare(n.Name.Value, valType, true)
+	a.declare(n.Name.Value, valType, true, n.Name.Token)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -540,7 +565,7 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 
 	if symbols, exportedTypes, ok := symbol.GetStandardModule(modPath); ok {
 		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil)
-		a.declare(modName, modSymbol, true)
+		a.declare(modName, modSymbol, true, n.Name.Token)
 		return modSymbol
 	}
 
@@ -575,7 +600,7 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 		return symbol.AnySymbol()
 	}
 
-	a.declare(modName, modSymbol, true)
+	a.declare(modName, modSymbol, true, n.Name.Token)
 	return modSymbol
 }
 
@@ -728,6 +753,7 @@ func (a *Analyzer) analyzeExpressionStatement(n *ast.ExpressionStatement) symbol
 // logging an error if it has not been declared.
 func (a *Analyzer) analyzeIdentifier(n *ast.Identifier) symbol.Symbol {
 	if entry, ok := a.findVarSymbolInScope(n.Value); ok {
+		a.nodeDefinitions[n] = entry.DefinitionToken
 		return entry.Sym
 	}
 

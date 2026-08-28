@@ -118,7 +118,10 @@ func (l *Lexer) readString() string {
 		}
 	}
 	result := l.input[position:l.position]
-	if l.ch == '"' {
+	switch l.ch {
+	case 0:
+		l.Errors = append(l.Errors, fmt.Sprintf("Syntax Error at line %d, column %d: unterminated string literal", l.Line, l.Column))
+	case '"':
 		l.readChar() // consume the closing quote
 	}
 	return result
@@ -136,7 +139,10 @@ func (l *Lexer) readDate() string {
 		}
 	}
 	result := l.input[position:l.position]
-	if l.ch == '\'' {
+	switch l.ch {
+	case 0:
+		l.Errors = append(l.Errors, fmt.Sprintf("Syntax Error at line %d, column %d: unterminated date literal", l.Line, l.Column))
+	case '\'':
 		l.readChar() // consume the closing quote
 	}
 	return result
