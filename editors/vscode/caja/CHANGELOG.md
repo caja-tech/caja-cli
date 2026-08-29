@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Go to Definition**: Navigate directly to variable, function, and struct definitions.
   - **Signature Help**: Display parameter hints while typing function calls.
 
+> **Note**: To utilize the LSP features, you must have the Caja CLI version `v0.1.0-alpha.5` or greater installed on your system.
+
 ## [0.1.1] - 2026-08-28
 ### Changed
 - Adjusted the extension's icon size for better display in the VS Code marketplace and sidebar.
