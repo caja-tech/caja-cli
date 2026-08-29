@@ -1,20 +1,26 @@
 package symbol
 
-import "caja-cli/internal/pipeline/environment"
+import (
+	"caja-cli/internal/pipeline/environment"
+
+	"caja-cli/internal/pipeline/lexer"
+)
 
 // ModuleSymbol represents a module in the semantic analysis,
 // containing its name and the scope of exported symbols.
 type ModuleSymbol struct {
-	symbolType environment.ObjectType
-	name       string
-	scope      map[string]Symbol
-	types      map[string]Symbol
-	privates   map[string]bool
-	constants  map[string]bool
+	symbolType  environment.ObjectType
+	name        string
+	scope       map[string]Symbol
+	types       map[string]Symbol
+	privates    map[string]bool
+	constants   map[string]bool
+	Definitions map[string]lexer.Token
+	FilePath    string
 }
 
 // NewModuleSymbol creates and returns a new ModuleSymbol with the specified name and exported scope.
-func NewModuleSymbol(name string, scope map[string]Symbol, types map[string]Symbol, privates map[string]bool, constants map[string]bool) *ModuleSymbol {
+func NewModuleSymbol(name string, scope map[string]Symbol, types map[string]Symbol, privates map[string]bool, constants map[string]bool, definitions map[string]lexer.Token, filePath string) *ModuleSymbol {
 	if types == nil {
 		types = make(map[string]Symbol)
 	}
@@ -24,7 +30,10 @@ func NewModuleSymbol(name string, scope map[string]Symbol, types map[string]Symb
 	if constants == nil {
 		constants = make(map[string]bool)
 	}
-	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, types: types, privates: privates, constants: constants}
+	if definitions == nil {
+		definitions = make(map[string]lexer.Token)
+	}
+	return &ModuleSymbol{symbolType: environment.MODULE_OBJ, name: name, scope: scope, types: types, privates: privates, constants: constants, Definitions: definitions, FilePath: filePath}
 }
 
 // Equals compares this ModuleSymbol with another Symbol to determine if they represent the same module.

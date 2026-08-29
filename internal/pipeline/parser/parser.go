@@ -101,6 +101,10 @@ func (p *Parser) Parse() *ast.Program {
 		statement := p.parseStatement()
 		if statement != nil {
 			program.Statements = append(program.Statements, statement)
+			if p.peekToken.Type != lexer.EOF && p.peekToken.Line == p.currToken.Line {
+				p.reportError(p.peekToken, fmt.Sprintf("syntax error: unexpected token '%s'. Expected a newline between statements", p.peekToken.Literal))
+				p.synchronize()
+			}
 		} else {
 			p.synchronize()
 		}
@@ -609,6 +613,10 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		statement := p.parseStatement()
 		if statement != nil {
 			block.Statements = append(block.Statements, statement)
+			if p.peekToken.Type != lexer.RBRACE && p.peekToken.Type != lexer.EOF && p.peekToken.Line == p.currToken.Line {
+				p.reportError(p.peekToken, fmt.Sprintf("syntax error: unexpected token '%s'. Expected a newline between statements", p.peekToken.Literal))
+				p.synchronize()
+			}
 		}
 		p.nextToken()
 	}

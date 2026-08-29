@@ -10,8 +10,8 @@ func TestFindNodeAtPosition(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
-		targetLine   uint32 // 0-indexed (LSP)
-		targetCol    uint32 // 0-indexed (LSP)
+		targetLine   int // 0-indexed (LSP)
+		targetCol    int // 0-indexed (LSP)
 		expectedType string // string representation of the expected node
 	}{
 		{

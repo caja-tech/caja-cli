@@ -18,6 +18,7 @@ type Analyzer struct {
 	diagnosticErrors []ast.DiagnosticError
 	nodeSymbols      map[ast.Node]symbol.Symbol
 	nodeDefinitions  map[ast.Node]lexer.Token
+	nodeDefinitionFiles map[ast.Node]string
 	functionDepth    int
 	globalEnv        *environment.Environment
 	cache            map[string]*Analyzer
@@ -35,6 +36,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		diagnosticErrors: make([]ast.DiagnosticError, 0),
 		nodeSymbols:      make(map[ast.Node]symbol.Symbol),
 		nodeDefinitions:  make(map[ast.Node]lexer.Token),
+		nodeDefinitionFiles: make(map[ast.Node]string),
 		globalEnv:        globalEnv,
 		cache:            make(map[string]*Analyzer),
 		loading:          make(map[string]bool),
@@ -82,10 +84,14 @@ func (a *Analyzer) GetSymbol(node ast.Node) (symbol.Symbol, bool) {
 	return sym, ok
 }
 
-// GetDefinition retrieves the token where the symbol in the given AST node was declared.
-func (a *Analyzer) GetDefinition(node ast.Node) (lexer.Token, bool) {
+// GetDefinition retrieves the token where the symbol in the given AST node was declared, and the file path.
+func (a *Analyzer) GetDefinition(node ast.Node) (lexer.Token, string, bool) {
 	tok, ok := a.nodeDefinitions[node]
-	return tok, ok
+	file := a.nodeDefinitionFiles[node]
+	if file == "" && a.globalEnv != nil {
+		file = a.globalEnv.FileName
+	}
+	return tok, file, ok
 }
 
 // HasErrors returns true if any semantic errors were found.
@@ -183,11 +189,13 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 	types := make(map[string]symbol.Symbol)
 	privates := make(map[string]bool)
 	constants := make(map[string]bool)
+	definitions := make(map[string]lexer.Token)
 
 	// Assuming top-level declarations are in the first scope (index 0)
 	if len(a.scopes) > 0 {
 		for name, entry := range a.scopes[0] {
 			exports[name] = entry.Sym
+			definitions[name] = entry.DefinitionToken
 			if a.privates[name] {
 				privates[name] = true
 			}
@@ -203,7 +211,7 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 		}
 	}
 
-	return symbol.NewModuleSymbol("module", exports, types, privates, constants)
+	return symbol.NewModuleSymbol("module", exports, types, privates, constants, definitions, a.globalEnv.FileName)
 }
 
 // analyzeArrayLiteral ensures all elements in the array match the type of the first element,
@@ -564,7 +572,7 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	modName := n.Name.Value
 
 	if symbols, exportedTypes, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil)
+		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil, nil, "")
 		a.declare(modName, modSymbol, true, n.Name.Token)
 		return modSymbol
 	}
@@ -1058,6 +1066,11 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 	if modSymbol, ok := leftSymbol.(*symbol.ModuleSymbol); ok {
 		if propertySymbol, ok := modSymbol.GetSymbol(n.Property.Value); ok {
 			propType = propertySymbol
+			a.nodeSymbols[n.Property] = propertySymbol
+			if defToken, ok := modSymbol.Definitions[n.Property.Value]; ok {
+				a.nodeDefinitions[n.Property] = defToken
+				a.nodeDefinitionFiles[n.Property] = modSymbol.FilePath
+			}
 		} else {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on module", n.Property.Value))
 			return symbol.AnySymbol()
@@ -1065,6 +1078,8 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 	} else if structDef != nil {
 		if fieldSym, exists := structDef.Fields[n.Property.Value]; exists {
 			propType = fieldSym.Type
+			a.nodeSymbols[n.Property] = propType
+			// We could also store definition if StructDefSymbol tracked it, but we don't have it yet.
 		} else {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on struct '%s'", n.Property.Value, structDef.Name))
 			return symbol.AnySymbol()

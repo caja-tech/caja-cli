@@ -7,14 +7,14 @@ import (
 
 // FindNodeAtPosition traverses the AST and returns the innermost Node
 // that encapsulates the given line and column (0-indexed).
-func FindNodeAtPosition(node ast.Node, line, col uint32) ast.Node {
+func FindNodeAtPosition(node ast.Node, line, col int) ast.Node {
 	if node == nil {
 		return nil
 	}
 
 	// 1-indexed conversion
-	targetLine := int(line + 1)
-	targetCol := int(col + 1)
+	targetLine := line + 1
+	targetCol := col + 1
 
 	return findTightestNode(node, targetLine, targetCol)
 }

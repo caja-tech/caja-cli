@@ -6,88 +6,83 @@ import (
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/parser"
+	"context"
 	"net/url"
 	"path/filepath"
 
-	"github.com/tliron/glsp"
-	protocol "github.com/tliron/glsp/protocol_3_16"
-	"github.com/tliron/glsp/server"
-	"github.com/tliron/commonlog"
+	"github.com/owenrumney/go-lsp/document"
+	"github.com/owenrumney/go-lsp/lsp"
+	"github.com/owenrumney/go-lsp/server"
 )
 
 var (
 	lsName    = "caja-lsp"
-	documents = make(map[string]string)
-	serverVer string // Stores the injected version
+	serverVer string
 )
+
+type CajaHandler struct {
+	docs   *document.Store
+	client *server.Client
+}
 
 func Run(version string) error {
 	serverVer = version
-	commonlog.Configure(1, nil)
-	
-	handler := protocol.Handler{
-		Initialize:             initialize,
-		Initialized:            initialized,
-		TextDocumentDidOpen:    textDocumentDidOpen,
-		TextDocumentDidChange:  textDocumentDidChange,
-		TextDocumentDidClose:   textDocumentDidClose,
-		TextDocumentDidSave:    textDocumentDidSave,
-		TextDocumentHover:      textDocumentHover,
-		TextDocumentDefinition: textDocumentDefinition,
-	}
 
-	srv := server.NewServer(&handler, lsName, false)
-	return srv.RunStdio()
+	h := &CajaHandler{docs: document.NewStore()}
+	srv := server.NewServer(h)
+
+	return srv.Run(context.Background(), server.RunStdio())
 }
 
-func initialize(context *glsp.Context, params *protocol.InitializeParams) (any, error) {
-	capabilities := protocol.ServerCapabilities{
-		TextDocumentSync:   protocol.TextDocumentSyncKindFull,
-		HoverProvider:      true,
-		DefinitionProvider: true,
-	}
-	
-	return protocol.InitializeResult{
-		Capabilities: capabilities,
-		ServerInfo: &protocol.InitializeResultServerInfo{
+func (h *CajaHandler) Initialize(_ context.Context, _ *lsp.InitializeParams) (*lsp.InitializeResult, error) {
+	return &lsp.InitializeResult{
+		ServerInfo: &lsp.ServerInfo{
 			Name:    lsName,
-			Version: &serverVer,
+			Version: serverVer,
 		},
 	}, nil
 }
 
-func initialized(context *glsp.Context, params *protocol.InitializedParams) error {
+func (h *CajaHandler) Shutdown(_ context.Context) error {
 	return nil
 }
 
-func textDocumentDidOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
-	documents[params.TextDocument.URI] = params.TextDocument.Text
-	validateDocument(context, params.TextDocument.URI, params.TextDocument.Text)
+func (h *CajaHandler) SetClient(client *server.Client) {
+	h.client = client
+}
+
+func (h *CajaHandler) DidOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams) error {
+	_, err := h.docs.Open(params)
+	if err == nil {
+		h.validateDocument(ctx, string(params.TextDocument.URI))
+	}
+	return err
+}
+
+func (h *CajaHandler) DidChange(ctx context.Context, params *lsp.DidChangeTextDocumentParams) error {
+	_, err := h.docs.Change(params)
+	if err == nil {
+		h.validateDocument(ctx, string(params.TextDocument.URI))
+	}
+	return err
+}
+
+func (h *CajaHandler) DidClose(_ context.Context, params *lsp.DidCloseTextDocumentParams) error {
+	h.docs.Close(params)
 	return nil
 }
 
-func textDocumentDidChange(context *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
-	text := params.ContentChanges[0].(protocol.TextDocumentContentChangeEvent).Text
-	documents[params.TextDocument.URI] = text
-	validateDocument(context, params.TextDocument.URI, text)
-	return nil
-}
+func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
+	text, ok := h.docs.Text(lsp.DocumentURI(uri))
+	if !ok {
+		return
+	}
 
-func textDocumentDidSave(context *glsp.Context, params *protocol.DidSaveTextDocumentParams) error {
-	return nil
-}
-
-func textDocumentDidClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
-	delete(documents, params.TextDocument.URI)
-	return nil
-}
-
-func validateDocument(context *glsp.Context, uri string, text string) {
 	tknzr := lexer.New(text)
 	p := parser.New(tknzr)
 	prog := p.Parse()
 
-	var diagnostics []protocol.Diagnostic
+	diagnostics := make([]lsp.Diagnostic, 0)
 
 	for _, err := range p.DiagnosticErrors() {
 		diagnostics = append(diagnostics, toLSPDiagnostic(err))
@@ -105,42 +100,44 @@ func validateDocument(context *glsp.Context, uri string, text string) {
 		}
 	}
 
-	go context.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
-		URI:         uri,
-		Diagnostics: diagnostics,
-	})
+	if h.client != nil {
+		_ = h.client.PublishDiagnostics(ctx, &lsp.PublishDiagnosticsParams{
+			URI:         lsp.DocumentURI(uri),
+			Diagnostics: diagnostics,
+		})
+	}
 }
 
-func toLSPDiagnostic(err ast.DiagnosticError) protocol.Diagnostic {
-	line := protocol.UInteger(err.Token.Line)
+func toLSPDiagnostic(err ast.DiagnosticError) lsp.Diagnostic {
+	line := err.Token.Line
 	if line > 0 {
 		line-- // LSP lines are 0-indexed
 	}
-	col := protocol.UInteger(err.Token.Column)
+	col := err.Token.Column
 	if col > 0 {
 		col-- // LSP cols are 0-indexed
 	}
 
-	length := protocol.UInteger(len(err.Token.Literal))
+	length := len(err.Token.Literal)
 	if length == 0 {
 		length = 1
 	}
 
-	severity := protocol.DiagnosticSeverityError
+	severity := lsp.SeverityError
 
-	return protocol.Diagnostic{
-		Range: protocol.Range{
-			Start: protocol.Position{Line: line, Character: col},
-			End:   protocol.Position{Line: line, Character: col + length},
+	return lsp.Diagnostic{
+		Range: lsp.Range{
+			Start: lsp.Position{Line: line, Character: col},
+			End:   lsp.Position{Line: line, Character: col + length},
 		},
 		Severity: &severity,
-		Source:   &lsName,
+		Source:   lsName,
 		Message:  err.Message,
 	}
 }
 
-func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	text, ok := documents[params.TextDocument.URI]
+func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Hover, error) {
+	text, ok := h.docs.Text(params.TextDocument.URI)
 	if !ok {
 		return nil, nil
 	}
@@ -149,7 +146,7 @@ func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*pr
 	p := parser.New(tknzr)
 	prog := p.Parse()
 
-	filePath := uriToPath(params.TextDocument.URI)
+	filePath := uriToPath(string(params.TextDocument.URI))
 	baseDir := filepath.Dir(filePath)
 	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
 	a := analyzer.New(globalEnv)
@@ -166,17 +163,14 @@ func textDocumentHover(context *glsp.Context, params *protocol.HoverParams) (*pr
 	}
 
 	markdown := "```caja\n" + sym.String() + "\n```"
-	
-	return &protocol.Hover{
-		Contents: protocol.MarkupContent{
-			Kind:  protocol.MarkupKindMarkdown,
-			Value: markdown,
-		},
+
+	return &lsp.Hover{
+		Contents: lsp.NewHoverContents(lsp.Markdown, markdown),
 	}, nil
 }
 
-func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionParams) (any, error) {
-	text, ok := documents[params.TextDocument.URI]
+func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams) ([]lsp.Location, error) {
+	text, ok := h.docs.Text(params.TextDocument.URI)
 	if !ok {
 		return nil, nil
 	}
@@ -185,7 +179,7 @@ func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionPa
 	p := parser.New(tknzr)
 	prog := p.Parse()
 
-	filePath := uriToPath(params.TextDocument.URI)
+	filePath := uriToPath(string(params.TextDocument.URI))
 	baseDir := filepath.Dir(filePath)
 	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
 	a := analyzer.New(globalEnv)
@@ -196,27 +190,35 @@ func textDocumentDefinition(context *glsp.Context, params *protocol.DefinitionPa
 		return nil, nil
 	}
 
-	defToken, ok := a.GetDefinition(node)
+	defToken, defFile, ok := a.GetDefinition(node)
 	if !ok || defToken.Line == 0 {
 		return nil, nil
 	}
 
-	line := protocol.UInteger(defToken.Line - 1)
-	col := protocol.UInteger(defToken.Column)
-	length := protocol.UInteger(len(defToken.Literal))
+	line := defToken.Line - 1
+	col := defToken.Column - 1
+	length := len(defToken.Literal)
 	if length == 0 {
 		length = 1
 	}
 
-	return []protocol.Location{
-		{
-			URI: params.TextDocument.URI,
-			Range: protocol.Range{
-				Start: protocol.Position{Line: line, Character: col},
-				End:   protocol.Position{Line: line, Character: col + length},
-			},
+	targetURI := params.TextDocument.URI
+	if defFile != "" {
+		if !filepath.IsAbs(defFile) {
+			defFile = filepath.Join(baseDir, defFile+".caja")
+		}
+		targetURI = lsp.DocumentURI("file://" + defFile)
+	}
+
+	loc := lsp.Location{
+		URI: targetURI,
+		Range: lsp.Range{
+			Start: lsp.Position{Line: line, Character: col},
+			End:   lsp.Position{Line: line, Character: col + length},
 		},
-	}, nil
+	}
+    
+	return []lsp.Location{loc}, nil
 }
 
 func uriToPath(uri string) string {
