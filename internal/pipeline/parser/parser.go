@@ -3,6 +3,8 @@ package parser
 import (
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/lexer"
+	"context"
+
 	"fmt"
 	"strconv"
 	"strings"
@@ -23,8 +25,10 @@ type infixParseFunc func(ast.Expression) ast.Expression
 // stream of tokens produced by a Tokenizer into an abstract syntax tree. It
 // maintains a current and peek token for single-token lookahead and dispatches
 // to registered prefix and infix parse functions based on token type.
+
 type Parser struct {
 	tknzr *lexer.Lexer
+	ctx   context.Context
 
 	currToken lexer.Token
 	peekToken lexer.Token
@@ -98,6 +102,13 @@ func (p *Parser) Parse() *ast.Program {
 	program.Statements = []ast.Statement{}
 
 	for p.currToken.Type != lexer.EOF {
+		if p.ctx != nil && p.ctx.Err() != nil {
+			return nil
+		}
+
+		if p.ctx != nil && p.ctx.Err() != nil {
+			return nil
+		}
 		statement := p.parseStatement()
 		if statement != nil {
 			program.Statements = append(program.Statements, statement)
@@ -407,7 +418,11 @@ func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 // parsed; otherwise the current tokens are treated as an ExpressionStatement.
 func (p *Parser) parseStatement() ast.Statement {
 	if p.currToken.Type == lexer.RETURN {
-		return p.parseReturnStatement()
+		stmt := p.parseReturnStatement()
+		if stmt == nil {
+			return nil
+		}
+		return stmt
 	}
 
 	isPrivate := false
@@ -422,17 +437,19 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	if p.currToken.Type == lexer.LET {
 		stmt := p.parseLetStatement()
-		if stmt != nil {
-			stmt.IsPrivate = isPrivate
+		if stmt == nil {
+			return nil
 		}
+		stmt.IsPrivate = isPrivate
 		return stmt
 	}
 
 	if p.currToken.Type == lexer.CONST {
 		stmt := p.parseConstStatement()
-		if stmt != nil {
-			stmt.IsPrivate = isPrivate
+		if stmt == nil {
+			return nil
 		}
+		stmt.IsPrivate = isPrivate
 		return stmt
 	}
 
@@ -441,14 +458,19 @@ func (p *Parser) parseStatement() ast.Statement {
 			p.reportError(p.currToken, "syntax error: 'private' modifier cannot be applied to imports")
 			return nil
 		}
-		return p.parseImportStatement()
+		stmt := p.parseImportStatement()
+		if stmt == nil {
+			return nil
+		}
+		return stmt
 	}
 
 	if p.currToken.Type == lexer.TYPE {
 		stmt := p.parseTypeAliasStatement()
-		if stmt != nil {
-			stmt.IsPrivate = isPrivate
+		if stmt == nil {
+			return nil
 		}
+		stmt.IsPrivate = isPrivate
 		return stmt
 	}
 
@@ -734,7 +756,7 @@ func (p *Parser) parseTypeSignature() string {
 		if !p.expectPeek(lexer.LPAREN) {
 			return ""
 		}
-		
+
 		var params []string
 		if p.peekToken.Type != lexer.RPAREN {
 			paramType := p.parseTypeSignature()
@@ -749,17 +771,17 @@ func (p *Parser) parseTypeSignature() string {
 				}
 			}
 		}
-		
+
 		if !p.expectPeek(lexer.RPAREN) {
 			return ""
 		}
-		
+
 		returnType := "Nothing"
 		if p.peekToken.Type == lexer.ARROW {
 			p.nextToken() // move to ->
 			returnType = p.parseTypeSignature()
 		}
-		
+
 		typeName := "fn(" + strings.Join(params, ", ") + ") -> " + returnType
 		if p.peekToken.Type == lexer.QUESTION {
 			p.nextToken() // move to ?
@@ -1111,7 +1133,7 @@ func (p *Parser) parseTurbofishExpression(left ast.Expression) ast.Expression {
 		p.nextToken() // move to '('
 		exp := &ast.CallExpression{Token: tok, Function: left, TypeArguments: typeArgs}
 		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
-	exp.RParenToken = p.currToken
+		exp.RParenToken = p.currToken
 		return exp
 	}
 
@@ -1163,4 +1185,9 @@ func (p *Parser) synchronize() {
 		}
 		p.nextToken()
 	}
+}
+
+func (p *Parser) WithContext(ctx context.Context) *Parser {
+	p.ctx = ctx
+	return p
 }

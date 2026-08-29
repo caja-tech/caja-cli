@@ -7,12 +7,10 @@ import (
 	"testing"
 	"context"
 
-	"time"
-
-	"github.com/owenrumney/go-lsp/document"
 	"github.com/owenrumney/go-lsp/lsp"
 	"github.com/owenrumney/go-lsp/servertest"
 )
+
 
 func TestTextDocumentHover(t *testing.T) {
 	tests := []struct {
@@ -104,11 +102,12 @@ s.key()`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &CajaHandler{docs: document.NewStore()}
+			h := NewCajaHandler()
 			s := servertest.New(t, h)
 
 			if tt.input != "" {
 				s.DidOpen(lsp.DocumentURI(tt.uri), "caja", tt.input)
+				_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(tt.uri))
 			}
 
 			hover, err := s.Hover(lsp.DocumentURI(tt.uri), tt.queryLine, tt.queryChar)
@@ -186,11 +185,12 @@ func TestTextDocumentDefinition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &CajaHandler{docs: document.NewStore()}
+			h := NewCajaHandler()
 			s := servertest.New(t, h)
 
 			if tt.input != "" {
 				s.DidOpen(lsp.DocumentURI(tt.uri), "caja", tt.input)
+				_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(tt.uri))
 			}
 
 			locs, err := s.Definition(lsp.DocumentURI(tt.uri), tt.queryLine, tt.queryChar)
@@ -227,8 +227,8 @@ func TestTextDocumentDefinition(t *testing.T) {
 }
 
 func TestModuleLSPFeatures(t *testing.T) {
-	h := &CajaHandler{docs: document.NewStore()}
-	s := servertest.New(t, h)
+	h := NewCajaHandler()
+			s := servertest.New(t, h)
 
 	// Create a temporary directory for our physical workspace
 	tempDir := t.TempDir()
@@ -245,12 +245,15 @@ func TestModuleLSPFeatures(t *testing.T) {
 
 	// Tell LSP client we opened it
 	s.DidOpen(lsp.DocumentURI(moduleURI), "caja", moduleText)
+				_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(moduleURI))
 
 	mainPath := filepath.Join(tempDir, "main.caja")
 	mainURI := "file://" + mainPath
 	mainText := `import "./calculus"
 calculus.add(1, 2)`
+
 	s.DidOpen(lsp.DocumentURI(mainURI), "caja", mainText)
+				_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(mainURI))
 
 	// Test Hover on 'add'
 	hover, err := s.Hover(lsp.DocumentURI(mainURI), 1, 10) // 'a' in 'add'
@@ -282,46 +285,44 @@ calculus.add(1, 2)`
 }
 
 func TestDiagnosticsAreClearedOnFix(t *testing.T) {
-	h := &CajaHandler{docs: document.NewStore()}
-	s := servertest.New(t, h)
+	h := NewCajaHandler()
+			s := servertest.New(t, h)
 
 	mainURI := lsp.DocumentURI("file:///main.caja")
 	
 	// 1. Open document with an error
 	badText := `let x = 5 +` // Missing right operand
 	s.DidOpen(mainURI, "caja", badText)
-	time.Sleep(100 * time.Millisecond)
+	diags, _ := s.WaitForDiagnostics(context.Background(), mainURI)
 
 	// 2. Fetch diagnostics, there should be an error
-	diags := s.Diagnostics(mainURI)
 	if len(diags) == 0 {
 		t.Fatalf("Expected diagnostics for missing argument, got none")
 	}
 
 	// 3. Fix the error
 	goodText := `let x = 5 + 5`
+	s.ClearDiagnostics()
+
 	s.DidChange(mainURI, 2, goodText)
-	time.Sleep(100 * time.Millisecond)
+	diags, _ = s.WaitForDiagnostics(context.Background(), mainURI)
 
 	// 4. Fetch diagnostics, it should be EMPTY
-	diags = s.Diagnostics(mainURI)
 	if len(diags) > 0 {
 		t.Fatalf("Expected diagnostics to be cleared after fix, but got %v", diags)
 	}
 }
 
 func TestMultipleStatementsOnSameLine(t *testing.T) {
-	h := &CajaHandler{docs: document.NewStore()}
-	s := servertest.New(t, h)
+	h := NewCajaHandler()
+			s := servertest.New(t, h)
 
 	mainURI := lsp.DocumentURI("file:///main.caja")
 	
 	// Open document with missing operator, which creates two statements on the same line
 	badText := `let area = calculus.PI 10 * 10`
 	s.DidOpen(mainURI, "caja", badText)
-	time.Sleep(100 * time.Millisecond) // wait for async open
-
-	diags := s.Diagnostics(mainURI)
+	diags, _ := s.WaitForDiagnostics(context.Background(), mainURI)
 	if len(diags) == 0 {
 		t.Fatalf("Expected syntax error for missing operator, got none")
 	}
@@ -424,7 +425,8 @@ math_mod.power(2, `,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &CajaHandler{docs: document.NewStore()}
+			h := NewCajaHandler()
+			s := servertest.New(t, h)
 
 			tempDir := t.TempDir()
 			for filename, content := range tt.setupFiles {
@@ -436,26 +438,10 @@ math_mod.power(2, `,
 			}
 
 			uri := "file://" + filepath.Join(tempDir, "test.caja")
-			err := h.DidOpen(context.Background(), &lsp.DidOpenTextDocumentParams{
-				TextDocument: lsp.TextDocumentItem{
-					URI: lsp.DocumentURI(uri),
-					LanguageID: "caja",
-					Version: 1,
-					Text: tt.text,
-				},
-			})
-			if err != nil {
-				t.Fatalf("DidOpen returned error: %v", err)
-			}
+			s.DidOpen(lsp.DocumentURI(uri), "caja", tt.text)
+			_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(uri))
 
-			params := &lsp.SignatureHelpParams{
-				TextDocumentPositionParams: lsp.TextDocumentPositionParams{
-					TextDocument: lsp.TextDocumentIdentifier{URI: lsp.DocumentURI(uri)},
-					Position:     lsp.Position{Line: tt.line, Character: tt.col},
-				},
-			}
-
-			res, err := h.SignatureHelp(context.Background(), params)
+			res, err := s.SignatureHelp(lsp.DocumentURI(uri), tt.line, tt.col)
 			if err != nil {
 				t.Fatalf("SignatureHelp returned error: %v", err)
 			}
@@ -484,5 +470,29 @@ math_mod.power(2, `,
 				t.Errorf("Expected active parameter %d, got %d", tt.expectedParam, *res.ActiveParameter)
 			}
 		})
+	}
+}
+
+func TestIncompleteLetStatementDoesNotPanic(t *testing.T) {
+	h := NewCajaHandler()
+	s := servertest.New(t, h)
+
+	mainURI := lsp.DocumentURI("file:///main.caja")
+	// The user opens a valid file
+	validText := `let welcomeMessage = "Hello"`
+	s.DidOpen(mainURI, "caja", validText)
+	_, _ = s.WaitForDiagnostics(context.Background(), mainURI)
+
+	// The user starts typing "let " and stops, which used to panic
+	incompleteText := validText + "\nlet "
+	s.ClearDiagnostics()
+	s.DidChange(mainURI, 2, incompleteText)
+	
+	// If the server panics, WaitForDiagnostics will hang or the test will fail
+	diags, _ := s.WaitForDiagnostics(context.Background(), mainURI)
+
+	// We should receive a diagnostic for the expected identifier error
+	if len(diags) == 0 {
+		t.Fatalf("Expected diagnostics for incomplete let statement, got none")
 	}
 }

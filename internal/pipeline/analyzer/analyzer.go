@@ -6,6 +6,8 @@ import (
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/modules"
+	"context"
+
 	"fmt"
 )
 
@@ -13,40 +15,45 @@ import (
 // It manages variable scopes and tracks semantic errors such as
 // undeclared variables and variable redeclarations.
 type Analyzer struct {
-	scopes           []map[string]ScopeEntry
-	types            map[string]symbol.Symbol
-	diagnosticErrors []ast.DiagnosticError
-	nodeSymbols      map[ast.Node]symbol.Symbol
-	nodeDefinitions  map[ast.Node]lexer.Token
+	ctx                 context.Context
+	scopes              []map[string]ScopeEntry
+	types               map[string]symbol.Symbol
+	diagnosticErrors    []ast.DiagnosticError
+	nodeSymbols         map[ast.Node]symbol.Symbol
+	nodeDefinitions     map[ast.Node]lexer.Token
 	nodeDefinitionFiles map[ast.Node]string
-	functionDepth    int
-	globalEnv        *environment.Environment
-	cache            map[string]*Analyzer
-	loading          map[string]bool
-	privates         map[string]bool
+	functionDepth       int
+	globalEnv           *environment.Environment
+	cache               map[string]*Analyzer
+	loading             map[string]bool
+	privates            map[string]bool
 }
-
 
 // New creates and returns a new Analyzer with an initial global scope.
 func New(globalEnv *environment.Environment) *Analyzer {
 	globalScope := make(map[string]ScopeEntry)
 	analyzer := &Analyzer{
-		scopes:           []map[string]ScopeEntry{globalScope},
-		types:            make(map[string]symbol.Symbol),
-		diagnosticErrors: make([]ast.DiagnosticError, 0),
-		nodeSymbols:      make(map[ast.Node]symbol.Symbol),
-		nodeDefinitions:  make(map[ast.Node]lexer.Token),
+		scopes:              []map[string]ScopeEntry{globalScope},
+		types:               make(map[string]symbol.Symbol),
+		diagnosticErrors:    make([]ast.DiagnosticError, 0),
+		nodeSymbols:         make(map[ast.Node]symbol.Symbol),
+		nodeDefinitions:     make(map[ast.Node]lexer.Token),
 		nodeDefinitionFiles: make(map[ast.Node]string),
-		globalEnv:        globalEnv,
-		cache:            make(map[string]*Analyzer),
-		loading:          make(map[string]bool),
-		privates:         make(map[string]bool),
+		globalEnv:           globalEnv,
+		cache:               make(map[string]*Analyzer),
+		loading:             make(map[string]bool),
+		privates:            make(map[string]bool),
 	}
 
 	// Inject Nothing as a global builtin type
 	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol))
 
 	return analyzer
+}
+
+func (a *Analyzer) WithContext(ctx context.Context) *Analyzer {
+	a.ctx = ctx
+	return a
 }
 
 // Run initiates the semantic analysis process starting from the given AST node.
@@ -102,6 +109,9 @@ func (a *Analyzer) HasErrors() bool {
 // analyze traverses the AST starting from the given node and performs
 // semantic checks, populating the errors slice if any issues are found.
 func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
+	if a.ctx != nil && a.ctx.Err() != nil {
+		return symbol.AnySymbol()
+	}
 	if node == nil {
 		return symbol.AnySymbol()
 	}
@@ -303,7 +313,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	}
 
 	actualReturnSymbol := a.analyze(n.Body)
-	
+
 	a.functionDepth--
 	a.popScope()
 
@@ -468,7 +478,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 	}
 
-		if n.Value != nil {
+	if n.Value != nil {
 		rhsType := a.analyze(n.Value)
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
@@ -558,7 +568,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 	}
 
-		if n.Value != nil {
+	if n.Value != nil {
 		rhsType := a.analyze(n.Value)
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
@@ -699,7 +709,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 
 	if n.Signature != nil {
 		var paramTypes []symbol.Symbol
-		
+
 		for _, pt := range n.Signature.ParamTypes {
 			paramSymbol, ok := a.findTypeSymbolInTypes(pt)
 			if !ok {
@@ -716,7 +726,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			}
 			returnType = resolvedReturn
 		}
-		
+
 		fnSym := symbol.NewFunctionSymbol(n.Name.Value, nil, nil, len(n.Signature.ParamTypes), paramTypes, returnType)
 		if len(n.TypeParameters) > 0 {
 			fnSym.TypeParameters = n.TypeParameters

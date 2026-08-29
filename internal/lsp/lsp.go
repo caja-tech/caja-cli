@@ -2,8 +2,8 @@ package lsp
 
 import (
 	"caja-cli/internal/pipeline/analyzer"
-	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/analyzer/symbol"
+	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/parser"
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"sync"
 
 	"github.com/owenrumney/go-lsp/document"
 	"github.com/owenrumney/go-lsp/lsp"
@@ -22,15 +23,34 @@ var (
 	serverVer string
 )
 
+type DocumentState struct {
+	Prog     *ast.Program
+	Analyzer *analyzer.Analyzer
+}
+
 type CajaHandler struct {
 	docs   *document.Store
 	client *server.Client
+
+	mu       sync.RWMutex
+	workers  map[lsp.DocumentURI]chan context.Context
+	cancels  map[lsp.DocumentURI]context.CancelFunc
+	astCache map[lsp.DocumentURI]*DocumentState
+}
+
+func NewCajaHandler() *CajaHandler {
+	return &CajaHandler{
+		docs:     document.NewStore(),
+		workers:  make(map[lsp.DocumentURI]chan context.Context),
+		cancels:  make(map[lsp.DocumentURI]context.CancelFunc),
+		astCache: make(map[lsp.DocumentURI]*DocumentState),
+	}
 }
 
 func Run(version string) error {
 	serverVer = version
 
-	h := &CajaHandler{docs: document.NewStore()}
+	h := NewCajaHandler()
 	srv := server.NewServer(h)
 
 	return srv.Run(context.Background(), server.RunStdio())
@@ -53,58 +73,141 @@ func (h *CajaHandler) SetClient(client *server.Client) {
 	h.client = client
 }
 
-func (h *CajaHandler) DidOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams) error {
+func (h *CajaHandler) DidOpen(_ context.Context, params *lsp.DidOpenTextDocumentParams) error {
+	h.mu.Lock()
 	_, err := h.docs.Open(params)
 	if err == nil {
-		h.validateDocument(ctx, string(params.TextDocument.URI))
+		uri := params.TextDocument.URI
+		if _, exists := h.workers[uri]; !exists {
+			ch := make(chan context.Context, 1)
+			h.workers[uri] = ch
+			go h.documentWorkerLoop(uri, ch)
+		}
+
+		ch := h.workers[uri]
+
+		if cancel, ok := h.cancels[uri]; ok {
+			cancel()
+		}
+
+		ctx, cancelFunc := context.WithCancel(context.Background())
+		h.cancels[uri] = cancelFunc
+
+		select {
+		case <-ch: // pop old context if full
+		default:
+		}
+		ch <- ctx
 	}
+	h.mu.Unlock()
 	return err
 }
 
-func (h *CajaHandler) DidChange(ctx context.Context, params *lsp.DidChangeTextDocumentParams) error {
+func (h *CajaHandler) DidChange(_ context.Context, params *lsp.DidChangeTextDocumentParams) error {
+	h.mu.Lock()
 	_, err := h.docs.Change(params)
 	if err == nil {
-		h.validateDocument(ctx, string(params.TextDocument.URI))
+		uri := params.TextDocument.URI
+		if ch, ok := h.workers[uri]; ok {
+			if cancel, hasCancel := h.cancels[uri]; hasCancel {
+				cancel()
+			}
+
+			ctx, cancelFunc := context.WithCancel(context.Background())
+			h.cancels[uri] = cancelFunc
+
+			select {
+			case <-ch:
+			default:
+			}
+			ch <- ctx
+		}
 	}
+	h.mu.Unlock()
 	return err
 }
 
 func (h *CajaHandler) DidClose(_ context.Context, params *lsp.DidCloseTextDocumentParams) error {
+	h.mu.Lock()
+	uri := params.TextDocument.URI
 	h.docs.Close(params)
+
+	if cancel, ok := h.cancels[uri]; ok {
+		cancel()
+		delete(h.cancels, uri)
+	}
+
+	if ch, ok := h.workers[uri]; ok {
+		close(ch)
+		delete(h.workers, uri)
+	}
+	delete(h.astCache, uri)
+	h.mu.Unlock()
 	return nil
 }
 
+func (h *CajaHandler) documentWorkerLoop(uri lsp.DocumentURI, ch chan context.Context) {
+	for ctx := range ch {
+		h.validateDocument(ctx, string(uri))
+	}
+}
+
 func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
+	h.mu.RLock()
 	text, ok := h.docs.Text(lsp.DocumentURI(uri))
+	h.mu.RUnlock()
+
 	if !ok {
-		fmt.Println("SYMBOL NOT OK")
 		return
 	}
 
 	tknzr := lexer.New(text)
 	p := parser.New(tknzr)
-	prog := p.Parse()
+	prog := p.WithContext(ctx).Parse()
+	if prog == nil {
+		return
+	}
 
 	diagnostics := make([]lsp.Diagnostic, 0)
-
 	for _, err := range p.DiagnosticErrors() {
 		diagnostics = append(diagnostics, toLSPDiagnostic(err))
 	}
 
+	var a *analyzer.Analyzer
 	if !p.HasErrors() {
 		filePath := uriToPath(uri)
 		baseDir := filepath.Dir(filePath)
 		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-		a := analyzer.New(globalEnv)
-		a.Run(prog)
+		a = analyzer.New(globalEnv)
+		a.WithContext(ctx).Run(prog)
+		if ctx.Err() != nil {
+			return
+		}
 
 		for _, err := range a.DiagnosticErrors() {
 			diagnostics = append(diagnostics, toLSPDiagnostic(err))
 		}
+	} else {
+		filePath := uriToPath(uri)
+		baseDir := filepath.Dir(filePath)
+		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
+		a = analyzer.New(globalEnv)
+		a.WithContext(ctx).Run(prog)
+		if ctx.Err() != nil {
+			return
+		}
 	}
 
+	// Safely cache the AST and Analyzer
+	h.mu.Lock()
+	h.astCache[lsp.DocumentURI(uri)] = &DocumentState{
+		Prog:     prog,
+		Analyzer: a,
+	}
+	h.mu.Unlock()
+
 	if h.client != nil {
-		_ = h.client.PublishDiagnostics(ctx, &lsp.PublishDiagnosticsParams{
+		_ = h.client.PublishDiagnostics(context.Background(), &lsp.PublishDiagnosticsParams{
 			URI:         lsp.DocumentURI(uri),
 			Diagnostics: diagnostics,
 		})
@@ -140,20 +243,15 @@ func toLSPDiagnostic(err ast.DiagnosticError) lsp.Diagnostic {
 }
 
 func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Hover, error) {
-		text, ok := h.docs.Text(params.TextDocument.URI)
-	if !ok {
+	h.mu.RLock()
+	state, ok := h.astCache[params.TextDocument.URI]
+	h.mu.RUnlock()
+
+	if !ok || state == nil || state.Prog == nil || state.Analyzer == nil {
 		return nil, nil
 	}
-
-	tknzr := lexer.New(text)
-	p := parser.New(tknzr)
-	prog := p.Parse()
-
-	filePath := uriToPath(string(params.TextDocument.URI))
-	baseDir := filepath.Dir(filePath)
-	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-	a := analyzer.New(globalEnv)
-	a.Run(prog) // we run it even if there are syntax errors to try to get symbol info
+	prog := state.Prog
+	a := state.Analyzer
 
 	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
 	if node == nil {
@@ -173,20 +271,18 @@ func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Ho
 }
 
 func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams) ([]lsp.Location, error) {
-	text, ok := h.docs.Text(params.TextDocument.URI)
-	if !ok {
+	h.mu.RLock()
+	state, ok := h.astCache[params.TextDocument.URI]
+	h.mu.RUnlock()
+
+	if !ok || state == nil || state.Prog == nil || state.Analyzer == nil {
 		return nil, nil
 	}
-
-	tknzr := lexer.New(text)
-	p := parser.New(tknzr)
-	prog := p.Parse()
+	prog := state.Prog
+	a := state.Analyzer
 
 	filePath := uriToPath(string(params.TextDocument.URI))
 	baseDir := filepath.Dir(filePath)
-	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-	a := analyzer.New(globalEnv)
-	a.Run(prog)
 
 	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
 	if node == nil {
@@ -220,7 +316,7 @@ func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams
 			End:   lsp.Position{Line: line, Character: col + length},
 		},
 	}
-    
+
 	return []lsp.Location{loc}, nil
 }
 
@@ -234,22 +330,19 @@ func uriToPath(uri string) string {
 
 // SignatureHelp provides signature information for a function call at the cursor position.
 func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelpParams) (*lsp.SignatureHelp, error) {
-	
-	text, ok := h.docs.Text(params.TextDocument.URI)
-	if !ok {
-		fmt.Println("SYMBOL NOT OK")
+	h.mu.RLock()
+	state, stateOk := h.astCache[params.TextDocument.URI]
+	text, textOk := h.docs.Text(params.TextDocument.URI)
+	h.mu.RUnlock()
+
+	if !stateOk || state == nil || state.Prog == nil || state.Analyzer == nil {
+		return nil, nil
+	}
+	if !textOk {
 		return nil, fmt.Errorf("document not found: %s", params.TextDocument.URI)
 	}
-
-	tknzr := lexer.New(text)
-	p := parser.New(tknzr)
-	prog := p.Parse()
-
-	filePath := uriToPath(string(params.TextDocument.URI))
-	baseDir := filepath.Dir(filePath)
-	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-	a := analyzer.New(globalEnv)
-	a.Run(prog)
+	prog := state.Prog
+	a := state.Analyzer
 
 	if prog == nil {
 		fmt.Println("PROG IS NIL")
@@ -262,7 +355,6 @@ func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelp
 	}
 
 	sym, _ := a.GetSymbol(callExpr.Function)
-
 
 	if prop, ok := callExpr.Function.(*ast.PropertyExpression); ok {
 		if objIdent, ok := prop.Object.(*ast.Identifier); ok {
@@ -304,8 +396,7 @@ func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelp
 		Parameters: sigParams,
 	}
 
-
-		activeParam := 0
+	activeParam := 0
 	targetLine := params.Position.Line + 1
 	targetCol := params.Position.Character + 1
 
