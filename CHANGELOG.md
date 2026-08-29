@@ -2,6 +2,29 @@
 
 All notable changes to the Caja Language and CLI will be documented in this file.
 
+## [v0.1.0-alpha.5] - 2026-08-29
+
+### Added
+- **VS Code Extension**: Introduced the official Caja VS Code extension with foundational syntax highlighting (PR #73).
+- **Language Server Protocol (LSP)**: Implemented full LSP support inside the Caja CLI to bring advanced IDE features to the editor (PR #74).
+  - **Live Diagnostics**: Real-time syntax and semantic error highlighting as you type.
+  - **Hover Information**: Instantly view inferred types, struct layouts, and function signatures.
+  - **Go to Definition (Cmd+Click)**: Navigate directly to variable, function, and struct definitions, including cross-file module navigation.
+  - **Signature Help**: Display parameter hints and active parameter tracking while typing function calls.
+
+### Performance & Architecture Optimizations
+- **Single Worker Pattern**: The LSP safely processes requests sequentially per document, completely eliminating CPU spikes caused by overlapping parses on rapid keystrokes.
+- **Early Context Cancellation**: Intermediate keystrokes instantly cancel mid-flight background validations, freeing up CPU resources for the most recent AST changes.
+- **Lock-Free Fast Reads**: ASTs and Analyzers are safely cached using `sync.RWMutex`, allowing LSP operations like Hover and Go To Definition to read from memory in `O(1)` time without triggering expensive re-parses.
+
+### Fixed
+- **Parser Crash Fix**: Fixed a critical interface typed-nil bug in the parser that caused panics when evaluating incomplete statements (e.g., `let`, `const`, `return`, `import`, `type`).
+- **Syntax Enforcement**: The parser now strictly enforces newlines between statements.
+
+### Documentation
+- Created this comprehensive human-readable root `CHANGELOG.md` to document all notable changes across alpha releases.
+- Standardized the VS Code extension's `CHANGELOG.md` to adhere to the "Keep a Changelog" format.
+
 ## [v0.1.0-alpha.4] - 2026-08-27
 
 ### Added
