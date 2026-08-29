@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Compiled Output
+out/
+dist/
+
+# VS Code test files
+.vscode-test/
+
+# Packaged extension files
+*.vsix

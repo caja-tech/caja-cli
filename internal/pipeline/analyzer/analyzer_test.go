@@ -162,7 +162,7 @@ let f = fn() -> MyEmpty {
 `,
 			expectedErrors: []string{
 				"[Line 3, Column 9] semantic error: function is missing a guaranteed return statement. All code paths must return a value.",
-				"[Line 3, Column 9] type error: function declared to return MyEmpty, but body returns ANY",
+				"[Line 3, Column 9] type error: function declared to return MyEmpty, but body returns Any",
 			},
 		},
 		{
@@ -240,7 +240,7 @@ let a = 10
 a[0] = 5
 `,
 			expectedErrors: []string{
-				"type error: index assignment not supported for NUMBER",
+				"type error: index assignment not supported for Number",
 			},
 		},
 		{
@@ -250,7 +250,7 @@ let a = [1, 2, 3]
 a["hello"] = 5
 `,
 			expectedErrors: []string{
-				"type error: array index must be NUMBER, got STRING",
+				"type error: array index must be Number, got String",
 			},
 		},
 	{
@@ -268,7 +268,7 @@ let c: CustomType = nil
 let x: Number = "hello"
 `,
 			expectedErrors: []string{
-				"type error: cannot assign STRING to NUMBER",
+				"type error: cannot assign String to Number",
 			},
 		},
 		{
@@ -277,7 +277,7 @@ let x: Number = "hello"
 let s: String = 42
 `,
 			expectedErrors: []string{
-				"type error: cannot assign NUMBER to STRING",
+				"type error: cannot assign Number to String",
 			},
 		},
 		{
@@ -286,7 +286,7 @@ let s: String = 42
 let a: [Number] = ["hello"]
 `,
 			expectedErrors: []string{
-				"type error: cannot assign [STRING] to [NUMBER]",
+				"type error: cannot assign [String] to [Number]",
 			},
 		},
 		{
@@ -295,7 +295,7 @@ let a: [Number] = ["hello"]
 const b: Boolean = 1
 `,
 			expectedErrors: []string{
-				"type error: cannot assign NUMBER to BOOLEAN",
+				"type error: cannot assign Number to Boolean",
 			},
 		},
 		{
@@ -412,7 +412,7 @@ let myCb = fn(a: Number) -> Number { return a }
 apply(myCb)
 `,
 			expectedErrors: []string{
-				"type error: argument 1 expected fn(NUMBER) -> STRING, got fn(NUMBER) -> NUMBER",
+				"type error: argument 1 expected fn(Number) -> String, got myCb(a: Number) -> Number",
 			},
 		},
 		{
@@ -423,7 +423,7 @@ let myCb = fn(a: String) -> String { return a }
 apply(myCb)
 `,
 			expectedErrors: []string{
-				"type error: argument 1 expected fn(NUMBER) -> STRING, got fn(STRING) -> STRING",
+				"type error: argument 1 expected fn(Number) -> String, got myCb(a: String) -> String",
 			},
 		},
 		{
@@ -433,7 +433,7 @@ let a = 10
 a()
 `,
 			expectedErrors: []string{
-				"type error: cannot call a non-function (got NUMBER)",
+				"type error: cannot call a non-function (got Number)",
 			},
 		},
 		{
@@ -453,7 +453,7 @@ let check = fn(name: String) -> Boolean { return true }
 check(10)
 `,
 			expectedErrors: []string{
-				"type error: argument 1 expected STRING, got NUMBER",
+				"type error: argument 1 expected String, got Number",
 			},
 		},
 		{
@@ -462,7 +462,7 @@ check(10)
 let add = fn(a: Number, b: Number) -> String { return a + b }
 `,
 			expectedErrors: []string{
-				"type error: function declared to return STRING, but body returns NUMBER",
+				"type error: function declared to return String, but body returns Number",
 			},
 		},
 		{
@@ -527,7 +527,7 @@ let loop = fn(n: Number) -> Number {
 }
 `,
 			expectedErrors: []string{
-				"type error: argument 1 expected NUMBER, got STRING",
+				"type error: argument 1 expected Number, got String",
 			},
 		},
 		{
@@ -593,7 +593,7 @@ let count = fn(n: Number) -> Number {
 				let a = f::<Boolean, Number>(true, m)
 			`,
 			expectedErrors: []string{
-				"[Line 4, Column 14] type error: argument 2 expected map[BOOLEAN]NUMBER, got map[STRING]NUMBER",
+				"[Line 4, Column 14] type error: argument 2 expected map[Boolean]Number, got map[String]Number",
 			},
 		},
 	}
@@ -617,7 +617,7 @@ let d = '2023-10-25'
 d = 10
 `,
 			expectedErrors: []string{
-				"type error: cannot assign NUMBER to variable 'd' of type DATE",
+				"type error: cannot assign Number to variable 'd' of type Date",
 			},
 		},
 		{
@@ -635,7 +635,7 @@ d = '2023-12-01'
 let getDate = fn() -> Date { return 10 }
 `,
 			expectedErrors: []string{
-				"type error: function declared to return DATE, but body returns NUMBER",
+				"type error: function declared to return Date, but body returns Number",
 			},
 		},
 	}
@@ -652,7 +652,7 @@ if (1) {
 }
 `,
 			expectedErrors: []string{
-				"type error: condition must be a BOOLEAN, got NUMBER",
+				"type error: condition must be a Boolean, got Number",
 			},
 		},
 		{
@@ -669,7 +669,7 @@ let b = a[0]
 let a = [1, "two", 3]
 `,
 			expectedErrors: []string{
-				"type error: array elements must have the same type, expected NUMBER, got STRING",
+				"type error: array elements must have the same type, expected Number, got String",
 			},
 		},
 		{
@@ -679,7 +679,7 @@ let a = [1, 2, 3]
 let b = a["zero"]
 `,
 			expectedErrors: []string{
-				"type error: array index expected NUMBER, got STRING",
+				"type error: array index expected Number, got String",
 			},
 		},
 		{
@@ -689,7 +689,7 @@ let a = 10
 let b = a[0]
 `,
 			expectedErrors: []string{
-				"type error: index operator not supported for NUMBER",
+				"type error: index operator not supported for Number",
 			},
 		},
 		{
@@ -769,7 +769,7 @@ func TestSemanticAnalysisPrefix(t *testing.T) {
 		{
 			name:           "Invalid Bang",
 			input:          "return !5",
-			expectedErrors: []string{"type error: operator '!' requires a BOOLEAN, got NUMBER"},
+			expectedErrors: []string{"type error: operator '!' requires a Boolean, got Number"},
 		},
 		{
 			name:  "Valid Minus",
@@ -778,7 +778,7 @@ func TestSemanticAnalysisPrefix(t *testing.T) {
 		{
 			name:           "Invalid Minus",
 			input:          "return -true",
-			expectedErrors: []string{"type error: operator '-' requires a NUMBER, got BOOLEAN"},
+			expectedErrors: []string{"type error: operator '-' requires a Number, got Boolean"},
 		},
 	}
 	runTestScenarios(t, tests)
@@ -801,7 +801,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "push() rejects mismatched types",
 			input:          "import array\nlet arr = [1, 2]\nlet newArr = array.push(arr, \"string\")",
-			expectedErrors: []string{"type inference error: conflicting types for T: NUMBER and STRING", "type error: argument 2 expected NUMBER, got STRING"},
+			expectedErrors: []string{"type inference error: conflicting types for T: Number and String", "type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "pop() returns array",
@@ -830,7 +830,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "slice() rejects non-number index",
 			input:          "import array\nlet arr = [1, 2]\nlet s = array.slice(arr, \"0\", 2)",
-			expectedErrors: []string{"type error: argument 2 expected NUMBER, got STRING"},
+			expectedErrors: []string{"type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "join() works with matching types",
@@ -839,7 +839,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "join() rejects mismatched types",
 			input:          "import array\nlet arrOne = [1, 2]\nlet arrTwo = [\"a\", \"b\"]\nlet res = array.join(arrOne, arrTwo)",
-			expectedErrors: []string{"type inference error: conflicting types for T: NUMBER and STRING", "type error: argument 2 expected [NUMBER], got [STRING]"},
+			expectedErrors: []string{"type inference error: conflicting types for T: Number and String", "type error: argument 2 expected [Number], got [String]"},
 		},
 		{
 			name:  "array generic function assignment to variable",
@@ -848,7 +848,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "array generic function assignment to variable enforces types",
 			input:          "import array\nlet pushFunc = array.push\nlet arr = [1, 2]\npushFunc(arr, \"string\")",
-			expectedErrors: []string{"type inference error: conflicting types for T: NUMBER and STRING", "type error: argument 2 expected NUMBER, got STRING"},
+			expectedErrors: []string{"type inference error: conflicting types for T: Number and String", "type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "explicit generic turbofish instantiation of array function",
@@ -857,7 +857,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "explicit generic turbofish instantiation enforces explicit type",
 			input:          "import array\nlet arr = [\"a\", \"b\"]\narray.push::<Number>(arr, \"c\")",
-			expectedErrors: []string{"type error: argument 1 expected [NUMBER], got [STRING]", "type error: argument 2 expected NUMBER, got STRING"},
+			expectedErrors: []string{"type error: argument 1 expected [Number], got [String]", "type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "array generic functions on array of generic structs",
@@ -870,7 +870,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "charAt() rejects mismatched types",
 			input:          "import string\nreturn string.charAt(10, \"hello\")",
-			expectedErrors: []string{"type error: first argument to 'charAt' must be STRING, got NUMBER", "type error: second argument to 'charAt' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'charAt' must be String, got Number", "type error: second argument to 'charAt' must be Number, got String"},
 		},
 		{
 			name:  "substring() works with correct types",
@@ -879,7 +879,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "substring() rejects mismatched types",
 			input:          "import string\nreturn string.substring(10, \"start\", \"end\")",
-			expectedErrors: []string{"type error: first argument to 'substring' must be STRING, got NUMBER", "type error: second argument to 'substring' must be NUMBER, got STRING", "type error: third argument to 'substring' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'substring' must be String, got Number", "type error: second argument to 'substring' must be Number, got String", "type error: third argument to 'substring' must be Number, got String"},
 		},
 		{
 			name:  "concat() works with correct types",
@@ -888,7 +888,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "concat() rejects mismatched types",
 			input:          "import string\nreturn string.concat(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'concat' must be STRING, got NUMBER", "type error: second argument to 'concat' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'concat' must be String, got Number", "type error: second argument to 'concat' must be String, got Number"},
 		},
 		{
 			name:  "join() works with correct types",
@@ -897,12 +897,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "join() rejects mismatched types",
 			input:          "import string\nreturn string.join([10, 20], 20)",
-			expectedErrors: []string{"type error: array elements for 'join' must be STRING, got NUMBER", "type error: second argument to 'join' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: array elements for 'join' must be String, got Number", "type error: second argument to 'join' must be String, got Number"},
 		},
 		{
 			name:           "join() rejects invalid array element types",
 			input:          "import string\nreturn string.join([10, 20], \",\")",
-			expectedErrors: []string{"type error: array elements for 'join' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: array elements for 'join' must be String, got Number"},
 		},
 		{
 			name:  "split() works with correct types",
@@ -911,7 +911,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "split() rejects mismatched types",
 			input:          "import string\nreturn string.split(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'split' must be STRING, got NUMBER", "type error: second argument to 'split' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'split' must be String, got Number", "type error: second argument to 'split' must be String, got Number"},
 		},
 		{
 			name:  "contains() works with correct types",
@@ -920,7 +920,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "contains() rejects mismatched types",
 			input:          "import string\nreturn string.contains(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'contains' must be STRING, got NUMBER", "type error: second argument to 'contains' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'contains' must be String, got Number", "type error: second argument to 'contains' must be String, got Number"},
 		},
 		{
 			name:  "startsWith() works with correct types",
@@ -929,7 +929,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "startsWith() rejects mismatched types",
 			input:          "import string\nreturn string.startsWith(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'startsWith' must be STRING, got NUMBER", "type error: second argument to 'startsWith' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'startsWith' must be String, got Number", "type error: second argument to 'startsWith' must be String, got Number"},
 		},
 		{
 			name:  "endsWith() works with correct types",
@@ -938,7 +938,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "endsWith() rejects mismatched types",
 			input:          "import string\nreturn string.endsWith(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'endsWith' must be STRING, got NUMBER", "type error: second argument to 'endsWith' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'endsWith' must be String, got Number", "type error: second argument to 'endsWith' must be String, got Number"},
 		},
 		{
 			name:  "replace() works with correct types",
@@ -947,7 +947,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "replace() rejects mismatched types",
 			input:          "import string\nreturn string.replace(10, 20, 30)",
-			expectedErrors: []string{"type error: first argument to 'replace' must be STRING, got NUMBER", "type error: second argument to 'replace' must be STRING, got NUMBER", "type error: third argument to 'replace' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'replace' must be String, got Number", "type error: second argument to 'replace' must be String, got Number", "type error: third argument to 'replace' must be String, got Number"},
 		},
 		{
 			name:  "toUpper() works with correct types",
@@ -956,7 +956,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "toUpper() rejects mismatched types",
 			input:          "import string\nreturn string.toUpper(10)",
-			expectedErrors: []string{"type error: first argument to 'toUpper' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'toUpper' must be String, got Number"},
 		},
 		{
 			name:  "toLower() works with correct types",
@@ -965,7 +965,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "toLower() rejects mismatched types",
 			input:          "import string\nreturn string.toLower(10)",
-			expectedErrors: []string{"type error: first argument to 'toLower' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'toLower' must be String, got Number"},
 		},
 		{
 			name:  "trim() works with correct types",
@@ -974,7 +974,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "trim() rejects mismatched types",
 			input:          "import string\nreturn string.trim(10)",
-			expectedErrors: []string{"type error: first argument to 'trim' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'trim' must be String, got Number"},
 		},
 		{
 			name:  "string len() works with correct types",
@@ -983,7 +983,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "strlen() rejects mismatched types",
 			input:          "import string\nreturn string.len(10)",
-			expectedErrors: []string{"type error: first argument to 'len' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'len' must be String, got Number"},
 		},
 		{
 			name:  "year() works with correct types",
@@ -992,7 +992,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "year() rejects mismatched types",
 			input:          "import date\nreturn date.year(\"2023\")",
-			expectedErrors: []string{"type error: first argument to 'year' must be DATE, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'year' must be Date, got String"},
 		},
 		{
 			name:  "month() works with correct types",
@@ -1027,7 +1027,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "parse() rejects mismatched types",
 			input:          "import date\nreturn date.parse(2023)",
-			expectedErrors: []string{"type error: first argument to 'parse' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'parse' must be String, got Number"},
 		},
 		{
 			name:  "addDays() works with correct types",
@@ -1036,7 +1036,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "addDays() rejects mismatched types",
 			input:          "import date\nreturn date.addDays('2023-10-25', \"5\")",
-			expectedErrors: []string{"type error: second argument to 'addDays' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: second argument to 'addDays' must be Number, got String"},
 		},
 		{
 			name:  "diffDays() works with correct types",
@@ -1045,7 +1045,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "diffDays() rejects mismatched types",
 			input:          "import date\nreturn date.diffDays('2023-10-30', 5)",
-			expectedErrors: []string{"type error: second argument to 'diffDays' must be DATE, got NUMBER"},
+			expectedErrors: []string{"type error: second argument to 'diffDays' must be Date, got Number"},
 		},
 		{
 			name:  "new() works with correct types",
@@ -1054,7 +1054,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "new() rejects mismatched types",
 			input:          "import date\nreturn date.new(\"2023\", 1, 1)",
-			expectedErrors: []string{"type error: first argument to 'new' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'new' must be Number, got String"},
 		},
 		{
 			name:  "abs() works with correct types",
@@ -1068,7 +1068,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "abs() rejects mismatched types",
 			input:          "import math\nreturn math.abs(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'abs' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'abs' must be Number, got String"},
 		},
 		{
 			name:  "sqrt() works with correct types",
@@ -1077,7 +1077,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "sqrt() rejects mismatched types",
 			input:          "import math\nreturn math.sqrt(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'sqrt' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'sqrt' must be Number, got String"},
 		},
 		{
 			name:  "floor() works with correct types",
@@ -1086,7 +1086,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "floor() rejects mismatched types",
 			input:          "import math\nreturn math.floor(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'floor' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'floor' must be Number, got String"},
 		},
 		{
 			name:  "ceil() works with correct types",
@@ -1095,7 +1095,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "ceil() rejects mismatched types",
 			input:          "import math\nreturn math.ceil(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'ceil' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'ceil' must be Number, got String"},
 		},
 		{
 			name:  "round() works with correct types",
@@ -1104,7 +1104,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "round() rejects mismatched types",
 			input:          "import math\nreturn math.round(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'round' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'round' must be Number, got String"},
 		},
 		{
 			name:  "pow() works with correct types",
@@ -1118,12 +1118,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "pow() rejects mismatched first type",
 			input:          "import math\nreturn math.pow(\"2\", 3)",
-			expectedErrors: []string{"type error: first argument to 'pow' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'pow' must be Number, got String"},
 		},
 		{
 			name:           "pow() rejects mismatched second type",
 			input:          "import math\nreturn math.pow(2, \"3\")",
-			expectedErrors: []string{"type error: second argument to 'pow' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: second argument to 'pow' must be Number, got String"},
 		},
 		{
 			name:  "min() works with correct types",
@@ -1132,7 +1132,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "min() rejects mismatched second type",
 			input:          "import math\nreturn math.min(2, \"3\")",
-			expectedErrors: []string{"type error: second argument to 'min' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: second argument to 'min' must be Number, got String"},
 		},
 		{
 			name:  "max() works with correct types",
@@ -1141,7 +1141,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "max() rejects mismatched first type",
 			input:          "import math\nreturn math.max(\"2\", 3)",
-			expectedErrors: []string{"type error: first argument to 'max' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'max' must be Number, got String"},
 		},
 		{
 			name:  "log() works with correct types",
@@ -1150,7 +1150,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "log() rejects mismatched second type",
 			input:          "import math\nreturn math.log(100, \"10\")",
-			expectedErrors: []string{"type error: second argument to 'log' must be NUMBER, got STRING"},
+			expectedErrors: []string{"type error: second argument to 'log' must be Number, got String"},
 		},
 		{
 			name:  "rand() works with 0 arguments",
@@ -1183,7 +1183,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "log.info() rejects mismatched first type",
 			input:          "import log\nreturn log.info(42, 42)",
-			expectedErrors: []string{"type error: first argument to 'info' must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: first argument to 'info' must be String, got Number"},
 		},
 		{
 			name:           "log.info() rejects missing arguments",
@@ -1219,12 +1219,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "map.delete() rejects mismatched key type",
 			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m, 42)",
-			expectedErrors: []string{"type error: map index must be STRING, got NUMBER"},
+			expectedErrors: []string{"type error: map index must be String, got Number"},
 		},
 		{
 			name:           "map.delete() rejects mismatched first argument type",
 			input:          "import map\nreturn map.delete(\"not a map\", \"key\")",
-			expectedErrors: []string{"type error: first argument to 'delete' must be MAP, got STRING"},
+			expectedErrors: []string{"type error: first argument to 'delete' must be Map, got String"},
 		},
 		{
 			name:           "map.delete() rejects missing arguments",
@@ -1256,12 +1256,12 @@ func TestSemanticLogicalOperators(t *testing.T) {
 		{
 			name:           "Logical AND with wrong left type",
 			input:          "return 1 and true",
-			expectedErrors: []string{"type error: operator 'and' requires two BOOLEANs, got NUMBER and BOOLEAN"},
+			expectedErrors: []string{"type error: operator 'and' requires two Booleans, got Number and Boolean"},
 		},
 		{
 			name:           "Logical OR with wrong right type",
 			input:          "return false or \"string\"",
-			expectedErrors: []string{"type error: operator 'or' requires two BOOLEANs, got BOOLEAN and STRING"},
+			expectedErrors: []string{"type error: operator 'or' requires two Booleans, got Boolean and String"},
 		},
 	}
 	runTestScenarios(t, tests)
@@ -1355,7 +1355,7 @@ func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
 		{
 			name:           "Type alias mismatch",
 			input:          "type money Number\nlet add = fn(a: money) -> money { return a }\nadd(\"string\")",
-			expectedErrors: []string{"type error: argument 1 expected NUMBER, got STRING"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:           "Undefined type in alias",
@@ -1404,7 +1404,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				mapInstance[10] = 100
 			`,
 			expectedErrors: []string{
-				"[Line 5, Column 21] type error: map index must be STRING, got NUMBER",
+				"[Line 5, Column 21] type error: map index must be String, got Number",
 			},
 		},
 		{
@@ -1416,7 +1416,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				mapInstance["a"] = "hello"
 			`,
 			expectedErrors: []string{
-				"[Line 5, Column 22] type error: cannot assign STRING to map with value type NUMBER",
+				"[Line 5, Column 22] type error: cannot assign String to map with value type Number",
 			},
 		},
 		{
@@ -1434,7 +1434,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				let c = CustomStruct::<String> { f: fn(x: Number) -> Number { return x } }
 			`,
 			expectedErrors: []string{
-				"[Line 3, Column 36] type error: field 'f' expects fn(STRING) -> STRING, got fn(NUMBER) -> NUMBER",
+				"[Line 3, Column 36] type error: field 'f' expects fn(String) -> String, got fn(x: Number) -> Number",
 			},
 		},
 		{
@@ -1445,7 +1445,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 			`,
 			expectedErrors: []string{
 				"[Line 3, Column 26] type error: missing type arguments for generic struct 'CustomStruct'",
-				"[Line 3, Column 26] type error: field 'f' expects fn(T) -> T, got fn(STRING) -> STRING",
+				"[Line 3, Column 26] type error: field 'f' expects fn(T) -> T, got fn(x: String) -> String",
 			},
 		},
 		{
@@ -1456,7 +1456,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 			`,
 			expectedErrors: []string{
 				"[Line 3, Column 44] type error: expected 1 type arguments for struct 'CustomStruct', got 2",
-				"[Line 3, Column 44] type error: field 'f' expects fn(T) -> T, got fn(STRING) -> STRING",
+				"[Line 3, Column 44] type error: field 'f' expects fn(T) -> T, got fn(x: String) -> String",
 			},
 		},
 		{
@@ -1522,7 +1522,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				}
 			`,
 			expectedErrors: []string{
-				"type error: field 'run' expects fn(NUMBER) -> STRING, got fn(NUMBER) -> NUMBER",
+				"type error: field 'run' expects fn(Number) -> String, got fn(n: Number) -> Number",
 			},
 		},
 		{
@@ -1584,7 +1584,7 @@ func TestSemanticAnalysisStructs(t *testing.T) {
 				}
 				let u = User { age: "30" }
 			`,
-			expectedErrors: []string{"type error: field 'age' expects NUMBER, got STRING"},
+			expectedErrors: []string{"type error: field 'age' expects Number, got String"},
 		},
 		{
 			name: "Access undefined struct property",
@@ -1686,7 +1686,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 		{
 			name:           "cast.to::<String, Number>() rejects invalid fallback",
 			input:          "import cast\nreturn cast.to::<String, Number>(\"123\", \"err\")",
-			expectedErrors: []string{"type error: argument 2 expected NUMBER, got STRING"},
+			expectedErrors: []string{"type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "cast.to() works with any first argument without turbofish due to implicit generic binding of fallback",
@@ -1695,7 +1695,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 		{
 			name:           "cast.to::<String, Boolean>() rejects invalid fallback",
 			input:          "import cast\nreturn cast.to::<String, Boolean>(\"true\", 1)",
-			expectedErrors: []string{"type error: argument 2 expected BOOLEAN, got NUMBER"},
+			expectedErrors: []string{"type error: argument 2 expected Boolean, got Number"},
 		},
 		{
 			name: "assign invalid type to map.KeyFunc property",
@@ -1704,7 +1704,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 				type CustomStruct struct { key map.KeyFunc }
 				let s = CustomStruct{key: 10}
 			`,
-			expectedErrors: []string{"type error: field 'key' expects fn() -> STRING, got NUMBER"},
+			expectedErrors: []string{"type error: field 'key' expects KeyFunc() -> String, got Number"},
 		},
 		{
 			name: "assign wrong function signature to map.KeyFunc property",
@@ -1713,7 +1713,7 @@ func TestSemanticNullableNavigation(t *testing.T) {
 				type CustomStruct struct { key map.KeyFunc }
 				let s = CustomStruct{key: fn() -> Number { return 10 }}
 			`,
-			expectedErrors: []string{"type error: field 'key' expects fn() -> STRING, got fn() -> NUMBER"},
+			expectedErrors: []string{"type error: field 'key' expects KeyFunc() -> String, got fn() -> Number"},
 		},
 		{
 			name: "struct with duplicate fields of same type",

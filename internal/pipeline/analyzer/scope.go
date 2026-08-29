@@ -1,12 +1,16 @@
 package analyzer
 
-import "caja-cli/internal/pipeline/analyzer/symbol"
+import (
+	"caja-cli/internal/pipeline/analyzer/symbol"
+	"caja-cli/internal/pipeline/lexer"
+)
 
 // ScopeEntry represents a symbol declared in a scope and tracks if it is a constant.
 type ScopeEntry struct {
-	Sym           symbol.Symbol
-	IsConstant    bool
-	FunctionDepth int
+	Sym             symbol.Symbol
+	IsConstant      bool
+	FunctionDepth   int
+	DefinitionToken lexer.Token
 }
 
 // globalScope returns the top-level scope of this analyzer
@@ -28,7 +32,7 @@ func (a *Analyzer) popScope() {
 }
 
 // declare registers a variable name in the current (innermost) scope.
-func (a *Analyzer) declare(name string, sym symbol.Symbol, isConstant bool) {
+func (a *Analyzer) declare(name string, sym symbol.Symbol, isConstant bool, defToken lexer.Token) {
 	last := len(a.scopes) - 1
-	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth}
+	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth, DefinitionToken: defToken}
 }

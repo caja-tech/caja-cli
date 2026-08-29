@@ -554,6 +554,7 @@ type CallExpression struct {
 	Function      Expression  // Identifier or FunctionLiteral
 	TypeArguments []string    // Generic type arguments e.g., f::<Number>()
 	Arguments     []Expression
+	RParenToken   lexer.Token
 }
 
 func (ce *CallExpression) expressionNode()      {}

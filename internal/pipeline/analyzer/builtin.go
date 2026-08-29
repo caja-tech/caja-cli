@@ -77,10 +77,10 @@ func (a *Analyzer) analyzeStringCharAtFunction(n *ast.CallExpression) symbol.Sym
 	idxSymbol := a.analyze(n.Arguments[1])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'charAt' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'charAt' must be String, got %s", strSymbol.Type()))
 	}
 	if idxSymbol.Type() != environment.NUMBER_OBJ && idxSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'charAt' must be NUMBER, got %s", idxSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'charAt' must be Number, got %s", idxSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
@@ -98,13 +98,13 @@ func (a *Analyzer) analyzeStringSubstringFunction(n *ast.CallExpression) symbol.
 	endSymbol := a.analyze(n.Arguments[2])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'substring' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'substring' must be String, got %s", strSymbol.Type()))
 	}
 	if startSymbol.Type() != environment.NUMBER_OBJ && startSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'substring' must be NUMBER, got %s", startSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'substring' must be Number, got %s", startSymbol.Type()))
 	}
 	if endSymbol.Type() != environment.NUMBER_OBJ && endSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'substring' must be NUMBER, got %s", endSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'substring' must be Number, got %s", endSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
@@ -121,10 +121,10 @@ func (a *Analyzer) analyzeStringConcatFunction(n *ast.CallExpression) symbol.Sym
 	str2Symbol := a.analyze(n.Arguments[1])
 
 	if str1Symbol.Type() != environment.STRING_OBJ && str1Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'concat' must be STRING, got %s", str1Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'concat' must be String, got %s", str1Symbol.Type()))
 	}
 	if str2Symbol.Type() != environment.STRING_OBJ && str2Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'concat' must be STRING, got %s", str2Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'concat' must be String, got %s", str2Symbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
@@ -141,10 +141,10 @@ func (a *Analyzer) analyzeStringSplitFunction(n *ast.CallExpression) symbol.Symb
 	delimSymbol := a.analyze(n.Arguments[1])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'split' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'split' must be String, got %s", strSymbol.Type()))
 	}
 	if delimSymbol.Type() != environment.STRING_OBJ && delimSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'split' must be STRING, got %s", delimSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'split' must be String, got %s", delimSymbol.Type()))
 	}
 
 	return symbol.NewArraySymbol(symbol.NewBasicSymbol(environment.STRING_OBJ))
@@ -161,10 +161,10 @@ func (a *Analyzer) analyzeStringMatchFunction(functionName string, n *ast.CallEx
 	subSymbol := a.analyze(n.Arguments[1])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", functionName, strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be String, got %s", functionName, strSymbol.Type()))
 	}
 	if subSymbol.Type() != environment.STRING_OBJ && subSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be STRING, got %s", functionName, subSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be String, got %s", functionName, subSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
@@ -182,13 +182,13 @@ func (a *Analyzer) analyzeStringReplaceFunction(n *ast.CallExpression) symbol.Sy
 	newSymbol := a.analyze(n.Arguments[2])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'replace' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'replace' must be String, got %s", strSymbol.Type()))
 	}
 	if oldSymbol.Type() != environment.STRING_OBJ && oldSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'replace' must be STRING, got %s", oldSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'replace' must be String, got %s", oldSymbol.Type()))
 	}
 	if newSymbol.Type() != environment.STRING_OBJ && newSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'replace' must be STRING, got %s", newSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'replace' must be String, got %s", newSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
@@ -204,7 +204,7 @@ func (a *Analyzer) analyzeStringTransformFunction(functionName string, n *ast.Ca
 	strSymbol := a.analyze(n.Arguments[0])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", functionName, strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be String, got %s", functionName, strSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
@@ -220,7 +220,7 @@ func (a *Analyzer) analyzeStringLenFunction(n *ast.CallExpression) symbol.Symbol
 	strSymbol := a.analyze(n.Arguments[0])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'len' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'len' must be String, got %s", strSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
@@ -243,11 +243,11 @@ func (a *Analyzer) analyzeStringJoinFunction(n *ast.CallExpression) symbol.Symbo
 	if arrSymbol.Type() != environment.ARRAY_OBJ && arrSymbol.Type() != environment.ANY_OBJ {
 		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'join' must be an ARRAY, got %s", arrSymbol.Type()))
 	} else if arrSymbol.Type() == environment.ARRAY_OBJ && arrSymbol.ElementSymbol() != nil && arrSymbol.ElementSymbol().Type() != environment.STRING_OBJ && arrSymbol.ElementSymbol().Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: array elements for 'join' must be STRING, got %s", arrSymbol.ElementSymbol().Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: array elements for 'join' must be String, got %s", arrSymbol.ElementSymbol().Type()))
 	}
 
 	if delimSymbol.Type() != environment.STRING_OBJ && delimSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'join' must be STRING, got %s", delimSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'join' must be String, got %s", delimSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
@@ -263,7 +263,7 @@ func (a *Analyzer) analyzeDateComponentFunction(functionName string, n *ast.Call
 	dateSymbol := a.analyze(n.Arguments[0])
 
 	if dateSymbol.Type() != environment.DATE_OBJ && dateSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be DATE, got %s", functionName, dateSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be Date, got %s", functionName, dateSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
@@ -289,7 +289,7 @@ func (a *Analyzer) analyzeDateParseFunction(n *ast.CallExpression) symbol.Symbol
 	strSymbol := a.analyze(n.Arguments[0])
 
 	if strSymbol.Type() != environment.STRING_OBJ && strSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'parse' must be STRING, got %s", strSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'parse' must be String, got %s", strSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
@@ -306,10 +306,10 @@ func (a *Analyzer) analyzeDateAddDaysFunction(n *ast.CallExpression) symbol.Symb
 	numSymbol := a.analyze(n.Arguments[1])
 
 	if dateSymbol.Type() != environment.DATE_OBJ && dateSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'addDays' must be DATE, got %s", dateSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'addDays' must be Date, got %s", dateSymbol.Type()))
 	}
 	if numSymbol.Type() != environment.NUMBER_OBJ && numSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'addDays' must be NUMBER, got %s", numSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'addDays' must be Number, got %s", numSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
@@ -326,10 +326,10 @@ func (a *Analyzer) analyzeDateDiffDaysFunction(n *ast.CallExpression) symbol.Sym
 	date2Symbol := a.analyze(n.Arguments[1])
 
 	if date1Symbol.Type() != environment.DATE_OBJ && date1Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'diffDays' must be DATE, got %s", date1Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'diffDays' must be Date, got %s", date1Symbol.Type()))
 	}
 	if date2Symbol.Type() != environment.DATE_OBJ && date2Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'diffDays' must be DATE, got %s", date2Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'diffDays' must be Date, got %s", date2Symbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
@@ -347,13 +347,13 @@ func (a *Analyzer) analyzeDateNewFunction(n *ast.CallExpression) symbol.Symbol {
 	daySymbol := a.analyze(n.Arguments[2])
 
 	if yearSymbol.Type() != environment.NUMBER_OBJ && yearSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'new' must be NUMBER, got %s", yearSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'new' must be Number, got %s", yearSymbol.Type()))
 	}
 	if monthSymbol.Type() != environment.NUMBER_OBJ && monthSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'new' must be NUMBER, got %s", monthSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'new' must be Number, got %s", monthSymbol.Type()))
 	}
 	if daySymbol.Type() != environment.NUMBER_OBJ && daySymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'new' must be NUMBER, got %s", daySymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: third argument to 'new' must be Number, got %s", daySymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
@@ -378,7 +378,7 @@ func (a *Analyzer) analyzeMathOneArgFunction(functionName string, n *ast.CallExp
 
 	argSymbol := a.analyze(n.Arguments[0])
 	if argSymbol.Type() != environment.NUMBER_OBJ && argSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be NUMBER, got %s", functionName, argSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be Number, got %s", functionName, argSymbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
@@ -393,11 +393,11 @@ func (a *Analyzer) analyzeMathTwoArgFunction(functionName string, n *ast.CallExp
 
 	arg1Symbol := a.analyze(n.Arguments[0])
 	if arg1Symbol.Type() != environment.NUMBER_OBJ && arg1Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be NUMBER, got %s", functionName, arg1Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be Number, got %s", functionName, arg1Symbol.Type()))
 	}
 	arg2Symbol := a.analyze(n.Arguments[1])
 	if arg2Symbol.Type() != environment.NUMBER_OBJ && arg2Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be NUMBER, got %s", functionName, arg2Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be Number, got %s", functionName, arg2Symbol.Type()))
 	}
 
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
@@ -412,7 +412,7 @@ func (a *Analyzer) analyzeLogFunction(functionName string, n *ast.CallExpression
 
 	arg1Symbol := a.analyze(n.Arguments[0])
 	if arg1Symbol.Type() != environment.STRING_OBJ && arg1Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be STRING, got %s", functionName, arg1Symbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be String, got %s", functionName, arg1Symbol.Type()))
 	}
 	// The second argument can be anything, so we just analyze it without type checking
 	_ = a.analyze(n.Arguments[1])
@@ -441,7 +441,7 @@ func (a *Analyzer) analyzeMapContainsKeyFunction(n *ast.CallExpression) symbol.S
 	keySymbol := a.analyze(n.Arguments[1])
 
 	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'containsKey' must be MAP, got %s", mapSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'containsKey' must be Map, got %s", mapSymbol.Type()))
 	}
 
 	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
@@ -464,7 +464,7 @@ func (a *Analyzer) analyzeMapDeleteFunction(n *ast.CallExpression) symbol.Symbol
 	keySymbol := a.analyze(n.Arguments[1])
 
 	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'delete' must be MAP, got %s", mapSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'delete' must be Map, got %s", mapSymbol.Type()))
 	}
 
 	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {

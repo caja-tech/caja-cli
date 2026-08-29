@@ -10,6 +10,7 @@ bin/
 !npm/bin/
 dist/
 out/
+debug/
 
 # Test binary and coverage
 *.test

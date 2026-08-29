@@ -96,7 +96,7 @@ func TestEvaluateArrays(t *testing.T) {
 func TestErrorArrays(t *testing.T) {
 	var tests = []testErrorScenario{
 		{"Index out of bounds positive", "let a = [1, 2]\nreturn a[2]", "runtime error: array index out of bounds"},
-		{"Index operator on non-array (caught by semantic)", "let a = 1\nreturn a[0]", "type error: index operator not supported for NUMBER"},
+		{"Index operator on non-array (caught by semantic)", "let a = 1\nreturn a[0]", "type error: index operator not supported for Number"},
 		{"Assign index out of bounds", "let a = [1, 2]\na[2] = 5", "runtime error: array index out of bounds"},
 		{"Assign index out of bounds negative", "let a = [1, 2]\na[-1] = 5", "runtime error: array index out of bounds"},
 	}
@@ -389,7 +389,7 @@ func TestErrorHandling(t *testing.T) {
 		{
 			"Generic map passed as argument (invalid generic instantiation mismatch)", 
 			"let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }\nlet m: map[String]Number = { \"1\": 10 }\nlet a = f::<Boolean, Number>(true, m)", 
-			"[Line 3, Column 10] type error: argument 2 expected map[BOOLEAN]NUMBER, got map[STRING]NUMBER",
+			"[Line 3, Column 10] type error: argument 2 expected map[Boolean]Number, got map[String]Number",
 		},
 	}
 
@@ -1297,7 +1297,7 @@ func TestStructErrors(t *testing.T) {
 				}
 				let p = Point { x: "not-a-number" }
 			`,
-			expectedError: "type error: field 'x' expects NUMBER, got STRING",
+			expectedError: "type error: field 'x' expects Number, got String",
 		},
 		{
 			name: "Assign to const property",

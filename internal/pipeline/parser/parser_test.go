@@ -4,6 +4,7 @@ import (
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/text"
+	"strings"
 	"testing"
 )
 
@@ -1435,5 +1436,32 @@ func TestPipeOperatorParsing(t *testing.T) {
 				t.Errorf("expression string wrong. expected %q, got %q", tt.expected, stmt.Expression.String())
 			}
 		})
+	}
+}
+
+// TestMultipleStatementsOnSameLineError verifies that consecutive statements
+// on the same line without a newline produce a syntax error.
+func TestMultipleStatementsOnSameLineError(t *testing.T) {
+	input := "let area = calculus.PI 10 * 10"
+	tknzr := lexer.New(input)
+	p := New(tknzr)
+	p.Parse()
+
+	errors := p.Errors()
+	if len(errors) == 0 {
+		t.Fatal("expected parser errors for multiple statements on same line, but got none")
+	}
+
+	expectedError := "Expected a newline between statements"
+	found := false
+	for _, msg := range errors {
+		if strings.Contains(msg, expectedError) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatalf("expected error containing %q, got: %v", expectedError, errors)
 	}
 }

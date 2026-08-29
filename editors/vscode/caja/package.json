@@ -1,0 +1,61 @@
+{
+  "name": "caja",
+  "displayName": "caja",
+  "description": "Rich caja language support for Visual Studio Code",
+  "version": "0.1.2",
+  "icon": "profile_256x256.png",
+  "publisher": "CajaTech",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/caja-tech/caja-cli"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:caja"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "caja",
+        "aliases": [
+          "caja",
+          "Caja"
+        ],
+        "extensions": [
+          ".caja"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/logo32x32.svg",
+          "dark": "./icons/logo32x32.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "caja",
+        "scopeName": "source.caja",
+        "path": "./syntaxes/caja.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -b",
+    "watch": "tsc -b -w"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.3.3"
+  }
+}

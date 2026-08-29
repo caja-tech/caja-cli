@@ -1,0 +1,12 @@
+# tests/calculus.caja
+# A local module imported by main.caja
+
+const PI = 3.14159
+
+const add = fn(a: Number, b: Number) -> Number {
+    return a + b
+}
+
+const square = fn(x: Number) -> Number {
+    return x * x
+}
