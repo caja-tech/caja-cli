@@ -7,13 +7,17 @@ import "caja-cli/internal/pipeline/environment"
 type BuiltinSymbol struct {
 	symbolType environment.ObjectType
 	arity      int
+	Label      string
+	Params     []string
 }
 
 // NewBuiltinSymbol creates and returns a new BuiltinSymbol with the specified arity.
-func NewBuiltinSymbol(arity int) *BuiltinSymbol {
+func NewBuiltinSymbol(arity int, label string, params ...string) *BuiltinSymbol {
 	return &BuiltinSymbol{
 		symbolType: environment.BUILTIN_OBJ,
 		arity:      arity,
+		Label:      label,
+		Params:     params,
 	}
 }
 
@@ -45,7 +49,9 @@ func (bs *BuiltinSymbol) Type() environment.ObjectType {
 	return bs.symbolType
 }
 
-// String returns the string representation of the builtin type.
 func (bs *BuiltinSymbol) String() string {
+	if bs.Label != "" {
+		return bs.Label
+	}
 	return string(bs.Type())
 }

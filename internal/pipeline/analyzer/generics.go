@@ -104,7 +104,7 @@ func substituteTypesWithVisited(target symbol.Symbol, inferred map[string]symbol
 		for _, p := range fn.ParamTypes() {
 			newParams = append(newParams, substituteTypesWithVisited(p, inferred, visited))
 		}
-		return symbol.NewFunctionSymbol(nil, fn.Arity(), newParams, substituteTypesWithVisited(fn.ReturnType(), inferred, visited))
+		return symbol.NewFunctionSymbol(fn.Name, fn.ParamNames, nil, fn.Arity(), newParams, substituteTypesWithVisited(fn.ReturnType(), inferred, visited))
 	}
 
 	if nullType, ok := target.(*symbol.NullableSymbol); ok {

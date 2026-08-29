@@ -22,5 +22,5 @@ func (n *NullSymbol) Equals(other Symbol) bool {
 
 // String returns the string representation of the null type.
 func (n *NullSymbol) String() string {
-	return string(n.Type())
+	return "Nil"
 }

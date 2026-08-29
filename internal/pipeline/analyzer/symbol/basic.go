@@ -1,6 +1,8 @@
 package symbol
 
-import "caja-cli/internal/pipeline/environment"
+import (
+	"caja-cli/internal/pipeline/environment"
+)
 
 // BasicSymbol represents a primitive type in the semantic analysis (e.g., NUMBER, STRING, BOOLEAN).
 type BasicSymbol struct {

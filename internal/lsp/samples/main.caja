@@ -1,0 +1,55 @@
+# tests/calculus.caja
+# Use this file to test LSP Hover and Go To Definition features in VS Code.
+import math
+import string
+import calculus
+
+# 1. Primitive Variables
+let welcomeMessage = "Hello from Caja LSP!"
+const maxRetries = 5
+
+# Hover over `maxRetries` or `welcomeMessage` below to see their types.
+# Cmd+Click on `welcomeMessage` to jump back to its definition.
+let messageLength = string.len(welcomeMessage)
+
+# 2. Struct Definitions and Instantiations
+type User struct {
+    id Number
+    name String
+    isActive Boolean
+}
+
+let admin = User {
+    id: 1,
+    name: "Admin User",
+    isActive: true
+}
+
+# Hover over `admin` to see the struct type layout.
+# Cmd+Click on `admin` below.
+let isAdminActive = admin.isActive
+
+# 3. Functions
+# Hover over `calculateDiscount` to see its full signature.
+let calculateDiscount = fn(price: Number, discountPercent: Number) -> Number {
+    let multiplier = (100 - discountPercent) / 100
+    return price * multiplier
+}
+
+# Cmd+Click on `calculateDiscount` to jump to the function definition.
+let finalPrice = calculateDiscount(200, 15)
+
+# 4. Local Module Imports
+# Hover over `calculus` to see it resolved as a module.
+# Hover over `calculus.add` or `calculus.PI` to see the exported types from the local file.
+# Cmd+Click on `calculus.add` to jump straight to `tests/calculus.caja`.
+let sum = calculus.add(10, 20)
+let area = calculus.PI * 10 * 10
+
+# 5. Pipe Operators and Standard Library
+# Cmd+Click on `math.abs` won't jump (since it's a built-in), but hover will work.
+let result = -100
+    |> math.abs()
+    |> calculus.square()
+
+return result

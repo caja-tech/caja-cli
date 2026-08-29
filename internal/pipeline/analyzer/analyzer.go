@@ -6,6 +6,8 @@ import (
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/modules"
+	"context"
+
 	"fmt"
 )
 
@@ -13,33 +15,45 @@ import (
 // It manages variable scopes and tracks semantic errors such as
 // undeclared variables and variable redeclarations.
 type Analyzer struct {
-	scopes        []map[string]ScopeEntry
-	types         map[string]symbol.Symbol
-	errors        []string
-	functionDepth int
-	globalEnv     *environment.Environment
-	cache         map[string]*Analyzer
-	loading       map[string]bool
-	privates      map[string]bool
+	ctx                 context.Context
+	scopes              []map[string]ScopeEntry
+	types               map[string]symbol.Symbol
+	diagnosticErrors    []ast.DiagnosticError
+	nodeSymbols         map[ast.Node]symbol.Symbol
+	nodeDefinitions     map[ast.Node]lexer.Token
+	nodeDefinitionFiles map[ast.Node]string
+	functionDepth       int
+	globalEnv           *environment.Environment
+	cache               map[string]*Analyzer
+	loading             map[string]bool
+	privates            map[string]bool
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
 func New(globalEnv *environment.Environment) *Analyzer {
 	globalScope := make(map[string]ScopeEntry)
 	analyzer := &Analyzer{
-		scopes:    []map[string]ScopeEntry{globalScope},
-		types:     make(map[string]symbol.Symbol),
-		errors:    make([]string, 0),
-		globalEnv: globalEnv,
-		cache:     make(map[string]*Analyzer),
-		loading:   make(map[string]bool),
-		privates:  make(map[string]bool),
+		scopes:              []map[string]ScopeEntry{globalScope},
+		types:               make(map[string]symbol.Symbol),
+		diagnosticErrors:    make([]ast.DiagnosticError, 0),
+		nodeSymbols:         make(map[ast.Node]symbol.Symbol),
+		nodeDefinitions:     make(map[ast.Node]lexer.Token),
+		nodeDefinitionFiles: make(map[ast.Node]string),
+		globalEnv:           globalEnv,
+		cache:               make(map[string]*Analyzer),
+		loading:             make(map[string]bool),
+		privates:            make(map[string]bool),
 	}
 
 	// Inject Nothing as a global builtin type
 	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol))
 
 	return analyzer
+}
+
+func (a *Analyzer) WithContext(ctx context.Context) *Analyzer {
+	a.ctx = ctx
+	return a
 }
 
 // Run initiates the semantic analysis process starting from the given AST node.
@@ -59,17 +73,54 @@ func (a *Analyzer) PrintErrors() {
 
 // Errors returns the list of semantic errors found during analysis.
 func (a *Analyzer) Errors() []string {
-	return a.errors
+	var errs []string
+	for _, e := range a.diagnosticErrors {
+		errs = append(errs, e.String())
+	}
+	return errs
+}
+
+// DiagnosticErrors returns the structured diagnostic errors.
+func (a *Analyzer) DiagnosticErrors() []ast.DiagnosticError {
+	return a.diagnosticErrors
+}
+
+// GetSymbol retrieves the semantic symbol evaluated for the given AST node.
+func (a *Analyzer) GetSymbol(node ast.Node) (symbol.Symbol, bool) {
+	sym, ok := a.nodeSymbols[node]
+	return sym, ok
+}
+
+// GetDefinition retrieves the token where the symbol in the given AST node was declared, and the file path.
+func (a *Analyzer) GetDefinition(node ast.Node) (lexer.Token, string, bool) {
+	tok, ok := a.nodeDefinitions[node]
+	file := a.nodeDefinitionFiles[node]
+	if file == "" && a.globalEnv != nil {
+		file = a.globalEnv.FileName
+	}
+	return tok, file, ok
 }
 
 // HasErrors returns true if any semantic errors were found.
 func (a *Analyzer) HasErrors() bool {
-	return len(a.errors) > 0
+	return len(a.diagnosticErrors) > 0
 }
 
 // analyze traverses the AST starting from the given node and performs
 // semantic checks, populating the errors slice if any issues are found.
 func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
+	if a.ctx != nil && a.ctx.Err() != nil {
+		return symbol.AnySymbol()
+	}
+	if node == nil {
+		return symbol.AnySymbol()
+	}
+	sym := a.analyzeNode(node)
+	a.nodeSymbols[node] = sym
+	return sym
+}
+
+func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 	switch n := node.(type) {
 	case *ast.Program:
 		return a.analyzeProgram(n)
@@ -148,11 +199,13 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 	types := make(map[string]symbol.Symbol)
 	privates := make(map[string]bool)
 	constants := make(map[string]bool)
+	definitions := make(map[string]lexer.Token)
 
 	// Assuming top-level declarations are in the first scope (index 0)
 	if len(a.scopes) > 0 {
 		for name, entry := range a.scopes[0] {
 			exports[name] = entry.Sym
+			definitions[name] = entry.DefinitionToken
 			if a.privates[name] {
 				privates[name] = true
 			}
@@ -168,7 +221,7 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 		}
 	}
 
-	return symbol.NewModuleSymbol("module", exports, types, privates, constants)
+	return symbol.NewModuleSymbol("module", exports, types, privates, constants, definitions, a.globalEnv.FileName)
 }
 
 // analyzeArrayLiteral ensures all elements in the array match the type of the first element,
@@ -256,11 +309,11 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
 		}
 		paramTypes = append(paramTypes, paramSymbol)
-		a.declare(param.Name, paramSymbol, true)
+		a.declare(param.Name, paramSymbol, true, n.Token)
 	}
 
 	actualReturnSymbol := a.analyze(n.Body)
-	
+
 	a.functionDepth--
 	a.popScope()
 
@@ -298,7 +351,11 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 		delete(a.types, tParam)
 	}
 
-	return symbol.NewFunctionSymbol(n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
+	var paramNames []string
+	for _, p := range n.Parameters {
+		paramNames = append(paramNames, p.Name)
+	}
+	return symbol.NewFunctionSymbol("", paramNames, n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
 }
 
 // analyzeStructLiteral validates the fields of a struct instantiation
@@ -389,8 +446,12 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 			returnType = resolvedReturnType
 		}
 
-		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
-		a.declare(n.Name.Value, fnSymbol, false)
+		var paramNames []string
+		for _, p := range fnNode.Parameters {
+			paramNames = append(paramNames, p.Name)
+		}
+		fnSymbol := symbol.NewFunctionSymbol(n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
+		a.declare(n.Name.Value, fnSymbol, false, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
@@ -428,7 +489,11 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 	}
 
-	a.declare(n.Name.Value, valType, false)
+	if fnSym, ok := valType.(*symbol.FunctionSymbol); ok && fnSym.Name == "" {
+		fnSym.Name = n.Name.Value
+	}
+
+	a.declare(n.Name.Value, valType, false, n.Name.Token)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -471,8 +536,12 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 			returnType = resolvedReturnType
 		}
 
-		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
-		a.declare(n.Name.Value, fnSymbol, true)
+		var paramNames []string
+		for _, p := range fnNode.Parameters {
+			paramNames = append(paramNames, p.Name)
+		}
+		fnSymbol := symbol.NewFunctionSymbol(n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
+		a.declare(n.Name.Value, fnSymbol, true, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: function '%s' contains unconditional recursion and will infinitely loop", n.Name.Value))
@@ -510,7 +579,11 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 	}
 
-	a.declare(n.Name.Value, valType, true)
+	if fnSym, ok := valType.(*symbol.FunctionSymbol); ok && fnSym.Name == "" {
+		fnSym.Name = n.Name.Value
+	}
+
+	a.declare(n.Name.Value, valType, true, n.Name.Token)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -529,8 +602,8 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	modName := n.Name.Value
 
 	if symbols, exportedTypes, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil)
-		a.declare(modName, modSymbol, true)
+		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil, nil, "")
+		a.declare(modName, modSymbol, true, n.Name.Token)
 		return modSymbol
 	}
 
@@ -559,13 +632,13 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	modAnalyzer := New(modEnv)
 	modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
 	modSymbol := modAnalyzer.analyze(modProgram)
-	if len(modAnalyzer.errors) > 0 {
+	if len(modAnalyzer.diagnosticErrors) > 0 {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: failed to analyze module %s", modPath))
-		a.errors = append(a.errors, modAnalyzer.errors...)
+		a.diagnosticErrors = append(a.diagnosticErrors, modAnalyzer.diagnosticErrors...)
 		return symbol.AnySymbol()
 	}
 
-	a.declare(modName, modSymbol, true)
+	a.declare(modName, modSymbol, true, n.Name.Token)
 	return modSymbol
 }
 
@@ -636,7 +709,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 
 	if n.Signature != nil {
 		var paramTypes []symbol.Symbol
-		
+
 		for _, pt := range n.Signature.ParamTypes {
 			paramSymbol, ok := a.findTypeSymbolInTypes(pt)
 			if !ok {
@@ -653,8 +726,8 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			}
 			returnType = resolvedReturn
 		}
-		
-		fnSym := symbol.NewFunctionSymbol(nil, len(n.Signature.ParamTypes), paramTypes, returnType)
+
+		fnSym := symbol.NewFunctionSymbol(n.Name.Value, nil, nil, len(n.Signature.ParamTypes), paramTypes, returnType)
 		if len(n.TypeParameters) > 0 {
 			fnSym.TypeParameters = n.TypeParameters
 		}
@@ -718,6 +791,7 @@ func (a *Analyzer) analyzeExpressionStatement(n *ast.ExpressionStatement) symbol
 // logging an error if it has not been declared.
 func (a *Analyzer) analyzeIdentifier(n *ast.Identifier) symbol.Symbol {
 	if entry, ok := a.findVarSymbolInScope(n.Value); ok {
+		a.nodeDefinitions[n] = entry.DefinitionToken
 		return entry.Sym
 	}
 
@@ -732,12 +806,12 @@ func (a *Analyzer) analyzePrefixExpression(n *ast.PrefixExpression) symbol.Symbo
 	switch n.Operator {
 	case "!":
 		if rightSymbol.Type() != environment.BOOLEAN_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a BOOLEAN, got %s", rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a Boolean, got %s", rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	case "-":
 		if rightSymbol.Type() != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a NUMBER, got %s", rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a Number, got %s", rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 	default:
@@ -769,14 +843,14 @@ func (a *Analyzer) analyzeInfixExpression(n *ast.InfixExpression) symbol.Symbol 
 
 	case "-", "*", "/", "%", "^":
 		if leftSymbol.Type() != environment.NUMBER_OBJ || rightSymbol.Type() != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two Numbers, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 			return symbol.NewBasicSymbol(environment.ANY_OBJ)
 		}
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 
 	case "<", ">", "<=", ">=":
 		if leftSymbol.Type() != environment.NUMBER_OBJ || rightSymbol.Type() != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two Numbers, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 
@@ -801,7 +875,7 @@ func (a *Analyzer) analyzeInfixExpression(n *ast.InfixExpression) symbol.Symbol 
 
 	case "and", "or", "xor":
 		if leftSymbol.Type() != environment.BOOLEAN_OBJ || rightSymbol.Type() != environment.BOOLEAN_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two BOOLEANs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two Booleans, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	}
@@ -814,7 +888,7 @@ func (a *Analyzer) analyzeInfixExpression(n *ast.InfixExpression) symbol.Symbol 
 func (a *Analyzer) analyzeIfExpression(n *ast.IfExpression) symbol.Symbol {
 	condSymbol := a.analyze(n.Condition)
 	if condSymbol.Type() != environment.BOOLEAN_OBJ && condSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a BOOLEAN, got %s", condSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a Boolean, got %s", condSymbol.Type()))
 	}
 
 	trueType := a.analyze(n.Consequence)
@@ -927,7 +1001,7 @@ func (a *Analyzer) analyzeIndexExpression(n *ast.IndexExpression) symbol.Symbol 
 
 	if leftSym.Type() == environment.ARRAY_OBJ {
 		if indexSym.Type() != environment.NUMBER_OBJ && indexSym.Type() != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexSym.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: array index expected Number, got %s", indexSym.Type()))
 		}
 		if arrSym, ok := leftSym.(*symbol.ArraySymbol); ok {
 			return arrSym.ElementSymbol()
@@ -956,7 +1030,7 @@ func (a *Analyzer) analyzeIndexAssignmentStatement(n *ast.IndexAssignmentStateme
 
 	if leftSym.Type() == environment.ARRAY_OBJ {
 		if idxSym.Type() != environment.NUMBER_OBJ && idxSym.Type() != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: array index must be NUMBER, got %s", idxSym.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: array index must be Number, got %s", idxSym.Type()))
 		}
 		if arrSym, ok := leftSym.(*symbol.ArraySymbol); ok {
 			if !arrSym.ElementSymbol().Equals(valSym) && valSym.Type() != environment.ANY_OBJ {
@@ -1022,6 +1096,11 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 	if modSymbol, ok := leftSymbol.(*symbol.ModuleSymbol); ok {
 		if propertySymbol, ok := modSymbol.GetSymbol(n.Property.Value); ok {
 			propType = propertySymbol
+			a.nodeSymbols[n.Property] = propertySymbol
+			if defToken, ok := modSymbol.Definitions[n.Property.Value]; ok {
+				a.nodeDefinitions[n.Property] = defToken
+				a.nodeDefinitionFiles[n.Property] = modSymbol.FilePath
+			}
 		} else {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on module", n.Property.Value))
 			return symbol.AnySymbol()
@@ -1029,6 +1108,8 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 	} else if structDef != nil {
 		if fieldSym, exists := structDef.Fields[n.Property.Value]; exists {
 			propType = fieldSym.Type
+			a.nodeSymbols[n.Property] = propType
+			// We could also store definition if StructDefSymbol tracked it, but we don't have it yet.
 		} else {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' not found on struct '%s'", n.Property.Value, structDef.Name))
 			return symbol.AnySymbol()
@@ -1105,7 +1186,7 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 
 // reportError formats and appends a semantic error with the token's line and column.
 func (a *Analyzer) reportError(token lexer.Token, msg string) {
-	a.errors = append(a.errors, fmt.Sprintf("[Line %d, Column %d] %s", token.Line, token.Column, msg))
+	a.diagnosticErrors = append(a.diagnosticErrors, ast.DiagnosticError{Token: token, Message: msg})
 }
 
 // enforcePurity checks if the given expression is mutating an outer scope variable.
