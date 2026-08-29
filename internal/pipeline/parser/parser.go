@@ -1091,6 +1091,7 @@ func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
 func (p *Parser) parseFunctionCallExpression(function ast.Expression) ast.Expression {
 	exp := &ast.CallExpression{Token: p.currToken, Function: function}
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	exp.RParenToken = p.currToken
 	return exp
 }
 
@@ -1110,6 +1111,7 @@ func (p *Parser) parseTurbofishExpression(left ast.Expression) ast.Expression {
 		p.nextToken() // move to '('
 		exp := &ast.CallExpression{Token: tok, Function: left, TypeArguments: typeArgs}
 		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	exp.RParenToken = p.currToken
 		return exp
 	}
 

@@ -9,6 +9,8 @@ import (
 // tracking its expected number of arguments (arity), parameter types, and return type.
 type FunctionSymbol struct {
 	symbolType     environment.ObjectType
+	Name           string
+	ParamNames     []string
 	TypeParameters []string
 	arity          int
 	paramTypes     []Symbol
@@ -16,9 +18,11 @@ type FunctionSymbol struct {
 }
 
 // NewFunctionSymbol creates and returns a new FunctionSymbol with the specified generic type parameters, arity, parameter types, and return type.
-func NewFunctionSymbol(typeParams []string, arity int, paramTypes []Symbol, returnType Symbol) *FunctionSymbol {
+func NewFunctionSymbol(name string, paramNames []string, typeParams []string, arity int, paramTypes []Symbol, returnType Symbol) *FunctionSymbol {
 	return &FunctionSymbol{
 		symbolType:     environment.FUNCTION_OBJ,
+		Name:           name,
+		ParamNames:     paramNames,
 		TypeParameters: typeParams,
 		arity:          arity,
 		paramTypes:     paramTypes,
@@ -86,12 +90,22 @@ func (fs *FunctionSymbol) ReturnType() Symbol {
 // String returns the string representation of the function type.
 func (fs *FunctionSymbol) String() string {
 	var params []string
-	for _, p := range fs.paramTypes {
-		params = append(params, p.String())
+	for i, p := range fs.paramTypes {
+		if i < len(fs.ParamNames) && fs.ParamNames[i] != "" {
+			params = append(params, fmt.Sprintf("%s: %s", fs.ParamNames[i], p.String()))
+		} else {
+			params = append(params, p.String())
+		}
 	}
 	ret := "Nothing"
 	if fs.returnType != nil {
 		ret = fs.returnType.String()
 	}
-	return fmt.Sprintf("fn(%s) -> %s", strings.Join(params, ", "), ret)
+	
+	name := fs.Name
+	if name == "" {
+		name = "fn"
+	}
+	
+	return fmt.Sprintf("%s(%s) -> %s", name, strings.Join(params, ", "), ret)
 }

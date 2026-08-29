@@ -341,7 +341,11 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 		delete(a.types, tParam)
 	}
 
-	return symbol.NewFunctionSymbol(n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
+	var paramNames []string
+	for _, p := range n.Parameters {
+		paramNames = append(paramNames, p.Name)
+	}
+	return symbol.NewFunctionSymbol("", paramNames, n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
 }
 
 // analyzeStructLiteral validates the fields of a struct instantiation
@@ -432,7 +436,11 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 			returnType = resolvedReturnType
 		}
 
-		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
+		var paramNames []string
+		for _, p := range fnNode.Parameters {
+			paramNames = append(paramNames, p.Name)
+		}
+		fnSymbol := symbol.NewFunctionSymbol(n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol, false, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
@@ -460,7 +468,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 	}
 
-	if n.Value != nil {
+		if n.Value != nil {
 		rhsType := a.analyze(n.Value)
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
@@ -469,6 +477,10 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		} else {
 			valType = rhsType
 		}
+	}
+
+	if fnSym, ok := valType.(*symbol.FunctionSymbol); ok && fnSym.Name == "" {
+		fnSym.Name = n.Name.Value
 	}
 
 	a.declare(n.Name.Value, valType, false, n.Name.Token)
@@ -514,7 +526,11 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 			returnType = resolvedReturnType
 		}
 
-		fnSymbol := symbol.NewFunctionSymbol(fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
+		var paramNames []string
+		for _, p := range fnNode.Parameters {
+			paramNames = append(paramNames, p.Name)
+		}
+		fnSymbol := symbol.NewFunctionSymbol(n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol, true, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
@@ -542,7 +558,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 	}
 
-	if n.Value != nil {
+		if n.Value != nil {
 		rhsType := a.analyze(n.Value)
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
@@ -551,6 +567,10 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		} else {
 			valType = rhsType
 		}
+	}
+
+	if fnSym, ok := valType.(*symbol.FunctionSymbol); ok && fnSym.Name == "" {
+		fnSym.Name = n.Name.Value
 	}
 
 	a.declare(n.Name.Value, valType, true, n.Name.Token)
@@ -697,7 +717,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			returnType = resolvedReturn
 		}
 		
-		fnSym := symbol.NewFunctionSymbol(nil, len(n.Signature.ParamTypes), paramTypes, returnType)
+		fnSym := symbol.NewFunctionSymbol(n.Name.Value, nil, nil, len(n.Signature.ParamTypes), paramTypes, returnType)
 		if len(n.TypeParameters) > 0 {
 			fnSym.TypeParameters = n.TypeParameters
 		}
@@ -776,12 +796,12 @@ func (a *Analyzer) analyzePrefixExpression(n *ast.PrefixExpression) symbol.Symbo
 	switch n.Operator {
 	case "!":
 		if rightSymbol.Type() != environment.BOOLEAN_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a BOOLEAN, got %s", rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '!' requires a Boolean, got %s", rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	case "-":
 		if rightSymbol.Type() != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a NUMBER, got %s", rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a Number, got %s", rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 	default:
@@ -813,14 +833,14 @@ func (a *Analyzer) analyzeInfixExpression(n *ast.InfixExpression) symbol.Symbol 
 
 	case "-", "*", "/", "%", "^":
 		if leftSymbol.Type() != environment.NUMBER_OBJ || rightSymbol.Type() != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two Numbers, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 			return symbol.NewBasicSymbol(environment.ANY_OBJ)
 		}
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 
 	case "<", ">", "<=", ">=":
 		if leftSymbol.Type() != environment.NUMBER_OBJ || rightSymbol.Type() != environment.NUMBER_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two NUMBERs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two Numbers, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 
@@ -845,7 +865,7 @@ func (a *Analyzer) analyzeInfixExpression(n *ast.InfixExpression) symbol.Symbol 
 
 	case "and", "or", "xor":
 		if leftSymbol.Type() != environment.BOOLEAN_OBJ || rightSymbol.Type() != environment.BOOLEAN_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two BOOLEANs, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: operator '%s' requires two Booleans, got %s and %s", n.Operator, leftSymbol.Type(), rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
 	}
@@ -858,7 +878,7 @@ func (a *Analyzer) analyzeInfixExpression(n *ast.InfixExpression) symbol.Symbol 
 func (a *Analyzer) analyzeIfExpression(n *ast.IfExpression) symbol.Symbol {
 	condSymbol := a.analyze(n.Condition)
 	if condSymbol.Type() != environment.BOOLEAN_OBJ && condSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a BOOLEAN, got %s", condSymbol.Type()))
+		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a Boolean, got %s", condSymbol.Type()))
 	}
 
 	trueType := a.analyze(n.Consequence)
@@ -971,7 +991,7 @@ func (a *Analyzer) analyzeIndexExpression(n *ast.IndexExpression) symbol.Symbol 
 
 	if leftSym.Type() == environment.ARRAY_OBJ {
 		if indexSym.Type() != environment.NUMBER_OBJ && indexSym.Type() != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: array index expected NUMBER, got %s", indexSym.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: array index expected Number, got %s", indexSym.Type()))
 		}
 		if arrSym, ok := leftSym.(*symbol.ArraySymbol); ok {
 			return arrSym.ElementSymbol()
@@ -1000,7 +1020,7 @@ func (a *Analyzer) analyzeIndexAssignmentStatement(n *ast.IndexAssignmentStateme
 
 	if leftSym.Type() == environment.ARRAY_OBJ {
 		if idxSym.Type() != environment.NUMBER_OBJ && idxSym.Type() != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: array index must be NUMBER, got %s", idxSym.Type()))
+			a.reportError(n.Token, fmt.Sprintf("type error: array index must be Number, got %s", idxSym.Type()))
 		}
 		if arrSym, ok := leftSym.(*symbol.ArraySymbol); ok {
 			if !arrSym.ElementSymbol().Equals(valSym) && valSym.Type() != environment.ANY_OBJ {

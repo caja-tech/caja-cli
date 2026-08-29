@@ -188,3 +188,144 @@ func containsPosition(node ast.Node, line, col int) bool {
 	}
 	return false
 }
+
+// FindCallExpressionAtPosition recursively searches the AST for the tightest CallExpression
+// that encapsulates the given line and column, including the area between the '(' and ')'.
+func FindCallExpressionAtPosition(node ast.Node, line, col int) *ast.CallExpression {
+	if node == nil {
+		return nil
+	}
+	targetLine := line + 1
+	targetCol := col + 1
+
+	return findCallExpression(node, targetLine, targetCol)
+}
+
+func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
+	if node == nil {
+		return nil
+	}
+
+	var bestCall *ast.CallExpression
+
+	switch n := node.(type) {
+	case *ast.Program:
+		for _, s := range n.Statements {
+			if child := findCallExpression(s, line, col); child != nil {
+				bestCall = child
+			}
+		}
+	case *ast.BlockStatement:
+		for _, s := range n.Statements {
+			if child := findCallExpression(s, line, col); child != nil {
+				bestCall = child
+			}
+		}
+	case *ast.ExpressionStatement:
+		if child := findCallExpression(n.Expression, line, col); child != nil {
+			bestCall = child
+		}
+	case *ast.LetStatement:
+		if child := findCallExpression(n.Value, line, col); child != nil {
+			bestCall = child
+		}
+	case *ast.AssignStatement:
+		if child := findCallExpression(n.Value, line, col); child != nil {
+			bestCall = child
+		}
+	case *ast.ReturnStatement:
+		if child := findCallExpression(n.ReturnValue, line, col); child != nil {
+			bestCall = child
+		}
+	case *ast.CallExpression:
+		// Check arguments first
+		for _, arg := range n.Arguments {
+			if child := findCallExpression(arg, line, col); child != nil {
+				return child
+			}
+		}
+		
+		// If not inside arguments, check if we are inside this call's parentheses
+		startTok := n.Token
+		endTok := n.RParenToken
+		
+		if startTok.Line == 0 || endTok.Line == 0 {
+			break
+		}
+		
+		// Multi-line call
+		if line > startTok.Line && line < endTok.Line {
+			return n
+		}
+		// Single-line call
+		if startTok.Line == endTok.Line && line == startTok.Line {
+			if col >= startTok.Column && col <= endTok.Column {
+				return n
+			}
+		}
+		// Multi-line start boundary
+		if line == startTok.Line && line < endTok.Line {
+			if col >= startTok.Column {
+				return n
+			}
+		}
+		// Multi-line end boundary
+		if line > startTok.Line && line == endTok.Line {
+			if col <= endTok.Column {
+				return n
+			}
+		}
+	case *ast.InfixExpression:
+		if child := findCallExpression(n.Left, line, col); child != nil {
+			bestCall = child
+		} else if child := findCallExpression(n.Right, line, col); child != nil {
+			bestCall = child
+		}
+	case *ast.IfExpression:
+		if child := findCallExpression(n.Condition, line, col); child != nil {
+			bestCall = child
+		} else if child := findCallExpression(n.Consequence, line, col); child != nil {
+			bestCall = child
+		} else if child := findCallExpression(n.Alternative, line, col); child != nil {
+			bestCall = child
+		}
+	}
+
+	return bestCall
+}
+
+// GetNodeToken extracts the starting token of an AST node.
+func GetNodeToken(node ast.Node) lexer.Token {
+	var t lexer.Token
+	switch n := node.(type) {
+	case *ast.Identifier:
+		t = n.Token
+	case *ast.NumberLiteral:
+		t = n.Token
+	case *ast.StringLiteral:
+		t = n.Token
+	case *ast.BooleanLiteral:
+		t = n.Token
+	case *ast.NilLiteral:
+		t = n.Token
+	case *ast.GenericIdentifier:
+		t = n.Token
+	case *ast.CallExpression:
+		t = n.Token
+	case *ast.PropertyExpression:
+		t = n.Token
+	case *ast.IndexExpression:
+		t = n.Token
+	case *ast.InfixExpression:
+		t = GetNodeToken(n.Left)
+	case *ast.PrefixExpression:
+		t = n.Token
+	case *ast.ArrayLiteral:
+		t = n.Token
+	case *ast.MapLiteral:
+		t = n.Token
+	case *ast.FunctionLiteral:
+		t = n.Token
+	}
+	return t
+}

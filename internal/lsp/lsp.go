@@ -3,10 +3,12 @@ package lsp
 import (
 	"caja-cli/internal/pipeline/analyzer"
 	"caja-cli/internal/pipeline/ast"
+	"caja-cli/internal/pipeline/analyzer/symbol"
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/parser"
 	"context"
+	"fmt"
 	"net/url"
 	"path/filepath"
 
@@ -75,6 +77,7 @@ func (h *CajaHandler) DidClose(_ context.Context, params *lsp.DidCloseTextDocume
 func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 	text, ok := h.docs.Text(lsp.DocumentURI(uri))
 	if !ok {
+		fmt.Println("SYMBOL NOT OK")
 		return
 	}
 
@@ -137,7 +140,7 @@ func toLSPDiagnostic(err ast.DiagnosticError) lsp.Diagnostic {
 }
 
 func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Hover, error) {
-	text, ok := h.docs.Text(params.TextDocument.URI)
+		text, ok := h.docs.Text(params.TextDocument.URI)
 	if !ok {
 		return nil, nil
 	}
@@ -227,4 +230,131 @@ func uriToPath(uri string) string {
 		return ""
 	}
 	return u.Path
+}
+
+// SignatureHelp provides signature information for a function call at the cursor position.
+func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelpParams) (*lsp.SignatureHelp, error) {
+	
+	text, ok := h.docs.Text(params.TextDocument.URI)
+	if !ok {
+		fmt.Println("SYMBOL NOT OK")
+		return nil, fmt.Errorf("document not found: %s", params.TextDocument.URI)
+	}
+
+	tknzr := lexer.New(text)
+	p := parser.New(tknzr)
+	prog := p.Parse()
+
+	filePath := uriToPath(string(params.TextDocument.URI))
+	baseDir := filepath.Dir(filePath)
+	globalEnv := environment.NewEnvironment(baseDir, filePath, false)
+	a := analyzer.New(globalEnv)
+	a.Run(prog)
+
+	if prog == nil {
+		fmt.Println("PROG IS NIL")
+		return nil, nil
+	}
+
+	callExpr := FindCallExpressionAtPosition(prog, params.Position.Line, params.Position.Character)
+	if callExpr == nil {
+		return nil, nil
+	}
+
+	sym, _ := a.GetSymbol(callExpr.Function)
+
+
+	if prop, ok := callExpr.Function.(*ast.PropertyExpression); ok {
+		if objIdent, ok := prop.Object.(*ast.Identifier); ok {
+			modName := objIdent.Value
+			if symbols, _, ok := symbol.GetStandardModule(modName); ok {
+				if symObj, exists := symbols[prop.Property.Value]; exists {
+					sym = symObj
+				}
+			}
+		}
+	}
+
+	var label string
+	var paramsList []string
+
+	if fnSym, ok := sym.(*symbol.FunctionSymbol); ok {
+		label = fnSym.String()
+		for i, paramType := range fnSym.ParamTypes() {
+			paramName := "arg"
+			if fnLit, ok := callExpr.Function.(*ast.FunctionLiteral); ok && i < len(fnLit.Parameters) {
+				paramName = fnLit.Parameters[i].Name
+			}
+			paramsList = append(paramsList, fmt.Sprintf("%s: %s", paramName, paramType.String()))
+		}
+	} else if builtinSym, ok := sym.(*symbol.BuiltinSymbol); ok {
+		label = builtinSym.Label
+		paramsList = builtinSym.Params
+	} else {
+		return nil, nil
+	}
+
+	var sigParams []lsp.ParameterInformation
+	for _, p := range paramsList {
+		sigParams = append(sigParams, lsp.ParameterInformation{Label: p})
+	}
+
+	sigInfo := lsp.SignatureInformation{
+		Label:      label,
+		Parameters: sigParams,
+	}
+
+
+		activeParam := 0
+	targetLine := params.Position.Line + 1
+	targetCol := params.Position.Character + 1
+
+	lexerInst := lexer.New(text)
+	parenDepth := 0
+	bracketDepth := 0
+	braceDepth := 0
+	targetDepth := -1
+
+	for {
+		tok := lexerInst.NextToken()
+		if tok.Type == lexer.EOF {
+			break
+		}
+
+		if tok.Line > targetLine || (tok.Line == targetLine && tok.Column >= targetCol) {
+			break
+		}
+
+		switch tok.Type {
+		case lexer.LPAREN:
+			parenDepth++
+			if tok.Line == callExpr.Token.Line && tok.Column == callExpr.Token.Column {
+				targetDepth = parenDepth
+			}
+		case lexer.RPAREN:
+			parenDepth--
+		case lexer.LBRACKET:
+			bracketDepth++
+		case lexer.RBRACKET:
+			bracketDepth--
+		case lexer.LBRACE:
+			braceDepth++
+		case lexer.RBRACE:
+			braceDepth--
+		case lexer.COMMA:
+			if targetDepth != -1 && parenDepth == targetDepth && bracketDepth == 0 && braceDepth == 0 {
+				activeParam++
+			}
+		}
+	}
+
+	return &lsp.SignatureHelp{
+		Signatures:      []lsp.SignatureInformation{sigInfo},
+		ActiveSignature: intPtr(0),
+		ActiveParameter: &activeParam,
+	}, nil
+}
+
+func intPtr(i int) *int {
+	return &i
 }
