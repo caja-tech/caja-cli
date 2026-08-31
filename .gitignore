@@ -49,3 +49,5 @@ tmp/
 # Claude & Gemini
 ./.claude/worktrees
 ./.gemini/tmp
+# Worktrees
+/worktrees
