@@ -51,3 +51,5 @@ tmp/
 ./.gemini/tmp
 # Worktrees
 /worktrees
+
+!editors/vscode/caja/.vscode/

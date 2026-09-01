@@ -313,6 +313,35 @@ func TestDiagnosticsAreClearedOnFix(t *testing.T) {
 	}
 }
 
+func TestLowercaseTypeDiagnostic(t *testing.T) {
+	h := NewCajaHandler()
+	s := servertest.New(t, h)
+
+	mainURI := lsp.DocumentURI("file:///main.caja")
+	
+	badText := `type money Number`
+	s.DidOpen(mainURI, "caja", badText)
+	diags, _ := s.WaitForDiagnostics(context.Background(), mainURI)
+
+	if len(diags) == 0 {
+		t.Fatalf("Expected diagnostics for lowercase type, got none")
+	}
+
+	expectedMsg := "type name 'money' must start with a capital letter"
+	if diags[0].Message != expectedMsg {
+		t.Fatalf("Expected message %q, got %q", expectedMsg, diags[0].Message)
+	}
+
+	goodText := `type Money Number`
+	s.ClearDiagnostics()
+	s.DidChange(mainURI, 2, goodText)
+	diags, _ = s.WaitForDiagnostics(context.Background(), mainURI)
+
+	if len(diags) > 0 {
+		t.Fatalf("Expected diagnostics to be cleared after fix, but got %v", diags)
+	}
+}
+
 func TestMultipleStatementsOnSameLine(t *testing.T) {
 	h := NewCajaHandler()
 			s := servertest.New(t, h)

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // prefixParseFunc is a parsing function invoked when a token appears in prefix
@@ -656,6 +658,15 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
 		return nil
 	}
+
+	if len(p.currToken.Literal) > 0 {
+		firstRune, _ := utf8.DecodeRuneInString(p.currToken.Literal)
+		if !unicode.IsUpper(firstRune) {
+			p.reportError(p.currToken, fmt.Sprintf("type name '%s' must start with a capital letter", p.currToken.Literal))
+			return nil
+		}
+	}
+
 	statement.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
 	if p.peekToken.Type == lexer.LT {
