@@ -1108,12 +1108,12 @@ func TestEvaluateTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype flag Boolean\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, f: flag, c: custom) -> money { return m }\nreturn process(100, '2023-01-01', \"John\", true, 42)",
+			input:    "type Money Number\ntype Moment Date\ntype Name String\ntype Flag Boolean\ntype Custom Number\nlet process = fn(m: Money, d: Moment, n: Name, f: Flag, c: Custom) -> Money { return m }\nreturn process(100, '2023-01-01', \"John\", true, 42)",
 			expected: 100.0,
 		},
 		{
 			name:     "Type alias with array types",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype flags [Boolean]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, f: flags, c: collection) -> prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
+			input:    "type Prices [Number]\ntype Names [String]\ntype Holidays [Date]\ntype Flags [Boolean]\ntype Collection [Number]\nlet addAll = fn(p: Prices, n: Names, h: Holidays, f: Flags, c: Collection) -> Prices { return p }\nreturn addAll([1, 2], [\"a\"], ['2023-01-01'], [true, false], [1, 2])[1]",
 			expected: 2.0,
 		},
 		{

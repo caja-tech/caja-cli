@@ -1346,20 +1346,20 @@ func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:  "Type alias with primitive types",
-			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { return m }\nprocess(100, true, \"John\", 42)",
+			input: "type Money Number\ntype Moment Boolean\ntype Name String\ntype Custom Number\nlet process = fn(m: Money, d: Moment, n: Name, c: Custom) -> Money { return m }\nprocess(100, true, \"John\", 42)",
 		},
 		{
 			name:  "Type alias with array types",
-			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
+			input: "type Prices [Number]\ntype Names [String]\ntype Holidays [Boolean]\ntype Collection [Number]\nlet addAll = fn(p: Prices, n: Names, h: Holidays, c: Collection) -> Prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
 		},
 		{
 			name:           "Type alias mismatch",
-			input:          "type money Number\nlet add = fn(a: money) -> money { return a }\nadd(\"string\")",
+			input:          "type Money Number\nlet add = fn(a: Money) -> Money { return a }\nadd(\"string\")",
 			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:           "Undefined type in alias",
-			input:          "type someType Some\nlet doSomething = fn(a: someType) -> Number { return 1 }",
+			input:          "type SomeType Some\nlet doSomething = fn(a: SomeType) -> Number { return 1 }",
 			expectedErrors: []string{"type error: cannot resolve type name for Some"},
 		},
 	}

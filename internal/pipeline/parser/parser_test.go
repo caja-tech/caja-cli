@@ -836,13 +836,13 @@ func TestTypeAliasParsing(t *testing.T) {
 		},
 		{
 			name:     "Type alias with simple Number",
-			input:    "type money Number",
-			expected: "type money Number",
+			input:    "type Money Number",
+			expected: "type Money Number",
 		},
 		{
 			name:     "Type alias with array Number",
-			input:    "type collection [Number]",
-			expected: "type collection [Number]",
+			input:    "type Collection [Number]",
+			expected: "type Collection [Number]",
 		},
 		{
 			name:     "Type alias function implicit Nothing return type",
@@ -888,6 +888,7 @@ func TestTypeAliasParsing(t *testing.T) {
 func TestTypeAliasErrors(t *testing.T) {
 	tests := []string{
 		"type fn(Number) -> Number",                 // Missing alias name
+		"type money Number",                         // Lowercase type name
 		"type BinaryOp (Number, Number) -> Number",  // Missing fn keyword
 		"type BinaryOp fn(Number, Number):",       // Missing return type
 		"type CustomFunc<T, R fn(T) -> R",           // Missing closing bracket in alias definition
@@ -1218,13 +1219,13 @@ func TestTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types used in functions",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { m }",
-			expected: "type money Numbertype moment Datetype name Stringtype custom Numberlet process = fn(m: money, d: moment, n: name, c: custom) -> money { ... }",
+			input:    "type Money Number\ntype Moment Date\ntype Name String\ntype Custom Number\nlet process = fn(m: Money, d: Moment, n: Name, c: Custom) -> Money { m }",
+			expected: "type Money Numbertype Moment Datetype Name Stringtype Custom Numberlet process = fn(m: Money, d: Moment, n: Name, c: Custom) -> Money { ... }",
 		},
 		{
 			name:     "Type alias with array types used in functions",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { p }",
-			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Number]let addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { ... }",
+			input:    "type Prices [Number]\ntype Names [String]\ntype Holidays [Date]\ntype Collection [Number]\nlet addAll = fn(p: Prices, n: Names, h: Holidays, c: Collection) -> Prices { p }",
+			expected: "type Prices [Number]type Names [String]type Holidays [Date]type Collection [Number]let addAll = fn(p: Prices, n: Names, h: Holidays, c: Collection) -> Prices { ... }",
 		},
 	}
 
