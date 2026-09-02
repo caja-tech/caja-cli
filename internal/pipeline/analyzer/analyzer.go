@@ -27,6 +27,7 @@ type Analyzer struct {
 	cache               map[string]*Analyzer
 	loading             map[string]bool
 	privates            map[string]bool
+	unwrappedPipeArgs   map[ast.Node]symbol.Symbol
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -43,6 +44,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		cache:               make(map[string]*Analyzer),
 		loading:             make(map[string]bool),
 		privates:            make(map[string]bool),
+		unwrappedPipeArgs:   make(map[ast.Node]symbol.Symbol),
 	}
 
 	// Inject Nothing as a global builtin type
@@ -109,6 +111,7 @@ func (a *Analyzer) HasErrors() bool {
 // analyze traverses the AST starting from the given node and performs
 // semantic checks, populating the errors slice if any issues are found.
 func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
+	if sym, ok := a.unwrappedPipeArgs[node]; ok { return sym }
 	if a.ctx != nil && a.ctx.Err() != nil {
 		return symbol.AnySymbol()
 	}
@@ -148,8 +151,12 @@ func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 		return a.analyzeExpressionStatement(n)
 	case *ast.TypeAliasStatement:
 		return a.analyzeTypeAliasStatement(n)
+	case *ast.TypeConstraintStatement:
+		return a.analyzeTypeConstraintStatement(n)
 	case *ast.FunctionLiteral:
 		return a.analyzeFunctionLiteral(n)
+	case *ast.SafePipeExpression:
+		return a.analyzeSafePipeExpression(n)
 	case *ast.CallExpression:
 		return a.analyzeCallExpression(n)
 	case *ast.ArrayLiteral:
@@ -710,8 +717,8 @@ func (a *Analyzer) analyzeAssignStatement(n *ast.AssignStatement) symbol.Symbol 
 	} else {
 		a.enforcePurity(n.Name, n.Token)
 		expectedType := entry.Sym
-		if expectedType.Type() != sym.Type() && expectedType.Type() != environment.ANY_OBJ && sym.Type() != environment.ANY_OBJ {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.Type(), n.Name.Value, expectedType.Type()))
+		if !expectedType.Equals(sym) && expectedType.Type() != environment.ANY_OBJ && sym.Type() != environment.ANY_OBJ {
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to variable '%s' of type %s", sym.String(), n.Name.Value, expectedType.String()))
 		}
 	}
 
@@ -737,6 +744,34 @@ func (a *Analyzer) analyzeBlockStatement(n *ast.BlockStatement) symbol.Symbol {
 // and registers the resulting function signature in the analyzer's type registry.
 // analyzeTypeAliasStatement resolves the parameter and return types for a type alias
 // and registers the resulting function signature in the analyzer's type registry.
+func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement) symbol.Symbol {
+	baseType, ok := a.findTypeSymbolInTypes(n.BaseType.Value)
+	if !ok {
+		a.reportError(n.BaseType.Token, fmt.Sprintf("semantic error: base type '%s' is not declared", n.BaseType.Value))
+		return symbol.AnySymbol()
+	}
+	
+	constraint := symbol.NewConstraintSymbol(n.Name.Value, baseType, n.Predicate)
+	a.types[n.Name.Value] = constraint
+	a.nodeSymbols[n.BaseType] = baseType
+	a.nodeSymbols[n.Name] = constraint
+
+	// Verify predicate has correct type signature fn(BaseType) -> Boolean
+	fnType := a.analyze(n.Predicate)
+	if fnSym, ok := fnType.(*symbol.FunctionSymbol); ok {
+		if len(fnSym.ParamTypes()) != 1 || !fnSym.ParamTypes()[0].Equals(baseType) {
+			a.reportError(n.Token, fmt.Sprintf("type error: constraint predicate must accept a single argument of type %s", n.BaseType.Value))
+		}
+		if fnSym.ReturnType().Type() != environment.BOOLEAN_OBJ {
+			a.reportError(n.Token, "type error: constraint predicate must return Boolean")
+		}
+	} else if fnType.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, "type error: constraint predicate must be a function")
+	}
+
+	return constraint
+}
+
 func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.Symbol {
 	var aliasedSymbol symbol.Symbol
 
@@ -1109,6 +1144,10 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 		leftSymbol = nullableSym.Underlying
 	}
 
+	if constraintSym, ok := leftSymbol.(*symbol.ConstraintSymbol); ok {
+		leftSymbol = constraintSym.BaseType
+	}
+
 	if isNullable && !n.Safe {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: property access on nullable type requires safe navigation operator '?.' (property: %s)", n.Property.Value))
 		return symbol.AnySymbol()
@@ -1246,4 +1285,31 @@ func (a *Analyzer) enforcePurity(node ast.Node, token lexer.Token) {
 	case *ast.IndexExpression:
 		a.enforcePurity(n.Left, token)
 	}
+}
+
+
+func (a *Analyzer) analyzeSafePipeExpression(n *ast.SafePipeExpression) symbol.Symbol {
+	leftSymbol := a.analyze(n.Left)
+	
+	var underlying symbol.Symbol
+	if nullable, ok := leftSymbol.(*symbol.NullableSymbol); ok {
+		underlying = nullable.Underlying
+	} else if leftSymbol.Type() == environment.ANY_OBJ {
+		underlying = symbol.AnySymbol()
+	} else {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: unnecessary safe pipe on non-nullable type"))
+		underlying = leftSymbol
+	}
+
+	a.unwrappedPipeArgs[n.Left] = underlying
+	resultSym := a.analyzeCallExpression(n.Call)
+	delete(a.unwrappedPipeArgs, n.Left)
+
+	if resultSym.Type() == environment.ANY_OBJ || resultSym.Type() == environment.NULL_OBJ {
+		return resultSym
+	}
+	if _, isNullable := resultSym.(*symbol.NullableSymbol); isNullable {
+		return resultSym
+	}
+	return &symbol.NullableSymbol{Underlying: resultSym}
 }

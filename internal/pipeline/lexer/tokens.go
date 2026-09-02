@@ -60,8 +60,12 @@ const (
 	OR      TokenType = "OR"
 	XOR     TokenType = "XOR"
 	PIPE    TokenType = "PIPE"
+	SAFE_PIPE TokenType = "SAFE_PIPE"
 	PRIVATE TokenType = "PRIVATE"
 	STRUCT  TokenType = "STRUCT"
+	DEFINE  TokenType = "DEFINE"
+	CONSTRAINTS TokenType = "CONSTRAINTS"
+	WITH    TokenType = "WITH"
 	NIL     TokenType = "NIL"
 )
 
@@ -92,6 +96,9 @@ var keywords = map[string]TokenType{
 	"xor":     XOR,
 	"private": PRIVATE,
 	"struct":  STRUCT,
+	"define":  DEFINE,
+	"constraints": CONSTRAINTS,
+	"with":   WITH,
 	"nil":     NIL,
 }
 
@@ -108,7 +115,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, NIL:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL:
 		return true
 	}
 	return false

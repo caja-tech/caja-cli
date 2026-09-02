@@ -315,7 +315,7 @@ func decideDotToken(t *Lexer, line int, column int) deciderResult {
 }
 
 // decideQuestionToken matches the '?' character and produces a QUESTION token,
-// or a QUESTIONDOT token if it is followed by a '.' character.
+// or a QUESTIONDOT if followed by '.', or SAFE_PIPE if followed by '>'.
 func decideQuestionToken(t *Lexer, line int, column int) deciderResult {
 	if t.ch == '?' {
 		if t.peekChar() == '.' {
@@ -324,6 +324,13 @@ func decideQuestionToken(t *Lexer, line int, column int) deciderResult {
 			literal := string(ch) + string(t.ch)
 			t.readChar()
 			return deciderResult{true, Token{Type: QUESTIONDOT, Literal: literal, Line: line, Column: column}}
+		}
+		if t.peekChar() == '>' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: SAFE_PIPE, Literal: literal, Line: line, Column: column}}
 		}
 		return deciderResult{true, Token{Type: QUESTION, Literal: string(t.ch), Line: line, Column: column}}
 	}

@@ -3,15 +3,33 @@
   "name": "caja",
   "scopeName": "source.caja",
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#strings" },
-    { "include": "#keywords" },
-    { "include": "#constants" },
-    { "include": "#types" },
-    { "include": "#numbers" },
-    { "include": "#functions" },
-    { "include": "#operators" },
-    { "include": "#punctuation" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#functions"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    }
   ],
   "repository": {
     "comments": {
@@ -19,7 +37,9 @@
         {
           "begin": "#",
           "beginCaptures": {
-            "0": { "name": "punctuation.definition.comment.caja" }
+            "0": {
+              "name": "punctuation.definition.comment.caja"
+            }
           },
           "end": "$",
           "name": "comment.line.number-sign.caja"
@@ -31,59 +51,116 @@
         {
           "begin": "\"",
           "beginCaptures": {
-            "0": { "name": "punctuation.definition.string.begin.caja" }
+            "0": {
+              "name": "punctuation.definition.string.begin.caja"
+            }
           },
           "end": "\"",
           "endCaptures": {
-            "0": { "name": "punctuation.definition.string.end.caja" }
+            "0": {
+              "name": "punctuation.definition.string.end.caja"
+            }
           },
           "name": "string.quoted.double.caja",
-          "patterns": [{ "match": "\\\\.", "name": "constant.character.escape.caja" }]
+          "patterns": [
+            {
+              "match": "\\\\.",
+              "name": "constant.character.escape.caja"
+            }
+          ]
         }
       ]
     },
     "keywords": {
       "patterns": [
-        { "match": "\\b(import|from|as|return|if|else)\\b", "name": "keyword.control.caja" },
-        { "match": "\\b(and|or|xor)\\b", "name": "keyword.operator.logical.caja" },
-        { "match": "\\b(let|const|fn|struct|type)\\b", "name": "storage.type.caja" },
-        { "match": "\\b(private)\\b", "name": "storage.modifier.caja" }
+        {
+          "match": "\b(import|from|as|return|if|else|constraints|with)\b",
+          "name": "keyword.control.caja"
+        },
+        {
+          "match": "\b(and|or|xor)\b",
+          "name": "keyword.operator.logical.caja"
+        },
+        {
+          "match": "\b(let|const|fn|struct|type|define)\b",
+          "name": "storage.type.caja"
+        },
+        {
+          "match": "\b(private)\b",
+          "name": "storage.modifier.caja"
+        }
       ]
     },
     "constants": {
       "patterns": [
-        { "match": "\\b(nil)\\b", "name": "constant.language.null.caja" },
-        { "match": "\\b(true|false)\\b", "name": "constant.language.boolean.caja" }
+        {
+          "match": "\\b(nil)\\b",
+          "name": "constant.language.null.caja"
+        },
+        {
+          "match": "\\b(true|false)\\b",
+          "name": "constant.language.boolean.caja"
+        }
       ]
     },
     "types": {
       "patterns": [
-        { "match": "\\b(Number|Boolean|Date|String|Nothing)\\b", "name": "support.type.caja" },
-        { "match": "\\b([A-Z][a-zA-Z0-9_]*)\\b", "name": "entity.name.type.caja" }
+        {
+          "match": "\\b(Number|Boolean|Date|String|Nothing)\\b",
+          "name": "support.type.caja"
+        },
+        {
+          "match": "\\b([A-Z][a-zA-Z0-9_]*)\\b",
+          "name": "entity.name.type.caja"
+        }
       ]
     },
     "numbers": {
       "patterns": [
-        { "match": "\\b\\d+(\\.\\d+)?\\b", "name": "constant.numeric.caja" }
+        {
+          "match": "\\b\\d+(\\.\\d+)?\\b",
+          "name": "constant.numeric.caja"
+        }
       ]
     },
     "functions": {
       "patterns": [
-        { "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()", "name": "entity.name.function.caja" }
+        {
+          "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+          "name": "entity.name.function.caja"
+        }
       ]
     },
     "operators": {
       "patterns": [
-        { "match": "(->|\\?\\.|==|!=|<=|>=|<|>|=|\\+|-|\\*|/)", "name": "keyword.operator.caja" }
+        {
+          "match": "(->|\\?\\.|\\?\\>|\\|\\>|==|!=|<=|>=|<|>|=|\\+|-|\\*|/)",
+          "name": "keyword.operator.caja"
+        }
       ]
     },
     "punctuation": {
       "patterns": [
-        { "match": "\\(|\\)", "name": "punctuation.parenthesis.caja" },
-        { "match": "\\{|\\}", "name": "punctuation.brace.caja" },
-        { "match": "\\[|\\]", "name": "punctuation.bracket.caja" },
-        { "match": ",", "name": "punctuation.comma.caja" },
-        { "match": ":", "name": "punctuation.colon.caja" }
+        {
+          "match": "\\(|\\)",
+          "name": "punctuation.parenthesis.caja"
+        },
+        {
+          "match": "\\{|\\}",
+          "name": "punctuation.brace.caja"
+        },
+        {
+          "match": "\\[|\\]",
+          "name": "punctuation.bracket.caja"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.comma.caja"
+        },
+        {
+          "match": ":",
+          "name": "punctuation.colon.caja"
+        }
       ]
     }
   }

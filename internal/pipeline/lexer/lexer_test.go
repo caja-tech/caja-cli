@@ -981,6 +981,54 @@ func TestPipeToken(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestTypeConstraintTokenization verifies the tokenization of type constraints.
+func TestTypeConstraintTokenization(t *testing.T) {
+	input := `define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean {
+		return c.age > 18
+	}`
+
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"define", Token{DEFINE, "define", 1, 1}},
+		{"ident", Token{IDENT, "MajorCustomer", 1, 8}},
+		{"constraints", Token{CONSTRAINTS, "constraints", 1, 22}},
+		{"ident", Token{IDENT, "Customer", 1, 34}},
+		{"with", Token{WITH, "with", 1, 43}},
+		{"colon", Token{COLON, ":", 1, 47}},
+		{"fn", Token{FN, "fn", 1, 49}},
+		{"lparen", Token{LPAREN, "(", 1, 51}},
+		{"ident", Token{IDENT, "c", 1, 52}},
+		{"colon", Token{COLON, ":", 1, 53}},
+		{"ident", Token{IDENT, "Customer", 1, 55}},
+		{"rparen", Token{RPAREN, ")", 1, 63}},
+		{"arrow", Token{ARROW, "->", 1, 65}},
+		{"ident", Token{IDENT, "Boolean", 1, 68}},
+		{"lbrace", Token{LBRACE, "{", 1, 76}},
+		{"return", Token{RETURN, "return", 2, 3}},
+		{"ident", Token{IDENT, "c", 2, 10}},
+		{"dot", Token{DOT, ".", 2, 11}},
+		{"ident", Token{IDENT, "age", 2, 12}},
+		{"gt", Token{GT, ">", 2, 16}},
+		{"number", Token{NUMBER, "18", 2, 18}},
+		{"rbrace", Token{RBRACE, "}", 3, 2}},
+		{"EOF", Token{EOF, "", 3, 3}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+func TestSafePipeToken(t *testing.T) {
+	input := "?>"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Safe pipe operator", Token{SAFE_PIPE, "?>", 1, 1}},
+		{"End of file", Token{EOF, "", 1, 3}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
 // TestNamedImportTokenization tests the tokenization of named imports syntax.
 func TestNamedImportTokenization(t *testing.T) {
 	input := "import { where, select } from \"@caja/query\" as q"

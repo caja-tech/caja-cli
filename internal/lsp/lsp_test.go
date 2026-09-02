@@ -23,6 +23,26 @@ func TestTextDocumentHover(t *testing.T) {
 		expectedString string
 	}{
 		{
+			name:           "Type Constraint Hover Base Type",
+			uri:            "file:///test_tc_hover_base.caja",
+			input:          `type Customer struct { age Number }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return true }`,
+			queryLine:      1,
+			queryChar:      35,
+			expectedNil:    false,
+			expectedString: "Customer",
+		},
+		{
+			name:           "Named Import Hover",
+			uri:            "file:///test_named_import_hover.caja",
+			input:          `import { max } from "math"
+max(1, 2)`,
+			queryLine:      1,
+			queryChar:      1,
+			expectedNil:    false,
+			expectedString: "max(a: Number, b: Number) -> Number",
+		},
+		{
 			name:           "Valid Variable",
 			uri:            "file:///test_valid_var.caja",
 			input:          "let multiplier = 5 \nmultiplier",
@@ -146,7 +166,20 @@ func TestTextDocumentDefinition(t *testing.T) {
 		queryChar    int
 		expectedNil  bool
 		expectedLine int
+		expectedCol  int
 	}{
+
+		{
+			name:         "Named Import Definition",
+			uri:          "file:///test_named_import_def.caja",
+			input:        `import { max } from "math"
+max(1, 2)`,
+			queryLine:    1,
+			queryChar:    1,
+			expectedNil:  false,
+			expectedLine: 0,
+			expectedCol:  9,
+		},
 		{
 			name:         "Valid Variable Definition",
 			uri:          "file:///test_def_valid.caja",
@@ -155,6 +188,7 @@ func TestTextDocumentDefinition(t *testing.T) {
 			queryChar:    3,
 			expectedNil:  false,
 			expectedLine: 0,
+			expectedCol:  4,
 		},
 		{
 			name:         "Built-in Function",
@@ -172,6 +206,7 @@ func TestTextDocumentDefinition(t *testing.T) {
 			queryChar:    1,
 			expectedNil:  false,
 			expectedLine: 0,
+			expectedCol:  4,
 		},
 		{
 			name:         "Undeclared Variable",
@@ -219,8 +254,8 @@ func TestTextDocumentDefinition(t *testing.T) {
 				t.Errorf("Expected definition to start at line %d, got %d", tt.expectedLine, loc.Range.Start.Line)
 			}
 
-			if loc.Range.Start.Character != 4 {
-				t.Errorf("Expected definition to start at col 4, got %d", loc.Range.Start.Character)
+			if loc.Range.Start.Character != tt.expectedCol {
+				t.Errorf("Expected definition to start at col %d, got %d", tt.expectedCol, loc.Range.Start.Character)
 			}
 		})
 	}

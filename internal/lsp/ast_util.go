@@ -40,6 +40,20 @@ func findTightestNode(node ast.Node, line, col int) ast.Node {
 				return child
 			}
 		}
+	case *ast.TypeConstraintStatement:
+		if child := findTightestNode(n.Name, line, col); child != nil {
+			bestChild = child
+		} else if child := findTightestNode(n.BaseType, line, col); child != nil {
+			bestChild = child
+		} else if child := findTightestNode(n.Predicate, line, col); child != nil {
+			bestChild = child
+		}
+	case *ast.SafePipeExpression:
+		if child := findTightestNode(n.Left, line, col); child != nil {
+			bestChild = child
+		} else if child := findTightestNode(n.Call, line, col); child != nil {
+			bestChild = child
+		}
 	case *ast.LetStatement:
 		if child := findTightestNode(n.Name, line, col); child != nil {
 			bestChild = child
@@ -171,6 +185,10 @@ func containsPosition(node ast.Node, line, col int) bool {
 	// Since node interface only has TokenLiteral(), we need to use type assertion or reflection
 	// to get the actual token line and column.
 	switch n := node.(type) {
+	case *ast.TypeConstraintStatement:
+		t = n.Token
+	case *ast.SafePipeExpression:
+		t = n.Token
 	case *ast.Identifier:
 		t = n.Token
 	case *ast.NumberLiteral:
@@ -234,6 +252,12 @@ func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
 		}
 	case *ast.ExpressionStatement:
 		if child := findCallExpression(n.Expression, line, col); child != nil {
+			bestCall = child
+		}
+	case *ast.SafePipeExpression:
+		if child := findCallExpression(n.Left, line, col); child != nil {
+			bestCall = child
+		} else if child := findCallExpression(n.Call, line, col); child != nil {
 			bestCall = child
 		}
 	case *ast.LetStatement:
@@ -309,6 +333,10 @@ func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
 func GetNodeToken(node ast.Node) lexer.Token {
 	var t lexer.Token
 	switch n := node.(type) {
+	case *ast.TypeConstraintStatement:
+		t = n.Token
+	case *ast.SafePipeExpression:
+		t = n.Token
 	case *ast.Identifier:
 		t = n.Token
 	case *ast.NumberLiteral:

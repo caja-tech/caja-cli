@@ -432,6 +432,25 @@ func (sd *StructDefinition) String() string {
 	return out
 }
 
+// TypeConstraintStatement represents a predicate subtyping definition.
+// e.g., define MajorCustomer from Customer with: fn(c: Customer) -> Boolean { ... }
+type TypeConstraintStatement struct {
+	Token     lexer.Token // The 'define' token
+	Name      *Identifier // The new constrained type name
+	BaseType  *Identifier // The base type being constrained
+	Predicate Expression  // The constraint expression (usually a function literal)
+}
+
+func (ts *TypeConstraintStatement) statementNode()       {}
+func (ts *TypeConstraintStatement) TokenLiteral() string { return ts.Token.Literal }
+func (ts *TypeConstraintStatement) String() string {
+	out := ts.TokenLiteral() + " " + ts.Name.String() + " constraints " + ts.BaseType.String() + " with: "
+	if ts.Predicate != nil {
+		out += ts.Predicate.String()
+	}
+	return out
+}
+
 // TypeAliasStatement represents a top-level type alias declaration
 // (e.g. "type BinaryOp fn(Number, Number): Number"). It holds the "type" token,
 // Name is the new alias identifier, and Signature is the function signature.
@@ -690,4 +709,17 @@ func (ml *MapLiteral) String() string {
 	out += strings.Join(pairs, ", ")
 	out += "}"
 	return out
+}
+
+// SafePipeExpression represents a safe pipeline operation (?>).
+type SafePipeExpression struct {
+	Token lexer.Token // The '?>' token
+	Left  Expression
+	Call  *CallExpression
+}
+
+func (sp *SafePipeExpression) expressionNode()      {}
+func (sp *SafePipeExpression) TokenLiteral() string { return sp.Token.Literal }
+func (sp *SafePipeExpression) String() string {
+	return "(" + sp.Left.String() + " ?> " + sp.Call.Function.String() + ")"
 }

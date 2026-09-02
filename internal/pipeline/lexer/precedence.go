@@ -39,6 +39,7 @@ var precedences = map[TokenType]int{
 	OR:          LOGICAL_PRECEDENCE,
 	XOR:         LOGICAL_PRECEDENCE,
 	PIPE:        PIPE_PRECEDENCE,
+	SAFE_PIPE:   PIPE_PRECEDENCE,
 }
 
 // VerifyPrecedenceLevel returns the precedence level associated with the given

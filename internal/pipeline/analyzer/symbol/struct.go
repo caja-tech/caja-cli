@@ -50,6 +50,10 @@ func (sds *StructDefSymbol) Equals(other Symbol) bool {
 		return sds.Name == otherDef.Name
 	}
 
+	if otherConstraint, ok := other.(*ConstraintSymbol); ok {
+		return sds.Equals(otherConstraint.BaseType)
+	}
+
 	return false
 }
 
@@ -87,6 +91,9 @@ func (sis *StructInstanceSymbol) Equals(other Symbol) bool {
 				return true
 			}
 			return sis.Def.Name == otherDef.Name
+		}
+		if otherConstraint, ok := other.(*ConstraintSymbol); ok {
+			return sis.Equals(otherConstraint.BaseType)
 		}
 		return false
 	}

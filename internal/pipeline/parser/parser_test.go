@@ -1160,12 +1160,12 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private on import",
 			input:         "private import \"foo\"",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'",
 		},
 		{
 			name:          "Private on return",
 			input:         "private return 10",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'",
 		},
 		{
 			name:          "Return private",
@@ -1185,7 +1185,7 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private standalone",
 			input:         "private",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'",
 		},
 	}
 
@@ -1467,6 +1467,86 @@ func TestMultipleStatementsOnSameLineError(t *testing.T) {
 	}
 }
 
+func TestTypeConstraintParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Type constraint simple",
+			input:    "define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean {\nreturn c.age > 18\n}",
+			expected: "define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { ... }",
+		},
+		{
+			name:     "Type constraint one-liner",
+			input:    "define Even constraints Number with: fn(n: Number) -> Boolean { return n % 2 == 0 }",
+			expected: "define Even constraints Number with: fn(n: Number) -> Boolean { ... }",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+func TestTypeConstraintErrors(t *testing.T) {
+	tests := []string{
+		"define constraints Customer with: fn() {}",
+		"define MajorCustomer Customer with: fn() {}",
+		"define MajorCustomer constraints Customer fn() {}",
+		"define MajorCustomer constraints Customer with fn() {}",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+func TestSafePipeOperatorParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"A ?> f(B)",
+			"(A ?> f)",
+		},
+		{
+			"A ?> f",
+			"(A ?> f)",
+		},
+		{
+			"A ?> obj.method",
+			"(A ?> (obj.method))",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.Parse()
+			checkParseErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statements. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			}
+
+			if stmt.Expression.String() != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, stmt.Expression.String())
+			}
+		})
+	}
+}
+
 func TestNamedImportStatement(t *testing.T) {
 	tests := []struct {
 		input           string
@@ -1481,6 +1561,7 @@ func TestNamedImportStatement(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+
 			tknzr := lexer.New(tt.input)
 			p := New(tknzr)
 			program := p.Parse()
@@ -1556,6 +1637,7 @@ func TestNamedImportStatementErrors(t *testing.T) {
 			
 			if !found {
 				t.Errorf("expected error '%s', but got: %v", tt.expectedError, errors)
+
 			}
 		})
 	}
