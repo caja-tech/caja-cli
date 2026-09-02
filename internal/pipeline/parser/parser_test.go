@@ -1466,3 +1466,97 @@ func TestMultipleStatementsOnSameLineError(t *testing.T) {
 		t.Fatalf("expected error containing %q, got: %v", expectedError, errors)
 	}
 }
+
+func TestNamedImportStatement(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedName    string
+		expectedPath    string
+		expectedImports []string
+	}{
+		{"import { where } from \"@caja/query\"", "query", "@caja/query", []string{"where"}},
+		{"import { a, b, c } from \"math\"", "math", "math", []string{"a", "b", "c"}},
+		{"import { where } from \"@caja/query\" as q", "q", "@caja/query", []string{"where"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			program := p.Parse()
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+			if len(program.Statements) != 1 {
+				t.Fatalf("expected 1 statement, got %d", len(program.Statements))
+			}
+			stmt, ok := program.Statements[0].(*ast.ImportStatement)
+			if !ok {
+				t.Fatalf("expected ImportStatement, got %T", program.Statements[0])
+			}
+			if stmt.Name.Value != tt.expectedName {
+				t.Errorf("expected Name %q, got %q", tt.expectedName, stmt.Name.Value)
+			}
+			if stmt.Path != tt.expectedPath {
+				t.Errorf("expected Path %q, got %q", tt.expectedPath, stmt.Path)
+			}
+			if len(stmt.NamedImports) != len(tt.expectedImports) {
+				t.Fatalf("expected %d named imports, got %d", len(tt.expectedImports), len(stmt.NamedImports))
+			}
+			for i, exp := range tt.expectedImports {
+				if stmt.NamedImports[i].Value != exp {
+					t.Errorf("expected named import %q, got %q", exp, stmt.NamedImports[i].Value)
+				}
+			}
+		})
+	}
+}
+
+func TestNamedImportStatementErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			"Missing closing brace",
+			"import { a, b from \"math\"",
+			"expected identifier in named import, got STRING",
+		},
+		{
+			"Missing from keyword",
+			"import { a, b } \"math\"",
+			"expected 'from' after named imports",
+		},
+		{
+			"Invalid identifier in block",
+			"import { a, 1 } from \"math\"",
+			"expected identifier in named import, got NUMBER",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			p.Parse()
+			errors := p.Errors()
+			
+			if len(errors) == 0 {
+				t.Fatalf("expected error '%s', but got none", tt.expectedError)
+			}
+			
+			found := false
+			for _, err := range errors {
+				if strings.Contains(err, tt.expectedError) {
+					found = true
+					break
+				}
+			}
+			
+			if !found {
+				t.Errorf("expected error '%s', but got: %v", tt.expectedError, errors)
+			}
+		})
+	}
+}

@@ -1,0 +1,20 @@
+import { filter, map, reduce } from "@caja/query"
+
+let isEven = fn(x: Number) -> Boolean {
+    return x % 2 == 0
+}
+
+let powerTwo = fn(x: Number) -> Number {
+    return x ^ 2
+}
+
+let sum = fn(acc: Number, curr: Number) -> Number {
+    return acc + curr
+}
+
+let result = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    |> filter(isEven)
+    |> map(powerTwo)
+    |> reduce(sum, 0)
+
+return result

@@ -11,6 +11,7 @@ type ScopeEntry struct {
 	IsConstant      bool
 	FunctionDepth   int
 	DefinitionToken lexer.Token
+	IsImport        bool
 }
 
 // globalScope returns the top-level scope of this analyzer
@@ -35,4 +36,10 @@ func (a *Analyzer) popScope() {
 func (a *Analyzer) declare(name string, sym symbol.Symbol, isConstant bool, defToken lexer.Token) {
 	last := len(a.scopes) - 1
 	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth, DefinitionToken: defToken}
+}
+
+// declareImport registers an imported variable name in the current scope.
+func (a *Analyzer) declareImport(name string, sym symbol.Symbol, isConstant bool, defToken lexer.Token) {
+	last := len(a.scopes) - 1
+	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth, DefinitionToken: defToken, IsImport: true}
 }

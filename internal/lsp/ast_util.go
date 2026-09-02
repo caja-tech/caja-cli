@@ -74,6 +74,17 @@ func findTightestNode(node ast.Node, line, col int) ast.Node {
 		} else if child := findTightestNode(n.Value, line, col); child != nil {
 			bestChild = child
 		}
+	case *ast.ImportStatement:
+		if child := findTightestNode(n.Name, line, col); child != nil {
+			bestChild = child
+		} else {
+			for _, named := range n.NamedImports {
+				if child := findTightestNode(named, line, col); child != nil {
+					bestChild = child
+					break
+				}
+			}
+		}
 	case *ast.ReturnStatement:
 		if child := findTightestNode(n.ReturnValue, line, col); child != nil {
 			bestChild = child
