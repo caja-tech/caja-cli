@@ -836,13 +836,13 @@ func TestTypeAliasParsing(t *testing.T) {
 		},
 		{
 			name:     "Type alias with simple Number",
-			input:    "type money Number",
-			expected: "type money Number",
+			input:    "type Money Number",
+			expected: "type Money Number",
 		},
 		{
 			name:     "Type alias with array Number",
-			input:    "type collection [Number]",
-			expected: "type collection [Number]",
+			input:    "type Collection [Number]",
+			expected: "type Collection [Number]",
 		},
 		{
 			name:     "Type alias function implicit Nothing return type",
@@ -888,6 +888,7 @@ func TestTypeAliasParsing(t *testing.T) {
 func TestTypeAliasErrors(t *testing.T) {
 	tests := []string{
 		"type fn(Number) -> Number",                 // Missing alias name
+		"type money Number",                         // Lowercase type name
 		"type BinaryOp (Number, Number) -> Number",  // Missing fn keyword
 		"type BinaryOp fn(Number, Number):",       // Missing return type
 		"type CustomFunc<T, R fn(T) -> R",           // Missing closing bracket in alias definition
@@ -1218,13 +1219,13 @@ func TestTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type alias with primitive types used in functions",
-			input:    "type money Number\ntype moment Date\ntype name String\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { m }",
-			expected: "type money Numbertype moment Datetype name Stringtype custom Numberlet process = fn(m: money, d: moment, n: name, c: custom) -> money { ... }",
+			input:    "type Money Number\ntype Moment Date\ntype Name String\ntype Custom Number\nlet process = fn(m: Money, d: Moment, n: Name, c: Custom) -> Money { m }",
+			expected: "type Money Numbertype Moment Datetype Name Stringtype Custom Numberlet process = fn(m: Money, d: Moment, n: Name, c: Custom) -> Money { ... }",
 		},
 		{
 			name:     "Type alias with array types used in functions",
-			input:    "type prices [Number]\ntype names [String]\ntype holidays [Date]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { p }",
-			expected: "type prices [Number]type names [String]type holidays [Date]type collection [Number]let addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { ... }",
+			input:    "type Prices [Number]\ntype Names [String]\ntype Holidays [Date]\ntype Collection [Number]\nlet addAll = fn(p: Prices, n: Names, h: Holidays, c: Collection) -> Prices { p }",
+			expected: "type Prices [Number]type Names [String]type Holidays [Date]type Collection [Number]let addAll = fn(p: Prices, n: Names, h: Holidays, c: Collection) -> Prices { ... }",
 		},
 	}
 
@@ -1523,7 +1524,6 @@ func TestSafePipeOperatorParsing(t *testing.T) {
 			"(A ?> (obj.method))",
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			l := lexer.New(tt.input)
@@ -1542,6 +1542,102 @@ func TestSafePipeOperatorParsing(t *testing.T) {
 
 			if stmt.Expression.String() != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, stmt.Expression.String())
+			}
+		})
+	}
+}
+
+func TestNamedImportStatement(t *testing.T) {
+	tests := []struct {
+		input           string
+		expectedName    string
+		expectedPath    string
+		expectedImports []string
+	}{
+		{"import { where } from \"@caja/query\"", "query", "@caja/query", []string{"where"}},
+		{"import { a, b, c } from \"math\"", "math", "math", []string{"a", "b", "c"}},
+		{"import { where } from \"@caja/query\" as q", "q", "@caja/query", []string{"where"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			program := p.Parse()
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+			if len(program.Statements) != 1 {
+				t.Fatalf("expected 1 statement, got %d", len(program.Statements))
+			}
+			stmt, ok := program.Statements[0].(*ast.ImportStatement)
+			if !ok {
+				t.Fatalf("expected ImportStatement, got %T", program.Statements[0])
+			}
+			if stmt.Name.Value != tt.expectedName {
+				t.Errorf("expected Name %q, got %q", tt.expectedName, stmt.Name.Value)
+			}
+			if stmt.Path != tt.expectedPath {
+				t.Errorf("expected Path %q, got %q", tt.expectedPath, stmt.Path)
+			}
+			if len(stmt.NamedImports) != len(tt.expectedImports) {
+				t.Fatalf("expected %d named imports, got %d", len(tt.expectedImports), len(stmt.NamedImports))
+			}
+			for i, exp := range tt.expectedImports {
+				if stmt.NamedImports[i].Value != exp {
+					t.Errorf("expected named import %q, got %q", exp, stmt.NamedImports[i].Value)
+				}
+			}
+		})
+	}
+}
+
+func TestNamedImportStatementErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			"Missing closing brace",
+			"import { a, b from \"math\"",
+			"expected identifier in named import, got STRING",
+		},
+		{
+			"Missing from keyword",
+			"import { a, b } \"math\"",
+			"expected 'from' after named imports",
+		},
+		{
+			"Invalid identifier in block",
+			"import { a, 1 } from \"math\"",
+			"expected identifier in named import, got NUMBER",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			p.Parse()
+			errors := p.Errors()
+			
+			if len(errors) == 0 {
+				t.Fatalf("expected error '%s', but got none", tt.expectedError)
+			}
+			
+			found := false
+			for _, err := range errors {
+				if strings.Contains(err, tt.expectedError) {
+					found = true
+					break
+				}
+			}
+			
+			if !found {
+				t.Errorf("expected error '%s', but got: %v", tt.expectedError, errors)
+
 			}
 		})
 	}

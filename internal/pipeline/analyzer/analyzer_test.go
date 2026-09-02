@@ -1346,20 +1346,20 @@ func TestSemanticAnalysisTypeAliasUsage(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:  "Type alias with primitive types",
-			input: "type money Number\ntype moment Boolean\ntype name String\ntype custom Number\nlet process = fn(m: money, d: moment, n: name, c: custom) -> money { return m }\nprocess(100, true, \"John\", 42)",
+			input: "type Money Number\ntype Moment Boolean\ntype Name String\ntype Custom Number\nlet process = fn(m: Money, d: Moment, n: Name, c: Custom) -> Money { return m }\nprocess(100, true, \"John\", 42)",
 		},
 		{
 			name:  "Type alias with array types",
-			input: "type prices [Number]\ntype names [String]\ntype holidays [Boolean]\ntype collection [Number]\nlet addAll = fn(p: prices, n: names, h: holidays, c: collection) -> prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
+			input: "type Prices [Number]\ntype Names [String]\ntype Holidays [Boolean]\ntype Collection [Number]\nlet addAll = fn(p: Prices, n: Names, h: Holidays, c: Collection) -> Prices { return p }\naddAll([1, 2], [\"a\"], [true], [1, 2])",
 		},
 		{
 			name:           "Type alias mismatch",
-			input:          "type money Number\nlet add = fn(a: money) -> money { return a }\nadd(\"string\")",
+			input:          "type Money Number\nlet add = fn(a: Money) -> Money { return a }\nadd(\"string\")",
 			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:           "Undefined type in alias",
-			input:          "type someType Some\nlet doSomething = fn(a: someType) -> Number { return 1 }",
+			input:          "type SomeType Some\nlet doSomething = fn(a: SomeType) -> Number { return 1 }",
 			expectedErrors: []string{"type error: cannot resolve type name for Some"},
 		},
 	}
@@ -1901,4 +1901,83 @@ m ?> processMajor |> printAge
 		},
 	}
 	runTestScenarios(t, tests)
+}
+func TestSemanticAnalysisNamedImports(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name: "Valid named import from math",
+			input: `import { max } from "math"
+let m = max(1, 2)
+`,
+			expectedError: "",
+		},
+		{
+			name: "Named import and alias both work",
+			input: `import { max } from "math" as m
+let a = max(1, 2)
+let b = m.min(1, 2)
+`,
+			expectedError: "",
+		},
+		{
+			name: "Import conflict with local variable",
+			input: `import { max } from "math"
+let max = 10
+`,
+			expectedError: "import conflict: variable 'max' is already declared. Suggestion: create an alias for the module",
+		},
+		{
+			name: "Import conflict with already existing local variable",
+			input: `let max = 10
+import { max } from "math"
+`,
+			expectedError: "semantic error: import statements must appear at the beginning of the file",
+		},
+		{
+			name: "Import conflict with another named import",
+			input: `import { max } from "math"
+import { max } from "math"
+`,
+			expectedError: "import conflict: variable 'max' is already declared. Suggestion: create an alias for the module",
+		},
+		{
+			name: "Named import missing from module",
+			input: `import { notExists } from "math"
+`,
+			expectedError: "semantic error: module 'math' has no exported member 'notExists'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := environment.NewEnvironment("", "", false)
+			a := New(env)
+			
+			// Setup a mock math module
+			lexerInstance := lexer.New(tt.input)
+			p := parser.New(lexerInstance)
+			program := p.Parse()
+
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+
+			a.Run(program)
+			
+			if tt.expectedError != "" {
+				if len(a.DiagnosticErrors()) == 0 {
+					t.Fatalf("expected error '%s', got none", tt.expectedError)
+				}
+				if a.DiagnosticErrors()[0].Message != tt.expectedError {
+					t.Errorf("expected error '%s', got '%s'", tt.expectedError, a.DiagnosticErrors()[0].Message)
+				}
+			} else if len(a.DiagnosticErrors()) > 0 {
+				t.Fatalf("expected no errors, got: %v", a.DiagnosticErrors())
+			}
+		})
+	}
 }

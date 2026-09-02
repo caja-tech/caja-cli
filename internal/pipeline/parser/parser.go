@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // prefixParseFunc is a parsing function invoked when a token appears in prefix
@@ -526,6 +528,31 @@ func (p *Parser) parseStatement() ast.Statement {
 func (p *Parser) parseImportStatement() *ast.ImportStatement {
 	statement := &ast.ImportStatement{Token: p.currToken}
 
+	if p.peekToken.Type == lexer.LBRACE {
+		p.nextToken() // move to '{'
+		
+		for p.peekToken.Type != lexer.RBRACE && p.peekToken.Type != lexer.EOF {
+			p.nextToken()
+			if p.currToken.Type == lexer.COMMA {
+				continue
+			}
+			if p.currToken.Type != lexer.IDENT && !lexer.IsKeyword(p.currToken.Type) {
+				p.reportError(p.currToken, fmt.Sprintf("expected identifier in named import, got %s", p.currToken.Type))
+				return nil
+			}
+			statement.NamedImports = append(statement.NamedImports, &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal})
+		}
+		
+		if !p.expectPeek(lexer.RBRACE) {
+			return nil
+		}
+		
+		if !p.expectPeek(lexer.IDENT) || p.currToken.Literal != "from" {
+			p.reportError(p.currToken, "expected 'from' after named imports")
+			return nil
+		}
+	}
+
 	if p.peekToken.Type == lexer.STRING {
 		p.nextToken()
 		statement.Path = p.currToken.Literal
@@ -697,6 +724,15 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
 		return nil
 	}
+
+	if len(p.currToken.Literal) > 0 {
+		firstRune, _ := utf8.DecodeRuneInString(p.currToken.Literal)
+		if !unicode.IsUpper(firstRune) {
+			p.reportError(p.currToken, fmt.Sprintf("type name '%s' must start with a capital letter", p.currToken.Literal))
+			return nil
+		}
+	}
+
 	statement.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
 	if p.peekToken.Type == lexer.LT {

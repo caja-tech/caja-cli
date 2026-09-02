@@ -1029,3 +1029,24 @@ func TestSafePipeToken(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+// TestNamedImportTokenization tests the tokenization of named imports syntax.
+func TestNamedImportTokenization(t *testing.T) {
+	input := "import { where, select } from \"@caja/query\" as q"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Import keyword", Token{IMPORT, "import", 1, 1}},
+		{"Left brace", Token{LBRACE, "{", 1, 8}},
+		{"Identifier where", Token{WHERE, "where", 1, 10}},
+		{"Comma", Token{COMMA, ",", 1, 15}},
+		{"Identifier select", Token{IDENT, "select", 1, 17}},
+		{"Right brace", Token{RBRACE, "}", 1, 24}},
+		{"Identifier from", Token{IDENT, "from", 1, 26}},
+		{"String module", Token{STRING, "@caja/query", 1, 31}},
+		{"As keyword", Token{AS, "as", 1, 45}},
+		{"Identifier q", Token{IDENT, "q", 1, 48}},
+		{"End of file", Token{EOF, "", 1, 49}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

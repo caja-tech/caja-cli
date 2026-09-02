@@ -273,17 +273,31 @@ func (cs *ConstStatement) String() string {
 // ImportStatement represents an import declaration (e.g. "import second").
 // Token holds the "import" keyword token, and Name is the module identifier.
 type ImportStatement struct {
-	Token lexer.Token
-	Name  *Identifier
-	Path  string
+	Token        lexer.Token
+	Name         *Identifier
+	Path         string
+	NamedImports []*Identifier
 }
 
 func (is *ImportStatement) statementNode()       {}
 func (is *ImportStatement) TokenLiteral() string { return is.Token.Literal }
 func (is *ImportStatement) String() string {
+	var out string
+	out += is.TokenLiteral()
+
+	if len(is.NamedImports) > 0 {
+		out += " { "
+		for i, name := range is.NamedImports {
+			out += name.String()
+			if i < len(is.NamedImports)-1 {
+				out += ", "
+			}
+		}
+		out += " } from"
+	}
+
 	if is.Path != "" && is.Path != is.Name.Value {
 		// If path is a string literal and basename is not the bound name, we might have an alias or just standard string behavior.
-		// A reliable way to format: if alias is used, it should print `import "path" as alias`
 		basename := is.Path
 		for i := len(basename) - 1; i >= 0; i-- {
 			if basename[i] == '/' {
@@ -292,15 +306,19 @@ func (is *ImportStatement) String() string {
 			}
 		}
 		if is.Name.Value != basename {
-			return is.TokenLiteral() + " \"" + is.Path + "\" as " + is.Name.Value
+			out += " \"" + is.Path + "\" as " + is.Name.Value
+			return out
 		}
-		return is.TokenLiteral() + " \"" + is.Path + "\""
+		out += " \"" + is.Path + "\""
+		return out
 	}
 	if is.Path != is.Name.Value {
 		// Ident alias: import mod as alias
-		return is.TokenLiteral() + " " + is.Path + " as " + is.Name.Value
+		out += " " + is.Path + " as " + is.Name.Value
+		return out
 	}
-	return is.TokenLiteral() + " " + is.Name.String()
+	out += " " + is.Path
+	return out
 }
 
 // ReturnStatement is a statement node that represents an explicit return from
