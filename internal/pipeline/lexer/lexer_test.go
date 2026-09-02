@@ -983,7 +983,7 @@ func TestPipeToken(t *testing.T) {
 
 // TestTypeConstraintTokenization verifies the tokenization of type constraints.
 func TestTypeConstraintTokenization(t *testing.T) {
-	input := `define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean {
+	input := `define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean {
 		return c.age > 18
 	}`
 
@@ -994,17 +994,17 @@ func TestTypeConstraintTokenization(t *testing.T) {
 		{"ident", Token{IDENT, "MajorCustomer", 1, 8}},
 		{"constraints", Token{CONSTRAINTS, "constraints", 1, 22}},
 		{"ident", Token{IDENT, "Customer", 1, 34}},
-		{"where", Token{WHERE, "where", 1, 43}},
-		{"colon", Token{COLON, ":", 1, 48}},
-		{"fn", Token{FN, "fn", 1, 50}},
-		{"lparen", Token{LPAREN, "(", 1, 52}},
-		{"ident", Token{IDENT, "c", 1, 53}},
-		{"colon", Token{COLON, ":", 1, 54}},
-		{"ident", Token{IDENT, "Customer", 1, 56}},
-		{"rparen", Token{RPAREN, ")", 1, 64}},
-		{"arrow", Token{ARROW, "->", 1, 66}},
-		{"ident", Token{IDENT, "Boolean", 1, 69}},
-		{"lbrace", Token{LBRACE, "{", 1, 77}},
+		{"with", Token{WITH, "with", 1, 43}},
+		{"colon", Token{COLON, ":", 1, 47}},
+		{"fn", Token{FN, "fn", 1, 49}},
+		{"lparen", Token{LPAREN, "(", 1, 51}},
+		{"ident", Token{IDENT, "c", 1, 52}},
+		{"colon", Token{COLON, ":", 1, 53}},
+		{"ident", Token{IDENT, "Customer", 1, 55}},
+		{"rparen", Token{RPAREN, ")", 1, 63}},
+		{"arrow", Token{ARROW, "->", 1, 65}},
+		{"ident", Token{IDENT, "Boolean", 1, 68}},
+		{"lbrace", Token{LBRACE, "{", 1, 76}},
 		{"return", Token{RETURN, "return", 2, 3}},
 		{"ident", Token{IDENT, "c", 2, 10}},
 		{"dot", Token{DOT, ".", 2, 11}},
@@ -1012,7 +1012,7 @@ func TestTypeConstraintTokenization(t *testing.T) {
 		{"gt", Token{GT, ">", 2, 16}},
 		{"number", Token{NUMBER, "18", 2, 18}},
 		{"rbrace", Token{RBRACE, "}", 3, 2}},
-		{"eof", Token{EOF, "", 3, 3}},
+		{"EOF", Token{EOF, "", 3, 3}},
 	}
 
 	runTestsOnTokens(tknzr, tests, t)
@@ -1037,7 +1037,7 @@ func TestNamedImportTokenization(t *testing.T) {
 	tests := []testScenario{
 		{"Import keyword", Token{IMPORT, "import", 1, 1}},
 		{"Left brace", Token{LBRACE, "{", 1, 8}},
-		{"Identifier where", Token{WHERE, "where", 1, 10}},
+		{"Identifier where", Token{IDENT, "where", 1, 10}},
 		{"Comma", Token{COMMA, ",", 1, 15}},
 		{"Identifier select", Token{IDENT, "select", 1, 17}},
 		{"Right brace", Token{RBRACE, "}", 1, 24}},

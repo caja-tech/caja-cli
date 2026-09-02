@@ -703,7 +703,7 @@ func (p *Parser) parseTypeConstraintStatement() *ast.TypeConstraintStatement {
 	}
 	stmt.BaseType = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
 
-	if !p.expectPeek(lexer.WHERE) {
+	if !p.expectPeek(lexer.WITH) {
 		return nil
 	}
 

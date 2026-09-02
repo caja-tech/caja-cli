@@ -433,7 +433,7 @@ func (sd *StructDefinition) String() string {
 }
 
 // TypeConstraintStatement represents a predicate subtyping definition.
-// e.g., define MajorCustomer from Customer where: fn(c: Customer) -> Boolean { ... }
+// e.g., define MajorCustomer from Customer with: fn(c: Customer) -> Boolean { ... }
 type TypeConstraintStatement struct {
 	Token     lexer.Token // The 'define' token
 	Name      *Identifier // The new constrained type name
@@ -444,7 +444,7 @@ type TypeConstraintStatement struct {
 func (ts *TypeConstraintStatement) statementNode()       {}
 func (ts *TypeConstraintStatement) TokenLiteral() string { return ts.Token.Literal }
 func (ts *TypeConstraintStatement) String() string {
-	out := ts.TokenLiteral() + " " + ts.Name.String() + " constraints " + ts.BaseType.String() + " where: "
+	out := ts.TokenLiteral() + " " + ts.Name.String() + " constraints " + ts.BaseType.String() + " with: "
 	if ts.Predicate != nil {
 		out += ts.Predicate.String()
 	}

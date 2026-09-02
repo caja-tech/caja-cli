@@ -1471,13 +1471,13 @@ func TestTypeConstraintParsing(t *testing.T) {
 	tests := []testScenario{
 		{
 			name:     "Type constraint simple",
-			input:    "define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean {\nreturn c.age > 18\n}",
-			expected: "define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { ... }",
+			input:    "define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean {\nreturn c.age > 18\n}",
+			expected: "define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { ... }",
 		},
 		{
 			name:     "Type constraint one-liner",
-			input:    "define Even constraints Number where: fn(n: Number) -> Boolean { return n % 2 == 0 }",
-			expected: "define Even constraints Number where: fn(n: Number) -> Boolean { ... }",
+			input:    "define Even constraints Number with: fn(n: Number) -> Boolean { return n % 2 == 0 }",
+			expected: "define Even constraints Number with: fn(n: Number) -> Boolean { ... }",
 		},
 	}
 
@@ -1486,10 +1486,10 @@ func TestTypeConstraintParsing(t *testing.T) {
 
 func TestTypeConstraintErrors(t *testing.T) {
 	tests := []string{
-		"define constraints Customer where: fn() {}",
-		"define MajorCustomer Customer where: fn() {}",
+		"define constraints Customer with: fn() {}",
+		"define MajorCustomer Customer with: fn() {}",
 		"define MajorCustomer constraints Customer fn() {}",
-		"define MajorCustomer constraints Customer where fn() {}",
+		"define MajorCustomer constraints Customer with fn() {}",
 	}
 
 	for _, input := range tests {

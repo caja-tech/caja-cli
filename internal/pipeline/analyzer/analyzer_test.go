@@ -1745,7 +1745,7 @@ func TestTypeConstraints(t *testing.T) {
 			name: "Valid type constraint",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 let m: MajorCustomer? = Customer { age: 20 }
 let c: Customer? = m
 `,
@@ -1754,7 +1754,7 @@ let c: Customer? = m
 		{
 			name: "Type constraint missing base type",
 			input: `
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return true }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return true }
 `,
 			expectedErrors: []string{"semantic error: base type 'Customer' is not declared"},
 		},
@@ -1762,7 +1762,7 @@ define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { re
 			name: "Type constraint predicate not a function",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: 42
+define MajorCustomer constraints Customer with: 42
 `,
 			expectedErrors: []string{"type error: constraint predicate must be a function"},
 		},
@@ -1770,7 +1770,7 @@ define MajorCustomer constraints Customer where: 42
 			name: "Type constraint predicate wrong arg type",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Number) -> Boolean { return true }
+define MajorCustomer constraints Customer with: fn(c: Number) -> Boolean { return true }
 `,
 			expectedErrors: []string{"type error: constraint predicate must accept a single argument of type Customer"},
 		},
@@ -1778,7 +1778,7 @@ define MajorCustomer constraints Customer where: fn(c: Number) -> Boolean { retu
 			name: "Type constraint predicate wrong return type",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Number { return 42 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Number { return 42 }
 `,
 			expectedErrors: []string{"type error: constraint predicate must return Boolean"},
 		},
@@ -1792,7 +1792,7 @@ func TestAdvancedTypeConstraints(t *testing.T) {
 			name: "Type constraint as a function parameter",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let processMajor = fn(m: MajorCustomer?) -> Boolean {
 	return true
@@ -1807,7 +1807,7 @@ processMajor(m)
 			name: "Type constraint inside a data-first pipeline",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let processMajor = fn(m: MajorCustomer?) -> Boolean {
 	return true
@@ -1822,7 +1822,7 @@ m |> processMajor
 			name: "Passing base type to non-nullable constraint parameter is prohibited by analyzer",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let processMajor = fn(m: MajorCustomer) -> Boolean {
 	return true
@@ -1837,7 +1837,7 @@ processMajor(c)
 			name: "Casting a nullable type constraint to a non-nullable type constraint via assignment",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let mNullable: MajorCustomer? = Customer { age: 20 }
 let mNonNullable: MajorCustomer = mNullable
@@ -1854,7 +1854,7 @@ func TestSafePipeAnalyzer(t *testing.T) {
 			name: "Valid safe pipe into constraint",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let processMajor = fn(m: MajorCustomer) -> Boolean { return true }
 let m: MajorCustomer? = Customer { age: 20 }
@@ -1875,7 +1875,7 @@ m ?> double
 			name: "Chained safe pipes (Valid)",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let processMajor = fn(m: MajorCustomer) -> MajorCustomer { return m }
 let printAge = fn(m: MajorCustomer) -> Number { return m.age }
@@ -1889,7 +1889,7 @@ m ?> processMajor ?> printAge
 			name: "Chained safe pipe followed by standard pipe (Invalid)",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 
 let processMajor = fn(m: MajorCustomer) -> MajorCustomer { return m }
 let printAge = fn(m: MajorCustomer) -> Number { return m.age }

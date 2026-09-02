@@ -1411,7 +1411,7 @@ func TestEvaluateTypeConstraints(t *testing.T) {
 			name: "Type constraint success",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 let m: MajorCustomer? = Customer { age: 20 }
 return m?.age
 `,
@@ -1421,7 +1421,7 @@ return m?.age
 			name: "Type constraint fallback to null",
 			input: `
 type Customer struct { age Number }
-define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
 let m: MajorCustomer? = Customer { age: 10 }
 return m
 `,

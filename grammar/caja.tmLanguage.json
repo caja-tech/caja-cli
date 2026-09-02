@@ -55,7 +55,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\b(import|from|as|return|if|else|constraints|where|and|or|xor)\b",
+          "match": "\b(import|from|as|return|if|else|constraints|with|and|or|xor)\b",
           "name": "keyword.control.caja"
         },
         {
