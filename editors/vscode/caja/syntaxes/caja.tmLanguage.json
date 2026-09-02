@@ -44,7 +44,7 @@
     },
     "keywords": {
       "patterns": [
-        { "match": "\\b(import|as|return|if|else)\\b", "name": "keyword.control.caja" },
+        { "match": "\\b(import|from|as|return|if|else)\\b", "name": "keyword.control.caja" },
         { "match": "\\b(and|or|xor)\\b", "name": "keyword.operator.logical.caja" },
         { "match": "\\b(let|const|fn|struct|type)\\b", "name": "storage.type.caja" },
         { "match": "\\b(private)\\b", "name": "storage.modifier.caja" }

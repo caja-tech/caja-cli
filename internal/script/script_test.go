@@ -193,6 +193,24 @@ func TestModules(t *testing.T) {
 			expectError: false,
 			expectVal:   220.0,
 		},
+		{
+			name:        "Named Imports Builtin Test",
+			file:        "test_named_imports_builtin.caja",
+			expectError: false,
+			expectVal:   20.0,
+		},
+		{
+			name:        "Named Imports Custom Test",
+			file:        "test_named_imports_custom.caja",
+			expectError: false,
+			expectVal:   30.0,
+		},
+		{
+			name:        "Named Imports Node Test",
+			file:        "test_named_imports_node.caja",
+			expectError: false,
+			expectVal:   220.0,
+		},
 	}
 
 	for _, tc := range testCases {

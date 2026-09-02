@@ -1404,3 +1404,14 @@ func TestEvaluateNothingType(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+
+// TestEvaluateNamedImports verifies that named imports accurately extract the target values from a module.
+func TestEvaluateNamedImports(t *testing.T) {
+	var tests = []testScenario{
+		{"Named import from math", "import { max } from \"math\"\nreturn max(10, 20)", 20.0},
+		{"Named import and alias access", "import { max } from \"math\" as m\nlet a = max(5, 10)\nlet b = m.min(10, 20)\nreturn a + b", 20.0},
+		{"Multiple named imports", "import { max, min } from \"math\"\nreturn max(5, 10) + min(15, 20)", 25.0},
+	}
+
+	runTestScenarios(t, tests)
+}

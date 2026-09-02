@@ -30,7 +30,7 @@
     },
     "keywords": {
       "patterns": [
-        { "match": "\\b(import|as|return|if|else|and|or|xor)\\b", "name": "keyword.control.caja" },
+        { "match": "\\b(import|from|as|return|if|else|and|or|xor)\\b", "name": "keyword.control.caja" },
         { "match": "\\b(let|const|fn|struct|type|private)\\b", "name": "storage.type.caja" }
       ]
     },

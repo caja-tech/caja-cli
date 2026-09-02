@@ -1,0 +1,6 @@
+import { PI, max } from "math"
+import { min } from "math" as m
+
+let max_val = max(10, 20)
+let min_val = m.min(10, 20)
+return max_val

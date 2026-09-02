@@ -419,8 +419,12 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 // analyzeLetStatement checks for variable redeclarations and registers the
 // newly declared variable in the current scope with its analyzed type.
 func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
-	if _, exists := a.findVarSymbolInScope(n.Name.Value); exists {
-		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
+	if entry, exists := a.findVarSymbolInScope(n.Name.Value); exists {
+		if entry.IsImport {
+			a.reportError(n.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", n.Name.Value))
+		} else {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
+		}
 	}
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
@@ -509,8 +513,12 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 // analyzeConstStatement checks for variable redeclarations and registers the
 // newly declared constant in the current scope with its analyzed type.
 func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
-	if _, exists := a.findVarSymbolInScope(n.Name.Value); exists {
-		a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
+	if entry, exists := a.findVarSymbolInScope(n.Name.Value); exists {
+		if entry.IsImport {
+			a.reportError(n.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", n.Name.Value))
+		} else {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
+		}
 	}
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
@@ -601,44 +609,74 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	modPath := n.Path
 	modName := n.Name.Value
 
+	var modSymbol symbol.Symbol
 	if symbols, exportedTypes, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol := symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil, nil, "")
-		a.declare(modName, modSymbol, true, n.Name.Token)
-		return modSymbol
-	}
+		modSymbol = symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil, nil, "")
+	} else {
+		// Check circular dependencies
+		if a.loading[modPath] {
+			a.reportError(n.Token, fmt.Sprintf("circular import detected: '%s'", modPath))
+			return symbol.AnySymbol()
+		}
 
-	// Check circular dependencies
-	if a.loading[modPath] {
-		a.reportError(n.Token, fmt.Sprintf("circular import detected: '%s'", modPath))
-		return symbol.AnySymbol()
-	}
+		a.loading[modPath] = true
+		defer func() { a.loading[modPath] = false }()
 
-	a.loading[modPath] = true
-	defer func() { a.loading[modPath] = false }()
+		modProgram, err := modules.Load(a.globalEnv.BaseDir, modPath)
+		if err != nil {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: failed to import '%s': %v", modPath, err))
+			return symbol.AnySymbol()
+		}
 
-	modProgram, err := modules.Load(a.globalEnv.BaseDir, modPath)
-	if err != nil {
-		a.reportError(n.Token, fmt.Sprintf("semantic error: failed to import '%s': %v", modPath, err))
-		return symbol.AnySymbol()
-	}
+		// Cache the parsed AST for the evaluator to reuse
+		if a.globalEnv != nil {
+			a.globalEnv.ModuleASTs[modPath] = modProgram
+		}
 
-	// Cache the parsed AST for the evaluator to reuse
-	if a.globalEnv != nil {
-		a.globalEnv.ModuleASTs[modPath] = modProgram
-	}
-
-	modEnv := environment.NewEnvironment(a.globalEnv.BaseDir, modPath, true)
-	modEnv.ModuleASTs = a.globalEnv.ModuleASTs
-	modAnalyzer := New(modEnv)
-	modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
-	modSymbol := modAnalyzer.analyze(modProgram)
-	if len(modAnalyzer.diagnosticErrors) > 0 {
-		a.reportError(n.Token, fmt.Sprintf("semantic error: failed to analyze module %s", modPath))
-		a.diagnosticErrors = append(a.diagnosticErrors, modAnalyzer.diagnosticErrors...)
-		return symbol.AnySymbol()
+		modEnv := environment.NewEnvironment(a.globalEnv.BaseDir, modPath, true)
+		modEnv.ModuleASTs = a.globalEnv.ModuleASTs
+		modAnalyzer := New(modEnv)
+		modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
+		modSymbol = modAnalyzer.analyze(modProgram)
+		if len(modAnalyzer.diagnosticErrors) > 0 {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: failed to analyze module %s", modPath))
+			a.diagnosticErrors = append(a.diagnosticErrors, modAnalyzer.diagnosticErrors...)
+			return symbol.AnySymbol()
+		}
 	}
 
 	a.declare(modName, modSymbol, true, n.Name.Token)
+
+	if len(n.NamedImports) > 0 {
+		modSym, ok := modSymbol.(*symbol.ModuleSymbol)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: '%s' is not a module", modPath))
+			return symbol.AnySymbol()
+		}
+
+		for _, named := range n.NamedImports {
+			if sym, exists := modSym.GetSymbol(named.Value); exists {
+				a.nodeSymbols[named] = sym
+				if defTok, ok := modSym.Definitions[named.Value]; ok {
+					a.nodeDefinitions[named] = defTok
+					if modSym.FilePath != "" {
+						if a.nodeDefinitionFiles == nil {
+							a.nodeDefinitionFiles = make(map[ast.Node]string)
+						}
+						a.nodeDefinitionFiles[named] = modSym.FilePath
+					}
+				}
+				if _, alreadyDeclared := a.findVarSymbolInScope(named.Value); alreadyDeclared {
+					a.reportError(named.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", named.Value))
+				} else {
+					a.declareImport(named.Value, sym, true, named.Token)
+				}
+			} else {
+				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
+			}
+		}
+	}
+
 	return modSymbol
 }
 

@@ -209,31 +209,41 @@ func evalImportStatement(node *ast.ImportStatement, env *environment.Environment
 	modPath := node.Path
 	modName := node.Name.Value
 
+	var moduleObj environment.Object
+
 	if cached, ok := env.ModuleCache[modPath]; ok {
-		env.Set(modName, cached)
-		return cached, nil
-	}
-
-	if stdMod := env.GetStandardModule(modPath); stdMod != nil {
+		moduleObj = cached
+	} else if stdMod := env.GetStandardModule(modPath); stdMod != nil {
 		env.ModuleCache[modPath] = stdMod
-		env.Set(modName, stdMod)
-		return stdMod, nil
+		moduleObj = stdMod
+	} else {
+		if env.Loading[modPath] {
+			return nil, fmt.Errorf("circular import detected: %s", modPath)
+		}
+
+		env.Loading[modPath] = true
+		defer func() { env.Loading[modPath] = false }()
+
+		loadedMod, err := loadModule(modPath, env)
+		if err != nil {
+			return nil, err
+		}
+
+		env.ModuleCache[modPath] = loadedMod
+		moduleObj = loadedMod
 	}
 
-	if env.Loading[modPath] {
-		return nil, fmt.Errorf("circular import detected: %s", modPath)
-	}
-
-	env.Loading[modPath] = true
-	defer func() { env.Loading[modPath] = false }()
-
-	moduleObj, err := loadModule(modPath, env)
-	if err != nil {
-		return nil, err
-	}
-
-	env.ModuleCache[modPath] = moduleObj
 	env.Set(modName, moduleObj)
+
+	if len(node.NamedImports) > 0 {
+		if modMap, ok := moduleObj.(*environment.Module); ok {
+			for _, named := range node.NamedImports {
+				if val, exists := modMap.Env.Get(named.Value); exists {
+					env.Set(named.Value, val)
+				}
+			}
+		}
+	}
 
 	return moduleObj, nil
 }
