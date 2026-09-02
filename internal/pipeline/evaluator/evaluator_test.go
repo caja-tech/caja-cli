@@ -1404,3 +1404,77 @@ func TestEvaluateNothingType(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestEvaluateTypeConstraints(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Type constraint success",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+let m: MajorCustomer? = Customer { age: 20 }
+return m?.age
+`,
+			expected: 20.0,
+		},
+		{
+			name: "Type constraint fallback to null",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+let m: MajorCustomer? = Customer { age: 10 }
+return m
+`,
+			expected: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := testEval(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if res != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, res)
+			}
+		})
+	}
+}
+
+
+
+func TestSafePipeEvaluator(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Safe pipe executes correctly when not null",
+			input: `
+type Wrapper struct { value Number }
+let double = fn(w: Wrapper) -> Number { return w.value * 2 }
+let m: Wrapper? = Wrapper { value: 5 }
+return m ?> double
+`,
+			expected: 10.0,
+		},
+		{
+			name: "Safe pipe short-circuits to null",
+			input: `
+type Wrapper struct { value Number }
+let double = fn(w: Wrapper) -> Number { return w.value * 2 }
+let m: Wrapper? = nil
+return m ?> double
+`,
+			expected: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := testEval(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if res != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, res)
+			}
+		})
+	}
+}

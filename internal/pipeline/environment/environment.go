@@ -33,6 +33,7 @@ type EnvRegistry struct {
 	ModuleASTs     map[string]*ast.Program // ASTs parsed during semantic analysis
 	ExportedValues *[]Object
 	privates       map[string]bool
+	typeConstraints map[string]Object
 }
 
 // Environment provides a symbol table to store and retrieve variables
@@ -60,9 +61,10 @@ func NewEnvironment(baseDir string, fileName string, isModule bool) *Environment
 			CallStack:      []StackFrame{},
 			ModuleCache:    make(map[string]*Module),
 			Loading:        make(map[string]bool),
-			ModuleASTs:     make(map[string]*ast.Program),
-			ExportedValues: &exportedValues,
-			privates:       make(map[string]bool),
+			ModuleASTs:      make(map[string]*ast.Program),
+			ExportedValues:  &exportedValues,
+			privates:        make(map[string]bool),
+			typeConstraints: make(map[string]Object),
 		},
 	}
 }
@@ -86,6 +88,7 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 		env.ModuleASTs = outer.ModuleASTs
 		env.ExportedValues = outer.ExportedValues
 		env.privates = outer.privates
+		env.typeConstraints = outer.typeConstraints
 	}
 	return env
 }
@@ -106,6 +109,21 @@ func (e *Environment) Get(key string) (Object, bool) {
 func (e *Environment) Set(name string, val Object) Object {
 	e.store[name] = val
 	return val
+}
+
+func (e *Environment) GetTypeConstraint(name string) (Object, bool) {
+	if e.typeConstraints == nil {
+		return nil, false
+	}
+	val, ok := e.typeConstraints[name]
+	return val, ok
+}
+
+func (e *Environment) SetTypeConstraint(name string, predicate Object) {
+	if e.typeConstraints == nil {
+		e.typeConstraints = make(map[string]Object)
+	}
+	e.typeConstraints[name] = predicate
 }
 
 // MarkPrivate marks a variable as private to this module.

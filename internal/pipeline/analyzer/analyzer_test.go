@@ -1738,3 +1738,167 @@ func TestSemanticNullableNavigation(t *testing.T) {
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestTypeConstraints(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid type constraint",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+let m: MajorCustomer? = Customer { age: 20 }
+let c: Customer? = m
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Type constraint missing base type",
+			input: `
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return true }
+`,
+			expectedErrors: []string{"semantic error: base type 'Customer' is not declared"},
+		},
+		{
+			name: "Type constraint predicate not a function",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: 42
+`,
+			expectedErrors: []string{"type error: constraint predicate must be a function"},
+		},
+		{
+			name: "Type constraint predicate wrong arg type",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Number) -> Boolean { return true }
+`,
+			expectedErrors: []string{"type error: constraint predicate must accept a single argument of type Customer"},
+		},
+		{
+			name: "Type constraint predicate wrong return type",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Number { return 42 }
+`,
+			expectedErrors: []string{"type error: constraint predicate must return Boolean"},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestAdvancedTypeConstraints(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Type constraint as a function parameter",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer?) -> Boolean {
+	return true
+}
+
+let m: MajorCustomer? = Customer { age: 20 }
+processMajor(m)
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Type constraint inside a data-first pipeline",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer?) -> Boolean {
+	return true
+}
+
+let m: MajorCustomer? = Customer { age: 20 }
+m |> processMajor
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Passing base type to non-nullable constraint parameter is prohibited by analyzer",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer) -> Boolean {
+	return true
+}
+
+let c: Customer = Customer { age: 20 }
+processMajor(c)
+`,
+			expectedErrors: []string{"type error: argument 1 expected MajorCustomer, got Customer"},
+		},
+		{
+			name: "Casting a nullable type constraint to a non-nullable type constraint via assignment",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let mNullable: MajorCustomer? = Customer { age: 20 }
+let mNonNullable: MajorCustomer = mNullable
+`,
+			expectedErrors: []string{"type error: cannot assign MajorCustomer? to MajorCustomer"},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestSafePipeAnalyzer(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid safe pipe into constraint",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer) -> Boolean { return true }
+let m: MajorCustomer? = Customer { age: 20 }
+m ?> processMajor
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Unnecessary safe pipe",
+			input: `
+let m: Number = 5
+let double = fn(x: Number) -> Number { return x * 2 }
+m ?> double
+`,
+			expectedErrors: []string{"semantic error: unnecessary safe pipe on non-nullable type"},
+		},
+		{
+			name: "Chained safe pipes (Valid)",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer) -> MajorCustomer { return m }
+let printAge = fn(m: MajorCustomer) -> Number { return m.age }
+
+let m: MajorCustomer? = Customer { age: 20 }
+m ?> processMajor ?> printAge
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Chained safe pipe followed by standard pipe (Invalid)",
+			input: `
+type Customer struct { age Number }
+define MajorCustomer constraints Customer where: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer) -> MajorCustomer { return m }
+let printAge = fn(m: MajorCustomer) -> Number { return m.age }
+
+let m: MajorCustomer? = Customer { age: 20 }
+m ?> processMajor |> printAge
+`,
+			expectedErrors: []string{"type error: argument 1 expected MajorCustomer, got MajorCustomer?"},
+		},
+	}
+	runTestScenarios(t, tests)
+}

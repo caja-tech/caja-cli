@@ -28,6 +28,12 @@ func (ns *NullableSymbol) Equals(other Symbol) bool {
 		return ns.Underlying.Equals(otherNullable.Underlying)
 	}
 
+	if constraint, ok := ns.Underlying.(*ConstraintSymbol); ok {
+		if constraint.BaseType.Equals(other) {
+			return true
+		}
+	}
+
 	// If the other is NOT nullable (but we are), it's still acceptable to assign a non-null
 	// value to a nullable variable.
 	return ns.Underlying.Equals(other)

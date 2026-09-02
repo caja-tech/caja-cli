@@ -87,6 +87,7 @@ func New(t *lexer.Lexer) *Parser {
 	p.infixParseFuncs[lexer.OR] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.XOR] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.PIPE] = p.parsePipeExpression
+	p.infixParseFuncs[lexer.SAFE_PIPE] = p.parseSafePipeExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -429,8 +430,8 @@ func (p *Parser) parseStatement() ast.Statement {
 	if p.currToken.Type == lexer.PRIVATE {
 		isPrivate = true
 		p.nextToken()
-		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST {
-			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const' or 'type'")
+		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST && p.currToken.Type != lexer.DEFINE {
+			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'")
 			return nil
 		}
 	}
@@ -471,6 +472,15 @@ func (p *Parser) parseStatement() ast.Statement {
 			return nil
 		}
 		stmt.IsPrivate = isPrivate
+		return stmt
+	}
+
+	if p.currToken.Type == lexer.DEFINE {
+		stmt := p.parseTypeConstraintStatement()
+		if stmt == nil {
+			return nil
+		}
+		// Assuming we don't need IsPrivate for DEFINE for now, or add it if necessary.
 		return stmt
 	}
 
@@ -649,6 +659,37 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 // parseTypeAliasStatement parses a type alias declaration of the form "type Name fn(...): ReturnType".
 // It captures the "type" keyword token implicitly, ensures the next token is an identifier,
 // expects the "fn" keyword, and then parses the function signature.
+func (p *Parser) parseTypeConstraintStatement() *ast.TypeConstraintStatement {
+	stmt := &ast.TypeConstraintStatement{Token: p.currToken}
+
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.CONSTRAINTS) {
+		return nil
+	}
+
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	stmt.BaseType = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.WHERE) {
+		return nil
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken() // move past COLON to start of expression
+	stmt.Predicate = p.parseExpression(lexer.LOWEST_PRECEDENCE)
+
+	return stmt
+}
+
 func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 	statement := &ast.TypeAliasStatement{Token: p.currToken}
 
@@ -1017,8 +1058,10 @@ func (p *Parser) parsePropertyExpression(left ast.Expression) ast.Expression {
 		Safe:   p.currToken.Type == lexer.QUESTIONDOT,
 	}
 
-	if !p.expectPeek(lexer.IDENT) {
-		p.reportError(p.peekToken, fmt.Sprintf("expected property name, got %s", p.currToken.Type))
+	if p.peekToken.Type == lexer.IDENT || lexer.IsKeyword(p.peekToken.Type) {
+		p.nextToken()
+	} else {
+		p.reportError(p.peekToken, fmt.Sprintf("expected property name, got %s", p.peekToken.Type))
 		return nil
 	}
 
@@ -1190,4 +1233,29 @@ func (p *Parser) synchronize() {
 func (p *Parser) WithContext(ctx context.Context) *Parser {
 	p.ctx = ctx
 	return p
+}
+
+// parseSafePipeExpression rewrites A ?> f(B) into a SafePipeExpression with Left=A, Call=f(A, B)
+func (p *Parser) parseSafePipeExpression(left ast.Expression) ast.Expression {
+	token := p.currToken // The '?>' token
+	p.nextToken() // Move past '?>'
+
+	right := p.parseExpression(lexer.PIPE_PRECEDENCE)
+
+	var callExp *ast.CallExpression
+	if ce, ok := right.(*ast.CallExpression); ok {
+		ce.Arguments = append([]ast.Expression{left}, ce.Arguments...)
+		callExp = ce
+	} else {
+		callExp = &ast.CallExpression{
+			Function:  right,
+			Arguments: []ast.Expression{left},
+		}
+	}
+
+	return &ast.SafePipeExpression{
+		Token: token,
+		Left:  left,
+		Call:  callExp,
+	}
 }

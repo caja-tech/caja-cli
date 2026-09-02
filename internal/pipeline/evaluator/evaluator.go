@@ -62,8 +62,17 @@ func Eval(n ast.Node, env *environment.Environment) (environment.Object, error) 
 		return evalPrefixExpressionNode(node, env)
 	case *ast.TypeAliasStatement:
 		return nil, nil
+	case *ast.TypeConstraintStatement:
+		return evalTypeConstraintStatement(node, env)
 	case *ast.FunctionLiteral:
 		return evalFunctionLiteral(node, env)
+	case *ast.SafePipeExpression:
+		left, err := Eval(node.Left, env)
+		if err != nil { return nil, err }
+		if left == nil || left.Type() == environment.NULL_OBJ {
+			return environment.NullObj, nil
+		}
+		return evalSafePipeCall(node, left, env)
 	case *ast.CallExpression:
 		return evalCallExpression(node, env)
 	case *ast.ImportStatement:
@@ -414,6 +423,10 @@ func evalLetStatement(node *ast.LetStatement, env *environment.Environment) (env
 
 	if node.ValueType != "" {
 		if err := checkTypeMatches(node.ValueType, val); err != nil {
+			return nil, err
+		}
+		val, err = enforceTypeConstraint(node.ValueType, val, env)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -926,4 +939,71 @@ func loadModule(moduleName string, env *environment.Environment) (*environment.M
 		Name: moduleName,
 		Env:  modEnv,
 	}, nil
+}
+
+func evalTypeConstraintStatement(node *ast.TypeConstraintStatement, env *environment.Environment) (environment.Object, error) {
+	predicateObj, err := Eval(node.Predicate, env)
+	if err != nil {
+		return nil, err
+	}
+	env.SetTypeConstraint(node.Name.Value, predicateObj)
+	return nil, nil
+}
+
+func enforceTypeConstraint(typeName string, val environment.Object, env *environment.Environment) (environment.Object, error) {
+	if val == nil || val.Type() == environment.NULL_OBJ {
+		return val, nil
+	}
+	isNullable := false
+	if len(typeName) > 0 && typeName[len(typeName)-1] == '?' {
+		isNullable = true
+		typeName = typeName[:len(typeName)-1]
+	}
+	
+	predicate, ok := env.GetTypeConstraint(typeName)
+	if !ok {
+		return val, nil
+	}
+	
+	var res environment.Object
+	
+	switch fn := predicate.(type) {
+	case *environment.Function:
+		extendedEnv := environment.NewEnclosedEnvironment(fn.Env)
+		extendedEnv.Set(fn.Parameters[0].Name, val)
+		var err error
+		res, err = Eval(fn.Body, extendedEnv)
+		if err != nil {
+			return nil, err
+		}
+		// Extract return value if it's a ReturnValue object
+		if returnValue, ok := res.(*environment.ReturnValue); ok {
+			res = returnValue.Value
+		}
+	default:
+		return nil, fmt.Errorf("type error: constraint predicate for '%s' is not a valid function", typeName)
+	}
+	
+	if boolRes, ok := res.(*environment.Boolean); ok {
+		if !boolRes.Value {
+			if isNullable {
+				return environment.NullObj, nil
+			}
+			return nil, fmt.Errorf("type constraint error: value does not satisfy the constraint for type '%s'", typeName)
+		}
+	} else {
+		return nil, fmt.Errorf("type error: constraint predicate for '%s' did not return a Boolean", typeName)
+	}
+	
+	return val, nil
+}
+
+func evalSafePipeCall(node *ast.SafePipeExpression, leftObj environment.Object, env *environment.Environment) (environment.Object, error) {
+	dummyName := "___safe_pipe_dummy___"
+	env.Set(dummyName, leftObj)
+	orig := node.Call.Arguments[0]
+	node.Call.Arguments[0] = &ast.Identifier{Value: dummyName}
+	res, err := evalCallExpression(node.Call, env)
+	node.Call.Arguments[0] = orig
+	return res, err
 }
