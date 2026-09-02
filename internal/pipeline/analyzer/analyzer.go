@@ -753,6 +753,8 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 	
 	constraint := symbol.NewConstraintSymbol(n.Name.Value, baseType, n.Predicate)
 	a.types[n.Name.Value] = constraint
+	a.nodeSymbols[n.BaseType] = baseType
+	a.nodeSymbols[n.Name] = constraint
 
 	// Verify predicate has correct type signature fn(BaseType) -> Boolean
 	fnType := a.analyze(n.Predicate)
