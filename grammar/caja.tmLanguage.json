@@ -55,11 +55,11 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\b(import|from|as|return|if|else|constraints|with|and|or|xor)\b",
+          "match": "\\b(import|from|as|return|if|else|constraints|with|and|or|xor)\\b",
           "name": "keyword.control.caja"
         },
         {
-          "match": "\b(let|const|fn|struct|type|define|private)\b",
+          "match": "\\b(let|const|fn|struct|type|define|private)\\b",
           "name": "storage.type.caja"
         }
       ]
