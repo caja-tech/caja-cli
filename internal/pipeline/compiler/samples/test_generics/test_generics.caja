@@ -1,0 +1,22 @@
+import log
+
+type Box<T> struct {
+    value T
+}
+
+let processBox = fn<T, P>(box: Box<T>, m: map[T]P) -> P {
+    let key = box.value
+    return m[key]
+}
+
+let stringBox = Box::<String> { value: "test_key" }
+
+let myMap: map[String]Number = {
+    "test_key": 42.5
+}
+
+let result1 = processBox(stringBox, myMap)
+log.info("Implicit binding result: ", result1)
+
+let result2 = processBox::<String, Number>(stringBox, myMap)
+log.info("Explicit turbofish result: ", result2)

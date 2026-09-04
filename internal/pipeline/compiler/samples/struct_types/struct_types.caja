@@ -1,0 +1,54 @@
+type Node struct {
+    value Number
+    left Node?
+    right Node?
+}
+
+type Metadata struct {
+    description String
+    active Boolean
+}
+
+type Library struct {
+    books [String]
+    records map[String]Number
+    head Node
+    meta Metadata
+}
+
+let n1 = Node{value: 5, left: nil, right: nil}
+let n2 = Node{value: 10, left: n1, right: nil}
+
+let metadata = Metadata{
+    description: "Main Library",
+    active: true
+}
+
+let lib = Library{
+    books: ["Caja Guide", "Go in Action"],
+    records: {"user1": 100},
+    head: n2,
+    meta: metadata
+}
+
+lib.books[0] = "Updated Guide"
+
+type Dog struct {
+    bark fn() -> String
+}
+
+let myDog = Dog{
+    bark: fn() -> String { 
+        return "woof!" 
+    }
+}
+
+let sound = myDog.bark()
+
+type BinaryTree struct {
+    root Node
+}
+
+let tree = BinaryTree{
+    root: Node{value: 100, left: nil, right: nil}
+}

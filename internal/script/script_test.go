@@ -221,7 +221,7 @@ func TestModules(t *testing.T) {
 				t.Fatalf("failed to read test file: %v", err)
 			}
 
-			prog, env, err := ParseWithDir(string(content), testsDir, path)
+			prog, env, _, err := ParseWithDir(string(content), testsDir, path)
 			if err != nil {
 				if !tc.expectError {
 					t.Fatalf("unexpected parsing error: %v", err)

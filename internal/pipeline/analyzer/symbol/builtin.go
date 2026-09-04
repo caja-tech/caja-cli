@@ -9,15 +9,17 @@ type BuiltinSymbol struct {
 	arity      int
 	Label      string
 	Params     []string
+	ModuleName string
 }
 
 // NewBuiltinSymbol creates and returns a new BuiltinSymbol with the specified arity.
-func NewBuiltinSymbol(arity int, label string, params ...string) *BuiltinSymbol {
+func NewBuiltinSymbol(moduleName string, arity int, label string, params ...string) *BuiltinSymbol {
 	return &BuiltinSymbol{
 		symbolType: environment.BUILTIN_OBJ,
 		arity:      arity,
 		Label:      label,
 		Params:     params,
+		ModuleName: moduleName,
 	}
 }
 

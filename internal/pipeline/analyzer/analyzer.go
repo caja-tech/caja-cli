@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"fmt"
+
 )
 
 // Analyzer performs semantic analysis on an AST.
@@ -22,6 +23,7 @@ type Analyzer struct {
 	nodeSymbols         map[ast.Node]symbol.Symbol
 	nodeDefinitions     map[ast.Node]lexer.Token
 	nodeDefinitionFiles map[ast.Node]string
+	nodeImportedFiles   map[ast.Node]string
 	functionDepth       int
 	globalEnv           *environment.Environment
 	cache               map[string]*Analyzer
@@ -41,6 +43,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		nodeSymbols:         make(map[ast.Node]symbol.Symbol),
 		nodeDefinitions:     make(map[ast.Node]lexer.Token),
 		nodeDefinitionFiles: make(map[ast.Node]string),
+		nodeImportedFiles:   make(map[ast.Node]string),
 		globalEnv:           globalEnv,
 		cache:               make(map[string]*Analyzer),
 		loading:             make(map[string]bool),
@@ -50,7 +53,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 	}
 
 	// Inject Nothing as a global builtin type
-	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol))
+	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol), "")
 
 	return analyzer
 }
@@ -122,6 +125,11 @@ func (a *Analyzer) GetDefinition(node ast.Node) (lexer.Token, string, bool) {
 	return tok, file, ok
 }
 
+// GetImportedModule returns the module path from which an identifier was imported, if any.
+func (a *Analyzer) GetImportedModule(node ast.Node) string {
+	return a.nodeImportedFiles[node]
+}
+
 // HasErrors returns true if any semantic errors were found.
 func (a *Analyzer) HasErrors() bool {
 	return len(a.diagnosticErrors) > 0
@@ -130,7 +138,9 @@ func (a *Analyzer) HasErrors() bool {
 // analyze traverses the AST starting from the given node and performs
 // semantic checks, populating the errors slice if any issues are found.
 func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
-	if sym, ok := a.unwrappedPipeArgs[node]; ok { return sym }
+	if sym, ok := a.unwrappedPipeArgs[node]; ok {
+		return sym
+	}
 	if a.ctx != nil && a.ctx.Err() != nil {
 		return symbol.AnySymbol()
 	}
@@ -376,6 +386,14 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 		expectedReturnSymbol = expectedFnType.ReturnType()
 	}
 
+	if expectedReturnSymbol == nil {
+		if actualReturnSymbol != nil && actualReturnSymbol.Type() != environment.RETURN_VALUE_OBJ {
+			expectedReturnSymbol = actualReturnSymbol
+		} else {
+			expectedReturnSymbol = symbol.NewBasicSymbol(environment.NULL_OBJ)
+		}
+	}
+
 	if expectedReturnSymbol != nil {
 		isNothing := false
 		if def, ok := expectedReturnSymbol.(*symbol.StructDefSymbol); ok && def.Name == "Nothing" {
@@ -405,7 +423,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	for _, p := range n.Parameters {
 		paramNames = append(paramNames, p.Name)
 	}
-	return symbol.NewFunctionSymbol("", paramNames, n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
+	return symbol.NewFunctionSymbol("", "", paramNames, n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
 }
 
 // analyzeStructLiteral validates the fields of a struct instantiation
@@ -536,7 +554,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		for _, p := range fnNode.Parameters {
 			paramNames = append(paramNames, p.Name)
 		}
-		fnSymbol := symbol.NewFunctionSymbol(n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
+		fnSymbol := symbol.NewFunctionSymbol("", n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol, false, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
@@ -635,7 +653,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		for _, p := range fnNode.Parameters {
 			paramNames = append(paramNames, p.Name)
 		}
-		fnSymbol := symbol.NewFunctionSymbol(n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
+		fnSymbol := symbol.NewFunctionSymbol("", n.Name.Value, paramNames, fnNode.TypeParameters, len(fnNode.Parameters), paramTypes, returnType)
 		a.declare(n.Name.Value, fnSymbol, true, n.Name.Token)
 
 		if ast.GuaranteesRecursiveCall(fnNode.Body, n.Name.Value) {
@@ -698,7 +716,7 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 
 	var modSymbol symbol.Symbol
 	if symbols, exportedTypes, ok := symbol.GetStandardModule(modPath); ok {
-		modSymbol = symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil, nil, "")
+		modSymbol = symbol.NewModuleSymbol(modName, symbols, exportedTypes, nil, nil, nil, modPath)
 	} else {
 		// Check circular dependencies
 		if a.loading[modPath] {
@@ -725,6 +743,14 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 		modAnalyzer := New(modEnv)
 		modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
 		modSymbol = modAnalyzer.analyze(modProgram)
+
+		if a.globalEnv != nil {
+			if a.globalEnv.ModuleAnalyzers == nil {
+				a.globalEnv.ModuleAnalyzers = make(map[string]interface{})
+			}
+			a.globalEnv.ModuleAnalyzers[modPath] = modAnalyzer
+		}
+
 		if len(modAnalyzer.diagnosticErrors) > 0 {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: failed to analyze module %s", modPath))
 			a.diagnosticErrors = append(a.diagnosticErrors, modAnalyzer.diagnosticErrors...)
@@ -746,17 +772,17 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 				a.nodeSymbols[named] = sym
 				if defTok, ok := modSym.Definitions[named.Value]; ok {
 					a.nodeDefinitions[named] = defTok
-					if modSym.FilePath != "" {
-						if a.nodeDefinitionFiles == nil {
-							a.nodeDefinitionFiles = make(map[ast.Node]string)
-						}
-						a.nodeDefinitionFiles[named] = modSym.FilePath
+				}
+				if modSym.FilePath != "" {
+					if a.nodeImportedFiles == nil {
+						a.nodeImportedFiles = make(map[ast.Node]string)
 					}
+					a.nodeImportedFiles[named] = modSym.FilePath
 				}
 				if _, alreadyDeclared := a.findVarSymbolInScope(named.Value); alreadyDeclared {
 					a.reportError(named.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", named.Value))
 				} else {
-					a.declareImport(named.Value, sym, true, named.Token)
+					a.declareImport(named.Value, sym, true, named.Token, modPath)
 				}
 			} else {
 				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
@@ -830,7 +856,7 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 		a.reportError(n.BaseType.Token, fmt.Sprintf("semantic error: base type '%s' is not declared", n.BaseType.Value))
 		return symbol.AnySymbol()
 	}
-	
+
 	constraint := symbol.NewConstraintSymbol(n.Name.Value, baseType, n.Predicate)
 	a.types[n.Name.Value] = constraint
 	a.nodeSymbols[n.BaseType] = baseType
@@ -880,14 +906,14 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			returnType = resolvedReturn
 		}
 
-		fnSym := symbol.NewFunctionSymbol(n.Name.Value, nil, nil, len(n.Signature.ParamTypes), paramTypes, returnType)
+		fnSym := symbol.NewFunctionSymbol("", n.Name.Value, nil, nil, len(n.Signature.ParamTypes), paramTypes, returnType)
 		if len(n.TypeParameters) > 0 {
 			fnSym.TypeParameters = n.TypeParameters
 		}
 		aliasedSymbol = fnSym
 	} else if n.StructDefinition != nil {
 		fields := make(map[string]symbol.StructFieldSymbol)
-		aliasedSymbol = symbol.NewStructDefSymbol(n.Name.Value, n.TypeParameters, fields)
+		aliasedSymbol = symbol.NewStructDefSymbol(n.Name.Value, n.TypeParameters, fields, a.globalEnv.FileName)
 
 		// Pre-register the struct in the type registry to allow recursive definitions
 		a.types[n.Name.Value] = aliasedSymbol
@@ -929,7 +955,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 		}
 	}
 
-	return symbol.AnySymbol()
+	return aliasedSymbol
 }
 
 // analyzeExpressionStatement wraps the analysis of the inner expression.
@@ -944,7 +970,21 @@ func (a *Analyzer) analyzeExpressionStatement(n *ast.ExpressionStatement) symbol
 // logging an error if it has not been declared.
 func (a *Analyzer) analyzeIdentifier(n *ast.Identifier) symbol.Symbol {
 	if entry, ok := a.findVarSymbolInScope(n.Value); ok {
+		if entry.IsMoved {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: use of moved variable '%s'", n.Value))
+		}
+		if a.functionDepth > 0 && entry.FunctionDepth == 0 {
+			if !entry.IsConstant && !entry.IsImport && entry.Sym.Type() != environment.FUNCTION_OBJ && entry.Sym.Type() != environment.MODULE_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: pure functions cannot capture global/module variable '%s'", n.Value))
+			}
+		}
 		a.nodeDefinitions[n] = entry.DefinitionToken
+		if entry.IsImport && entry.FilePath != "" {
+			if a.nodeDefinitionFiles == nil {
+				a.nodeImportedFiles = make(map[ast.Node]string)
+			}
+			a.nodeImportedFiles[n] = entry.FilePath
+		}
 		return entry.Sym
 	}
 
@@ -967,6 +1007,16 @@ func (a *Analyzer) analyzePrefixExpression(n *ast.PrefixExpression) symbol.Symbo
 			a.reportError(n.Token, fmt.Sprintf("type error: operator '-' requires a Number, got %s", rightSymbol.Type()))
 		}
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
+	case "move":
+		if ident, ok := n.Right.(*ast.Identifier); ok {
+			entry, exists := a.findVarSymbolInScope(ident.Value)
+			if exists && entry.IsConstant {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: cannot move constant variable '%s'", ident.Value))
+			} else {
+				a.markVarMoved(ident.Value)
+			}
+		}
+		return rightSymbol
 	default:
 		a.reportError(n.Token, fmt.Sprintf("semantic error: unknown prefix operator '%s'", n.Operator))
 		return symbol.AnySymbol()
@@ -1044,10 +1094,18 @@ func (a *Analyzer) analyzeIfExpression(n *ast.IfExpression) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("type error: condition must be a Boolean, got %s", condSymbol.Type()))
 	}
 
+	snapshot := a.snapshotMovedVars()
+
 	trueType := a.analyze(n.Consequence)
+
+	movedAfterIf := a.snapshotMovedVars()
+	a.restoreMovedVars(snapshot)
+
 	if n.Alternative != nil {
 		a.analyze(n.Alternative)
 	}
+
+	a.unionMovedVars(movedAfterIf)
 	return trueType
 }
 
@@ -1060,15 +1118,21 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 	_, isBuiltin := sym.(*symbol.BuiltinSymbol)
 	if isBuiltin {
 		if ident, ok := n.Function.(*ast.Identifier); ok {
-			if builtinSym, handled := a.analyzeBuiltinCall("", ident.Value, n); handled {
+			modName := a.GetImportedModule(ident)
+			if builtinSym, handled := a.analyzeBuiltinCall(modName, ident.Value, n); handled {
 				return builtinSym
 			}
 		}
 
 		if prop, ok := n.Function.(*ast.PropertyExpression); ok {
-			var modName string
-			if objIdent, ok := prop.Object.(*ast.Identifier); ok {
-				modName = objIdent.Value
+			modName := ""
+			if builtinSym, ok := sym.(*symbol.BuiltinSymbol); ok {
+				modName = builtinSym.ModuleName
+			}
+			if modName == "" {
+				if objIdent, ok := prop.Object.(*ast.Identifier); ok {
+					modName = objIdent.Value
+				}
 			}
 			if builtinSym, handled := a.analyzeBuiltinCall(modName, prop.Property.Value, n); handled {
 				return builtinSym
@@ -1262,6 +1326,10 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 
 	if modSymbol, ok := leftSymbol.(*symbol.ModuleSymbol); ok {
 		if propertySymbol, ok := modSymbol.GetSymbol(n.Property.Value); ok {
+			if modSymbol.IsPrivate(n.Property.Value) {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' is private and cannot be accessed from outside the module", n.Property.Value))
+				return symbol.AnySymbol()
+			}
 			propType = propertySymbol
 			a.nodeSymbols[n.Property] = propertySymbol
 			if defToken, ok := modSymbol.Definitions[n.Property.Value]; ok {
@@ -1328,6 +1396,9 @@ func (a *Analyzer) analyzePropertyAssignmentStatement(n *ast.PropertyAssignmentS
 
 	if modSymbol, ok := leftSym.(*symbol.ModuleSymbol); ok {
 		// Module symbol is available (e.g., standard modules)
+		if modSymbol.IsPrivate(n.Property.Value) {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: property '%s' is private and cannot be assigned from outside the module", n.Property.Value))
+		}
 		if modSymbol.IsConstant(n.Property.Value) {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant property '%s'", n.Property.Value))
 		}
@@ -1377,10 +1448,9 @@ func (a *Analyzer) enforcePurity(node ast.Node, token lexer.Token) {
 	}
 }
 
-
 func (a *Analyzer) analyzeSafePipeExpression(n *ast.SafePipeExpression) symbol.Symbol {
 	leftSymbol := a.analyze(n.Left)
-	
+
 	var underlying symbol.Symbol
 	if nullable, ok := leftSymbol.(*symbol.NullableSymbol); ok {
 		underlying = nullable.Underlying
@@ -1402,4 +1472,8 @@ func (a *Analyzer) analyzeSafePipeExpression(n *ast.SafePipeExpression) symbol.S
 		return resultSym
 	}
 	return &symbol.NullableSymbol{Underlying: resultSym}
+}
+
+func (a *Analyzer) GlobalEnv() *environment.Environment {
+	return a.globalEnv
 }

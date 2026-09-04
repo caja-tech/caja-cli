@@ -640,6 +640,11 @@ func TestPrefixExpressionParsing(t *testing.T) {
 			input:    "-15",
 			expected: "(-15)",
 		},
+		{
+			name:     "Move prefix",
+			input:    "move a",
+			expected: "(movea)", // Since expected format just concatenates Operator and Right string representations: "move" + "a"
+		},
 	}
 	runTestScenarios(t, tests)
 }

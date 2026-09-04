@@ -1,0 +1,102 @@
+import "array" as array
+import "string" as string
+import "math" as math
+import "date" as date
+import "map" as map
+import "log" as log
+import "cast" as cast
+
+let arr = [1, 2, 3]
+let l = array.len(arr)
+let a1 = array.push(arr, 4)
+let a2 = array.pop(arr)
+let a3 = array.head(arr)
+let a4 = array.tail(arr)
+let a5 = array.last(arr)
+let a6 = array.copy(arr)
+let a7 = array.slice(arr, 0, 2)
+let a8 = array.join(arr, arr)
+
+let str = " hello caja "
+let s1 = string.charAt(str, 1)
+let s2 = string.substring(str, 1, 5)
+let s3 = string.concat(str, "world")
+let s4 = string.split(str, " ")
+let s5 = string.contains(str, "caja")
+let s6 = string.startsWith(str, " he")
+let s7 = string.endsWith(str, "ja ")
+let s8 = string.replace(str, "caja", "go")
+let s9 = string.toUpper(str)
+let s10 = string.toLower(str)
+let s11 = string.trim(str)
+let s12 = string.len(str)
+let s13 = string.join(["a", "b"], ",")
+
+let m1 = math.abs(-10)
+let m2 = math.sqrt(16)
+let m3 = math.pow(2, 3)
+let m4 = math.floor(3.9)
+let m5 = math.ceil(3.1)
+let m6 = math.round(3.5)
+let m7 = math.min(1, 2)
+let m8 = math.max(1, 2)
+let m9 = math.log(100, 10)
+let m10 = math.rand()
+let c1 = math.PI
+let c2 = math.E
+let c3 = math.SQRT2
+let c4 = math.LN2
+let c5 = math.LN10
+let c6 = math.LOG2E
+let c7 = math.LOG10E
+
+let d = date.today()
+let d1 = date.year(d)
+let d2 = date.month(d)
+let d3 = date.day(d)
+let d4 = date.weekday(d)
+let d5 = date.parse("2026-07-08")
+let d6 = date.addDays(d, 5)
+let d7 = date.diffDays(d, d6)
+let d8 = date.new(2026, 9, 3)
+
+let myMap = { "key": 10 }
+let ok = map.containsKey(myMap, "key")
+let myMap2 = map.delete(myMap, "key")
+
+log.info("Info msg", arr)
+log.warn("Warn msg", str)
+log.error("Error msg", myMap)
+log.export(arr)
+
+let numToNum = cast.to(10, 0)
+let strToNum = cast.to("10.5", 0)
+let invalidToNum = cast.to("hello", 0)
+
+let strToStr = cast.to("hello", "")
+let numToStr = cast.to(10.5, "")
+let boolToStr = cast.to(true, "")
+let dateToStr = cast.to(date.today(), "")
+
+let boolToBool = cast.to(true, false)
+let strToBool = cast.to("true", false)
+let invalidToBool = cast.to("hello", false)
+
+let dateToDate = cast.to(date.today(), date.today())
+
+type MyKey struct {
+	key map.KeyFunc
+}
+
+let myStructKey = MyKey {
+	key: fn() -> String {
+		return "struct-hash-123"
+	}
+}
+
+let structMap = {
+	myStructKey: 100
+}
+
+structMap[myStructKey] = 200
+let mappedValue = structMap[myStructKey]

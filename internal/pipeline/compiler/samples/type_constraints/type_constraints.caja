@@ -1,0 +1,7 @@
+type Customer struct { age Number }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let m: MajorCustomer? = Customer { age: 20 }
+let invalid: MajorCustomer? = Customer { age: 10 }
+
+return 0

@@ -1,0 +1,27 @@
+import "math"
+
+let abs_val = math.abs(-5.5) 
+let sqrt_val = math.sqrt(16) 
+let pow_val = math.pow(2, 3) 
+let floor_val = math.floor(4.9) 
+let ceil_val = math.ceil(4.1) 
+let round_val = math.round(4.5) 
+let min_val = math.min(10, 5) 
+let max_val = math.max(10, 5) 
+let log_val = math.log(100, 10) 
+let rand_val = math.rand()
+
+let array_results = [abs_val, sqrt_val, pow_val, floor_val, ceil_val, round_val, min_val, max_val, log_val]
+
+let sum = 0.0
+sum = sum + abs_val
+sum = sum + sqrt_val
+sum = sum + pow_val
+sum = sum + floor_val
+sum = sum + ceil_val
+sum = sum + round_val
+sum = sum + min_val
+sum = sum + max_val
+sum = sum + log_val
+
+return sum

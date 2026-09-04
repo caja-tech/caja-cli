@@ -1,0 +1,4 @@
+import second
+
+let result = second.add(1, 2)
+return result

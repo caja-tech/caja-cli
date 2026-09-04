@@ -383,7 +383,9 @@ let add_to_counter = fn() -> Number {
 }
 `,
 			expectedErrors: []string{
+				"semantic error: pure functions cannot capture global/module variable 'counter'",
 				"semantic error: cannot mutate outer scope variable 'counter' inside a function",
+				"semantic error: pure functions cannot capture global/module variable 'counter'",
 			},
 		},
 		{
@@ -397,6 +399,66 @@ let mutate_arr = fn() -> [Number] {
 `,
 			expectedErrors: []string{
 				"semantic error: cannot mutate outer scope variable 'arr' inside a function",
+				"semantic error: pure functions cannot capture global/module variable 'arr'",
+				"semantic error: pure functions cannot capture global/module variable 'arr'",
+			},
+		},
+		{
+			name: "Reading outer scope module variable inside a function (Purity violation)",
+			input: `
+let data = [1, 2, 3]
+
+let delayed_print = fn() {
+    let result = data[0]
+}
+`,
+			expectedErrors: []string{
+				"semantic error: pure functions cannot capture global/module variable 'data'",
+			},
+		},
+		{
+			name: "Reading outer scope global constant inside a function (Allowed)",
+			input: `
+const PI = 3.14
+
+let calculate = fn(r: Number) -> Number {
+    return r * PI
+}
+`,
+			expectedErrors: []string{}, // No errors expected
+		},
+		{
+			name: "Use after move error",
+			input: `
+let data = [1, 2, 3]
+let x = move data
+let y = data[0] # Error
+`,
+			expectedErrors: []string{
+				"semantic error: use of moved variable 'data'",
+			},
+		},
+		{
+			name: "Use after conditional move error",
+			input: `
+let data = [1, 2, 3]
+if (true) {
+	let x = move data
+}
+let y = data[0] # Error
+`,
+			expectedErrors: []string{
+				"semantic error: use of moved variable 'data'",
+			},
+		},
+		{
+			name: "Cannot move constant",
+			input: `
+const data = [1, 2, 3]
+let x = move data # Error
+`,
+			expectedErrors: []string{
+				"semantic error: cannot move constant variable 'data'",
 			},
 		},
 	}

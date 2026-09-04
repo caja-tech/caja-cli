@@ -1,0 +1,7 @@
+type Money Number
+
+let add = fn(a: Money, b: Money) -> Money { 
+    return a + b 
+}
+
+return add(10, 5)

@@ -1,0 +1,7 @@
+type Money Number
+type Matrix [[Number]]
+type StringMap map[String]String
+
+let balance: Money = 100.50
+let grid: Matrix = [[1, 2], [3, 4]]
+let data: StringMap = {"user": "Alice"}

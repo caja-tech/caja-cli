@@ -38,10 +38,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	build, err := NewBuildCmd()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	root.AddCommand(run)
 	root.AddCommand(encode)
 	root.AddCommand(decode)
 	root.AddCommand(lsp)
+	root.AddCommand(build)
 
 	if err := root.Execute(); err != nil {
 		fmt.Println(err)

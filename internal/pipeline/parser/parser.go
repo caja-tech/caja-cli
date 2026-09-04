@@ -65,6 +65,7 @@ func New(t *lexer.Lexer) *Parser {
 
 	p.prefixParseFuncs[lexer.BANG] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MINUS] = p.parsePrefixExpression
+	p.prefixParseFuncs[lexer.MOVE] = p.parsePrefixExpression
 
 	p.infixParseFuncs = make(map[lexer.TokenType]infixParseFunc)
 	p.infixParseFuncs[lexer.PLUS] = p.parseInfixExpression
