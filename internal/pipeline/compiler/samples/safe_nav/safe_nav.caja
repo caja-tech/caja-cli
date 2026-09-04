@@ -1,0 +1,17 @@
+type Node struct {
+    value Number
+    left Node?
+    right Node?
+}
+
+type Tree struct {
+    root Node?
+}
+
+let t: Tree? = nil
+let val = t?.root?.left?.value
+
+let t2: Tree? = Tree{
+    root: Node{value: 42, left: nil, right: nil}
+}
+let val2 = t2?.root?.value

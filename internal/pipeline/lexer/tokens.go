@@ -67,6 +67,7 @@ const (
 	CONSTRAINTS TokenType = "CONSTRAINTS"
 	WITH    TokenType = "WITH"
 	NIL     TokenType = "NIL"
+	MOVE    TokenType = "MOVE"
 )
 
 type Token struct {
@@ -100,6 +101,7 @@ var keywords = map[string]TokenType{
 	"constraints": CONSTRAINTS,
 	"with":   WITH,
 	"nil":     NIL,
+	"move":    MOVE,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the
@@ -115,7 +117,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE:
 		return true
 	}
 	return false

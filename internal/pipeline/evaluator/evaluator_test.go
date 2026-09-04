@@ -1488,3 +1488,17 @@ func TestEvaluateNamedImports(t *testing.T) {
 
 	runTestScenarios(t, tests)
 }
+
+func TestEvaluateMoveKeyword(t *testing.T) {
+	var tests = []testScenario{
+		{"Move primitives", "let a = 10\nreturn move a", 10.0},
+		{"Move arrays", "let a = [1, 2]\nreturn move a[0]", 1.0},
+		{"Move in pipelines", "import \"array\"\nlet a = [1, 2, 3]\nreturn move a |> array.head()", 1.0},
+		{"Move with struct", `
+			type Point struct { x Number }
+			let p = Point { x: 5 }
+			return move p.x
+		`, 5.0},
+	}
+	runTestScenarios(t, tests)
+}

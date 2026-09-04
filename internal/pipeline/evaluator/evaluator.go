@@ -604,6 +604,8 @@ func evalPrefixExpressionNode(node *ast.PrefixExpression, env *environment.Envir
 // evalPrefixExpression applies a prefix operator (!, -) to the right operand.
 func evalPrefixExpression(operator string, right environment.Object) (environment.Object, error) {
 	switch operator {
+	case "move":
+		return right, nil
 	case "!":
 		return evalBangOperatorExpression(right)
 	case "-":

@@ -1050,3 +1050,21 @@ func TestNamedImportTokenization(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+// TestMoveKeyword confirms that the "move" keyword is correctly tokenized
+// as MOVE and that its line/column information is accurate.
+func TestMoveKeyword(t *testing.T) {
+	input := "let a = move b"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier a", Token{IDENT, "a", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 7}},
+		{"Move keyword", Token{MOVE, "move", 1, 9}},
+		{"Identifier b", Token{IDENT, "b", 1, 14}},
+		{"End of file", Token{EOF, "", 1, 15}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

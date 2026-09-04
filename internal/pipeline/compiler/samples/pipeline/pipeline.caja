@@ -1,0 +1,12 @@
+let isEven = fn(x: Number) -> Boolean { return x % 2 == 0 }
+let double = fn(x: Number) -> Number { return x * 2 }
+let rangeArr = fn(start: Number, end: Number) -> [Number] { return [start, end] }
+let filter = fn(arr: [Number], f: fn(Number) -> Boolean) -> [Number] { return arr }
+let mapArr = fn(arr: [Number], f: fn(Number) -> Number) -> [Number] { return arr }
+let sum = fn(acc: Number, val: Number) -> Number { return acc + val }
+let reduce = fn(arr: [Number], f: fn(Number, Number) -> Number, init: Number) -> Number { return init }
+
+let result = rangeArr(1, 10) 
+    |> filter(isEven) 
+    |> mapArr(double) 
+    |> reduce(sum, 0)

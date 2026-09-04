@@ -5,14 +5,18 @@ type CustomStruct struct {
 	value String
 }
 
-let s = CustomStruct {
-	key: fn() -> String { return "" },
-	value: "key"
+let run_test = fn() -> Number {
+	let s = CustomStruct {
+		key: fn() -> String { return "" },
+		value: "key"
+	}
+
+	s.key = fn() -> String { return s.value }
+
+	let d: map[CustomStruct]Number = {}
+	d[s] = 10
+
+	return d[s]
 }
 
-s.key = fn() -> String { return s.value }
-
-let d: map[CustomStruct]Number = {}
-d[s] = 10
-
-return d[s]
+return run_test()

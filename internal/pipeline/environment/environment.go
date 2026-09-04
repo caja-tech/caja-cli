@@ -26,13 +26,14 @@ type EnvConfig struct {
 // EnvRegistry maintains the runtime state of an environment,
 // including variables, the call stack, and cached modules.
 type EnvRegistry struct {
-	store          map[string]Object
-	CallStack      []StackFrame
-	ModuleCache    map[string]*Module
-	Loading        map[string]bool
-	ModuleASTs     map[string]*ast.Program // ASTs parsed during semantic analysis
-	ExportedValues *[]Object
-	privates       map[string]bool
+	store           map[string]Object
+	CallStack       []StackFrame
+	ModuleCache     map[string]*Module
+	Loading         map[string]bool
+	ModuleASTs      map[string]*ast.Program // ASTs parsed during semantic analysis
+	ModuleAnalyzers map[string]interface{}
+	ExportedValues  *[]Object
+	privates        map[string]bool
 	typeConstraints map[string]Object
 }
 

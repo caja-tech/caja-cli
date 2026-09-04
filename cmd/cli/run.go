@@ -42,7 +42,7 @@ func NewRunCmd() (*cobra.Command, error) {
 
 			baseDir := filepath.Dir(filePath)
 
-			program, globalEnv, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
+			program, globalEnv, _, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
 			if err != nil {
 				return err
 			}

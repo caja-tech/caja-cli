@@ -79,3 +79,8 @@ func (ms *ModuleSymbol) GetType(typeName string) (Symbol, bool) {
 func (ms *ModuleSymbol) String() string {
 	return string(ms.Type())
 }
+
+// Name returns the module's name.
+func (ms *ModuleSymbol) Name() string {
+	return ms.name
+}

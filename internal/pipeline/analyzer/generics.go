@@ -112,10 +112,18 @@ func substituteTypesWithVisited(target symbol.Symbol, inferred map[string]symbol
 	}
 
 	if structDef, ok := target.(*symbol.StructDefSymbol); ok {
+		var instantiated []symbol.Symbol
+		for _, tp := range structDef.TypeParameters {
+			if inferredType, exists := inferred[tp]; exists {
+				instantiated = append(instantiated, inferredType)
+			}
+		}
+
 		newStruct := &symbol.StructDefSymbol{
-			Name:           structDef.Name,
-			TypeParameters: nil, // fully instantiated
-			Fields:         make(map[string]symbol.StructFieldSymbol),
+			Name:              structDef.Name,
+			TypeParameters:    nil, // fully instantiated
+			InstantiatedTypes: instantiated,
+			Fields:            make(map[string]symbol.StructFieldSymbol),
 		}
 		visited[target] = newStruct
 

@@ -1,0 +1,12 @@
+let makeMultiplier = fn(factor: Number) -> fn(Number) -> Number {
+    return fn(x: Number) -> Number {
+        return x * factor
+    }
+}
+
+let apply = fn(f: fn(Number) -> Number, val: Number) -> Number {
+    return f(val)
+}
+
+let double = makeMultiplier(2)
+let result = apply(double, 10)

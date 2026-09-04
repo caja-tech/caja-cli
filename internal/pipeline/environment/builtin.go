@@ -905,7 +905,7 @@ func (e *Environment) newCastModule() *Module {
 					if arg.Value { return &String{Value: "true"}, nil }
 					return &String{Value: "false"}, nil
 				case *Date:
-					return &String{Value: arg.Value.Format(time.RFC3339)}, nil
+					return &String{Value: arg.Value.Format("2006-01-02")}, nil
 				}
 			case *Boolean:
 				switch arg := input.(type) {

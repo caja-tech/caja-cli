@@ -1,0 +1,48 @@
+import "array"
+import "log"
+
+# Struct to test moving complex nested data
+type State struct {
+    items [Number]
+    active Boolean
+}
+
+# 1. Explicit move with array built-ins (zero-allocation append)
+let data = [1, 2, 3]
+let updated_data = array.push(move data, 4)
+
+log.info("Updated data:", updated_data)
+# If we try to use 'data' here, the compiler would throw: semantic error: use of moved variable 'data'
+
+# 2. Implicit move in pipelines (temporary values are uniquely owned)
+let numbers = [10, 20, 30]
+let result = numbers 
+    |> array.push(40) # 'numbers' is copied here to preserve immutability
+    |> array.push(50) # The temporary [10, 20, 30, 40] is safely mutated in-place!
+    |> array.push(60) # Mutated in-place!
+
+log.info("Pipeline result:", result)
+log.info("Original numbers (preserved):", numbers)
+
+# 3. Explicit move in pipelines
+let temp = [100, 200]
+let moved_result = move temp 
+    |> array.push(300) # 'temp' is moved, so it is mutated in-place! No copy is made.
+
+log.info("Moved pipeline result:", moved_result)
+
+# 4. Moving struct properties
+let state = State {
+    items: [1, 2],
+    active: true
+}
+
+# We can explicitly move just a property out of a struct to avoid copying the nested data
+let new_items = array.push(move state.items, 3)
+
+let new_state = State {
+    items: new_items,
+    active: false
+}
+
+log.info("New state active:", new_state.active)
