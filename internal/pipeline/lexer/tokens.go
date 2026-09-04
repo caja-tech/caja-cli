@@ -121,3 +121,15 @@ func IsKeyword(tokenType TokenType) bool {
 	}
 	return false
 }
+
+var keywordList []string
+
+// GetKeywords returns a list of all reserved keywords in the language.
+func GetKeywords() []string {
+	if keywordList == nil {
+		for k := range keywords {
+			keywordList = append(keywordList, k)
+		}
+	}
+	return keywordList
+}
