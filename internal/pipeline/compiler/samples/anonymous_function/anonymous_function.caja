@@ -1,0 +1,7 @@
+let double = (p: Number) => p * 2
+let sum: fn(Number, Number) -> Number = (p, q) => p + q
+
+let applyOp = fn(op: fn(Number, Number) -> Number) -> Number {
+   return op(10, 20)
+}
+let res = applyOp((x, y) => x + y)

@@ -13,6 +13,23 @@ func TestTranspile(t *testing.T) {
 		expected []string // substrings expected in the output Go code
 	}{
 		{
+			name: "Anonymous functions",
+			input: `
+				let double = (p: Number) => p * 2
+				let sum: fn(Number, Number) -> Number = (p, q) => p + q
+				
+				let applyOp = fn(op: fn(Number, Number) -> Number) -> Number {
+				   return op(10, 20)
+				}
+				let res = applyOp((x, y) => x + y)
+			`,
+			expected: []string{
+				"var double func(float64) float64 = func(p float64) float64 {\n\treturn (p * 2)\n}",
+				"var sum func(float64, float64) float64 = func(p float64, q float64) float64 {\n\treturn (p + q)\n}",
+				"var res float64 = applyOp(func(x float64, y float64) float64 {\n\treturn (x + y)\n})",
+			},
+		},
+		{
 			name: "Variable declarations",
 			input: `
 				let x = 10

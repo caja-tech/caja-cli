@@ -376,6 +376,14 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 		expectedReturnSymbol = expectedFnType.ReturnType()
 	}
 
+	if expectedReturnSymbol == nil {
+		if actualReturnSymbol != nil && actualReturnSymbol.Type() != environment.RETURN_VALUE_OBJ {
+			expectedReturnSymbol = actualReturnSymbol
+		} else {
+			expectedReturnSymbol = symbol.NewBasicSymbol(environment.NULL_OBJ)
+		}
+	}
+
 	if expectedReturnSymbol != nil {
 		isNothing := false
 		if def, ok := expectedReturnSymbol.(*symbol.StructDefSymbol); ok && def.Name == "Nothing" {
