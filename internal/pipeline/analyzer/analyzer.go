@@ -28,6 +28,7 @@ type Analyzer struct {
 	loading             map[string]bool
 	privates            map[string]bool
 	unwrappedPipeArgs   map[ast.Node]symbol.Symbol
+	expectedTypeStack   []symbol.Symbol
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -45,12 +46,30 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		loading:             make(map[string]bool),
 		privates:            make(map[string]bool),
 		unwrappedPipeArgs:   make(map[ast.Node]symbol.Symbol),
+		expectedTypeStack:   make([]symbol.Symbol, 0),
 	}
 
 	// Inject Nothing as a global builtin type
 	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol), "")
 
 	return analyzer
+}
+
+func (a *Analyzer) pushExpectedType(sym symbol.Symbol) {
+	a.expectedTypeStack = append(a.expectedTypeStack, sym)
+}
+
+func (a *Analyzer) popExpectedType() {
+	if len(a.expectedTypeStack) > 0 {
+		a.expectedTypeStack = a.expectedTypeStack[:len(a.expectedTypeStack)-1]
+	}
+}
+
+func (a *Analyzer) peekExpectedType() symbol.Symbol {
+	if len(a.expectedTypeStack) > 0 {
+		return a.expectedTypeStack[len(a.expectedTypeStack)-1]
+	}
+	return nil
 }
 
 func (a *Analyzer) WithContext(ctx context.Context) *Analyzer {
@@ -301,6 +320,14 @@ func (a *Analyzer) analyzeMapLiteral(n *ast.MapLiteral) symbol.Symbol {
 // registers its parameters, checks its body's return type against the declared
 // return type, and verifies that the function guarantees a return if needed.
 func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol {
+	expectedType := a.peekExpectedType()
+	var expectedFnType *symbol.FunctionSymbol
+	if expectedType != nil {
+		if fs, ok := expectedType.(*symbol.FunctionSymbol); ok {
+			expectedFnType = fs
+		}
+	}
+
 	a.pushScope()
 	a.functionDepth++
 
@@ -310,13 +337,27 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 
 	var paramTypes []symbol.Symbol
 
-	for _, param := range n.Parameters {
-		paramSymbol, ok := a.findTypeSymbolInTypes(param.Type)
-		if !ok {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
+	for i, param := range n.Parameters {
+		var paramSymbol symbol.Symbol
+		if param.Type == "" {
+			if expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
+				paramSymbol = expectedFnType.ParamTypes()[i]
+			} else {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot infer type for parameter '%s'. Provide an explicit type or context.", param.Name))
+				paramSymbol = symbol.AnySymbol()
+			}
+		} else {
+			var ok bool
+			paramSymbol, ok = a.findTypeSymbolInTypes(param.Type)
+			if !ok {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
+				paramSymbol = symbol.AnySymbol()
+			}
 		}
+
 		paramTypes = append(paramTypes, paramSymbol)
 		a.declare(param.Name, paramSymbol, true, n.Token)
+		a.nodeSymbols[param] = paramSymbol
 	}
 
 	actualReturnSymbol := a.analyze(n.Body)
@@ -331,12 +372,14 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.ReturnType))
 		}
 		expectedReturnSymbol = resolvedReturn
+	} else if expectedFnType != nil {
+		expectedReturnSymbol = expectedFnType.ReturnType()
+	}
 
+	if expectedReturnSymbol != nil {
 		isNothing := false
-		if expectedReturnSymbol != nil {
-			if def, ok := expectedReturnSymbol.(*symbol.StructDefSymbol); ok && def.Name == "Nothing" {
-				isNothing = true
-			}
+		if def, ok := expectedReturnSymbol.(*symbol.StructDefSymbol); ok && def.Name == "Nothing" {
+			isNothing = true
 		}
 
 		if !isNothing && !ast.GuaranteesReturn(n.Body) {
@@ -434,18 +477,48 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 	}
 
+	var valType symbol.Symbol
+	var hasExplicitType bool
+	var explicitType symbol.Symbol
+
+	valType = symbol.AnySymbol()
+
+	if n.ValueType != "" {
+		if t, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+		} else {
+			explicitType = t
+			hasExplicitType = true
+			valType = explicitType
+		}
+	}
+
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		for _, tParam := range fnNode.TypeParameters {
 			a.types[tParam] = symbol.NewGenericSymbol(tParam)
 		}
 
-		var paramTypes []symbol.Symbol
-		for _, param := range fnNode.Parameters {
-			typeName, ok := a.findTypeSymbolInTypes(param.Type)
-			if !ok {
-				a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+		var expectedFnType *symbol.FunctionSymbol
+		if hasExplicitType {
+			if fs, ok := explicitType.(*symbol.FunctionSymbol); ok {
+				expectedFnType = fs
 			}
-			paramTypes = append(paramTypes, typeName)
+		}
+
+		var paramTypes []symbol.Symbol
+		for i, param := range fnNode.Parameters {
+			if param.Type == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
+				paramTypes = append(paramTypes, expectedFnType.ParamTypes()[i])
+			} else if param.Type == "" {
+				// Type cannot be inferred from context, handled in function body analysis
+				paramTypes = append(paramTypes, symbol.AnySymbol())
+			} else {
+				typeName, ok := a.findTypeSymbolInTypes(param.Type)
+				if !ok {
+					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+				}
+				paramTypes = append(paramTypes, typeName)
+			}
 		}
 
 		var returnType symbol.Symbol
@@ -455,6 +528,8 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
 			}
 			returnType = resolvedReturnType
+		} else if expectedFnType != nil {
+			returnType = expectedFnType.ReturnType()
 		}
 
 		var paramNames []string
@@ -473,24 +548,14 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 	}
 
-	var valType symbol.Symbol
-	var hasExplicitType bool
-	var explicitType symbol.Symbol
-
-	valType = symbol.AnySymbol()
-
-	if n.ValueType != "" {
-		if t, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
-		} else {
-			explicitType = t
-			hasExplicitType = true
-			valType = explicitType
-		}
-	}
-
 	if n.Value != nil {
+		if hasExplicitType {
+			a.pushExpectedType(explicitType)
+		}
 		rhsType := a.analyze(n.Value)
+		if hasExplicitType {
+			a.popExpectedType()
+		}
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to %s", rhsType.String(), explicitType.String()))
@@ -528,18 +593,33 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 	}
 
+	var expectedFnType *symbol.FunctionSymbol
+	if n.ValueType != "" {
+		if explicitType, ok := a.findTypeSymbolInTypes(n.ValueType); ok {
+			if fs, ok := explicitType.(*symbol.FunctionSymbol); ok {
+				expectedFnType = fs
+			}
+		}
+	}
+
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		for _, tParam := range fnNode.TypeParameters {
 			a.types[tParam] = symbol.NewGenericSymbol(tParam)
 		}
 
 		var paramTypes []symbol.Symbol
-		for _, param := range fnNode.Parameters {
-			typeName, ok := a.findTypeSymbolInTypes(param.Type)
-			if !ok {
-				a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+		for i, param := range fnNode.Parameters {
+			if param.Type == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
+				paramTypes = append(paramTypes, expectedFnType.ParamTypes()[i])
+			} else if param.Type == "" {
+				paramTypes = append(paramTypes, symbol.AnySymbol())
+			} else {
+				typeName, ok := a.findTypeSymbolInTypes(param.Type)
+				if !ok {
+					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+				}
+				paramTypes = append(paramTypes, typeName)
 			}
-			paramTypes = append(paramTypes, typeName)
 		}
 
 		var returnType symbol.Symbol
@@ -1046,7 +1126,17 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 	argSymbols := make([]symbol.Symbol, len(n.Arguments))
 
 	for i, arg := range n.Arguments {
+		var expectedArgType symbol.Symbol
+		if fnSymbol != nil && i < len(fnSymbol.ParamTypes()) {
+			expectedArgType = fnSymbol.ParamTypes()[i]
+			a.pushExpectedType(expectedArgType)
+		}
+
 		argSymbols[i] = a.analyze(arg)
+
+		if expectedArgType != nil {
+			a.popExpectedType()
+		}
 	}
 
 	// First pass: resolve explicit type arguments or infer generic type parameters

@@ -84,3 +84,11 @@ func (ms *ModuleSymbol) String() string {
 func (ms *ModuleSymbol) Name() string {
 	return ms.name
 }
+
+func (ms *ModuleSymbol) GetSymbols() map[string]Symbol {
+	return ms.scope
+}
+
+func (ms *ModuleSymbol) GetTypes() map[string]Symbol {
+	return ms.types
+}

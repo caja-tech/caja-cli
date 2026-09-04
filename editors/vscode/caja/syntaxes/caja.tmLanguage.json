@@ -78,15 +78,15 @@
           "name": "keyword.control.caja"
         },
         {
-          "match": "\b(and|or|xor)\b",
+          "match": "\\b(and|or|xor)\\b",
           "name": "keyword.operator.logical.caja"
         },
         {
-          "match": "\b(let|const|fn|struct|type|define)\b",
+          "match": "\\b(let|const|fn|struct|type|define)\\b",
           "name": "storage.type.caja"
         },
         {
-          "match": "\b(private)\b",
+          "match": "\\b(private)\\b",
           "name": "storage.modifier.caja"
         }
       ]
@@ -134,7 +134,7 @@
     "operators": {
       "patterns": [
         {
-          "match": "(->|\\?\\.|\\?\\>|\\|\\>|==|!=|<=|>=|<|>|=|\\+|-|\\*|/)",
+          "match": "(->|=>|\\?\\.|\\?\\>|\\|\\>|==|!=|<=|>=|<|>|=|\\+|-|\\*|/)",
           "name": "keyword.operator.caja"
         }
       ]

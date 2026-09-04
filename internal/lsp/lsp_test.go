@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 	"context"
 
 	"github.com/owenrumney/go-lsp/lsp"
@@ -118,6 +119,34 @@ s.key()`,
 			expectedNil:    false,
 			expectedString: "KeyFunc() -> String",
 		},
+		{
+			name:           "Anonymous function parameter hover (LetStatement)",
+			uri:            "file:///test_anon_func_param_let.caja",
+			input:          `let sum: fn(Number, Number) -> Number = (p, q) => p + q`,
+			queryLine:      0,
+			queryChar:      41, // hovering over 'p' in '(p, q)'
+			expectedNil:    false,
+			expectedString: "Number",
+		},
+		{
+			name:           "Anonymous function parameter body hover (LetStatement)",
+			uri:            "file:///test_anon_func_body_let.caja",
+			input:          `let sum: fn(Number, Number) -> Number = (p, q) => p + q`,
+			queryLine:      0,
+			queryChar:      50, // hovering over 'p' in 'p + q'
+			expectedNil:    false,
+			expectedString: "Number",
+		},
+		{
+			name:           "Anonymous function parameter hover (CallExpression)",
+			uri:            "file:///test_anon_func_param_call.caja",
+			input:          `let applyOp = fn(op: fn(Number, String) -> Number) -> Number { return op(1, "a") }
+applyOp((x, y) => 1)`,
+			queryLine:      1,
+			queryChar:      12, // hovering over 'y' in '(x, y)'
+			expectedNil:    false,
+			expectedString: "String",
+		},
 	}
 
 	for _, tt := range tests {
@@ -215,6 +244,16 @@ max(1, 2)`,
 			queryLine:    0,
 			queryChar:    0,
 			expectedNil:  true,
+		},
+		{
+			name:         "Anonymous Function Parameter Definition",
+			uri:          "file:///test_anon_func_def.caja",
+			input:        `let sum = (p: Number, q: Number) => p + q`,
+			queryLine:    0,
+			queryChar:    36, // query over 'p' in 'p + q'
+			expectedNil:  false,
+			expectedLine: 0,
+			expectedCol:  10, // jumps to 'p' in '(p: Number, q: Number)'
 		},
 	}
 
@@ -558,5 +597,97 @@ func TestIncompleteLetStatementDoesNotPanic(t *testing.T) {
 	// We should receive a diagnostic for the expected identifier error
 	if len(diags) == 0 {
 		t.Fatalf("Expected diagnostics for incomplete let statement, got none")
+	}
+}
+func TestCompletion(t *testing.T) {
+	tests := []struct {
+		name           string
+		text           string
+		line           int
+		col            int
+		setupFiles     map[string]string
+		expectedLabels []string
+		missingLabels  []string
+	}{
+		{
+			name: "Keywords and Local Variables",
+			text: "let myVar = 10\nmyVar",
+			line: 1,
+			col:  5,
+			expectedLabels: []string{"let", "fn", "myVar"},
+			missingLabels:  []string{"otherVar"},
+		},
+		{
+			name: "Struct Properties",
+			text: "type User struct { age Number name String }\nlet u = User{age: 20, name: \"Alice\"}\nu.",
+			line: 2,
+			col:  2,
+			expectedLabels: []string{"age", "name"},
+			missingLabels:  []string{"let", "myVar"},
+		},
+		{
+			name: "Module Exports",
+			setupFiles: map[string]string{
+				"math_mod.caja": "let add = fn(x: Number, y: Number) -> Number { return x + y }\n",
+			},
+			text: "import \"./math_mod\"\nmath_mod.",
+			line: 1,
+			col:  9,
+			expectedLabels: []string{"add"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewCajaHandler()
+			s := servertest.New(t, h)
+
+			tempDir := t.TempDir()
+			for filename, content := range tt.setupFiles {
+				path := filepath.Join(tempDir, filename)
+				err := os.WriteFile(path, []byte(content), 0644)
+				if err != nil {
+					t.Fatalf("Failed to write mock module %s: %v", filename, err)
+				}
+			}
+
+			uri := "file://" + filepath.Join(tempDir, "test.caja")
+			s.DidOpen(lsp.DocumentURI(uri), "caja", tt.text)
+			_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(uri))
+
+			time.Sleep(200 * time.Millisecond)
+
+			res, err := h.Completion(context.Background(), &lsp.CompletionParams{
+				TextDocumentPositionParams: lsp.TextDocumentPositionParams{
+					TextDocument: lsp.TextDocumentIdentifier{URI: lsp.DocumentURI(uri)},
+					Position:     lsp.Position{Line: tt.line, Character: tt.col},
+				},
+			})
+
+			if err != nil {
+				t.Fatalf("Completion returned error: %v", err)
+			}
+
+			if res == nil {
+				t.Fatalf("Expected CompletionList, got nil")
+			}
+
+			labels := make(map[string]bool)
+			for _, item := range res.Items {
+				labels[item.Label] = true
+			}
+
+			for _, expected := range tt.expectedLabels {
+				if !labels[expected] {
+					t.Errorf("Expected completion item %q, but it was missing", expected)
+				}
+			}
+
+			for _, missing := range tt.missingLabels {
+				if labels[missing] {
+					t.Errorf("Did not expect completion item %q, but it was present", missing)
+				}
+			}
+		})
 	}
 }
