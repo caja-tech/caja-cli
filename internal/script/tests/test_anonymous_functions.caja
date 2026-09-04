@@ -1,0 +1,16 @@
+# Single parameters with explicit types (when no context is available)
+let double = (p: Number) => p * 2
+
+# Multi-parameters without types mapping from contextual assignments
+let sum: fn(Number, Number) -> Number = (p, q) => p + q
+
+# Passing anonymous functions as arguments (inferred correctly!)
+let applyOp = fn(op: fn(Number, Number) -> Number) -> Number {
+    return op(10, 20)
+}
+applyOp((x, y) => x + y)
+
+# Multiline block bodies
+let blockSum = (p: Number, q: Number) => {
+    return p + q
+}
