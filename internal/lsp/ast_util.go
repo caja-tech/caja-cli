@@ -166,6 +166,15 @@ func findTightestNode(node ast.Node, line, col int) ast.Node {
 				bestChild = child
 			}
 		}
+	case *ast.FunctionLiteral:
+		for _, p := range n.Parameters {
+			if child := findTightestNode(p, line, col); child != nil {
+				bestChild = child
+			}
+		}
+		if child := findTightestNode(n.Body, line, col); child != nil {
+			bestChild = child
+		}
 	}
 
 	if bestChild != nil {
@@ -202,6 +211,8 @@ func containsPosition(node ast.Node, line, col int) bool {
 	case *ast.GenericIdentifier:
 		t = n.Token
 	case *ast.CallExpression:
+		t = n.Token
+	case *ast.Parameter:
 		t = n.Token
 	default:
 		return false // Many nodes span multiple lines. For exact hover we only care about terminal tokens usually.
@@ -364,6 +375,8 @@ func GetNodeToken(node ast.Node) lexer.Token {
 	case *ast.MapLiteral:
 		t = n.Token
 	case *ast.FunctionLiteral:
+		t = n.Token
+	case *ast.Parameter:
 		t = n.Token
 	}
 	return t

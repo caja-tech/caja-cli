@@ -182,6 +182,18 @@ func TestArrowToken(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+func TestFatArrowToken(t *testing.T) {
+	input := "=>"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Fat Arrow token", Token{FAT_ARROW, "=>", 1, 1}},
+		{"End of file", Token{EOF, "", 1, 3}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestExponentialExpression tokenizes an arithmetic expression involving
 // the power operator, asserting that the caret token is correctly parsed.
 func TestExponentialExpression(t *testing.T) {
@@ -351,6 +363,29 @@ func TestFunctionTokenization(t *testing.T) {
 		{"Identifier b", Token{IDENT, "b", 2, 13}},
 		{"Right brace", Token{RBRACE, "}", 3, 1}},
 		{"End of file", Token{EOF, "", 3, 2}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+func TestAnonymousFunctionTokenization(t *testing.T) {
+	input := "let add = (a, b) => a + b"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier add", Token{IDENT, "add", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 9}},
+		{"Left paren", Token{LPAREN, "(", 1, 11}},
+		{"Identifier a", Token{IDENT, "a", 1, 12}},
+		{"Comma", Token{COMMA, ",", 1, 13}},
+		{"Identifier b", Token{IDENT, "b", 1, 15}},
+		{"Right paren", Token{RPAREN, ")", 1, 16}},
+		{"Fat Arrow", Token{FAT_ARROW, "=>", 1, 18}},
+		{"Identifier a", Token{IDENT, "a", 1, 21}},
+		{"Plus", Token{PLUS, "+", 1, 23}},
+		{"Identifier b", Token{IDENT, "b", 1, 25}},
+		{"End of file", Token{EOF, "", 1, 26}},
 	}
 
 	runTestsOnTokens(tknzr, tests, t)
