@@ -1,0 +1,14 @@
+type Customer struct { age Number }
+define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
+
+let processMajor = fn(m: MajorCustomer) -> MajorCustomer {
+    return m
+}
+
+let m1: MajorCustomer? = Customer { age: 20 }
+let m2: MajorCustomer? = Customer { age: 10 }
+
+let result1 = m1 ?> processMajor
+let result2 = m2 ?> processMajor
+
+return 0

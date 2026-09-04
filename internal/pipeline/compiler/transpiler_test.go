@@ -13,6 +13,46 @@ func TestTranspile(t *testing.T) {
 		expected []string // substrings expected in the output Go code
 	}{
 		{
+			name: "Type Constraints",
+			input: `
+				type Customer struct { age Number }
+				define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
+				let m: MajorCustomer? = Customer { age: 20 }
+			`,
+			expected: []string{
+				"type MajorCustomer Customer",
+				"var validate_MajorCustomer func(*Customer) *MajorCustomer = func(val *Customer) *MajorCustomer {\n\tpred := func(c *Customer) bool {\n\treturn (c.Age > 18)\n}\n\tif pred(val) {\n\t\tres := (*MajorCustomer)(val)\n\t\treturn res\n\t}\n\treturn nil\n}",
+				"var m *MajorCustomer = validate_MajorCustomer(&Customer{\nAge: 20,\n})",
+			},
+		},
+		{
+			name: "Safe Pipeline",
+			input: `
+				type Customer struct { age Number }
+				let process = fn(c: Customer) -> Customer { return c }
+				let x: Customer? = nil
+				let y = x ?> process
+			`,
+			expected: []string{
+				"var y *Customer = func(_val *Customer) *Customer { if _val != nil { return process(_val) }; return nil }(x)",
+			},
+		},
+		{
+			name: "Named Imports and Aliases",
+			input: `
+				import { PI, max } from "math"
+				import "math" as m
+				let max_val = max(10, 20)
+				let min_val = m.min(10, 20)
+				let pi_val = PI
+			`,
+			expected: []string{
+				"var max_val float64 = math.Max(10, 20)",
+				"var min_val float64 = math.Min(10, 20)",
+				"var pi_val float64 = math.Pi",
+			},
+		},
+		{
 			name: "Anonymous functions",
 			input: `
 				let double = (p: Number) => p * 2
@@ -345,7 +385,7 @@ let a = [1, 2, 3]
 let b = a |> array.push(4) |> array.push(5)
 `,
 			expected: []string{
-				"append(caja_array_push(a, 4), 5)", 
+				"append(caja_array_push(a, 4), 5)",
 			},
 		},
 		{

@@ -45,12 +45,9 @@ func (a *Analyzer) declare(name string, sym symbol.Symbol, isConstant bool, defT
 }
 
 // declareImport registers an imported variable name in the current scope.
-func (a *Analyzer) declareImport(name string, sym symbol.Symbol, isConstant bool, defToken lexer.Token) {
+func (a *Analyzer) declareImport(name string, sym symbol.Symbol, isConstant bool, defToken lexer.Token, filePath string) {
 	last := len(a.scopes) - 1
-	filePath := ""
-	if a.globalEnv != nil {
-		filePath = a.globalEnv.FileName
-	}
+    
 	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth, DefinitionToken: defToken, IsImport: true, FilePath: filePath}
 }
 

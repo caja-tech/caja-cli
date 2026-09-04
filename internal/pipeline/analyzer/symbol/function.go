@@ -15,10 +15,11 @@ type FunctionSymbol struct {
 	arity          int
 	paramTypes     []Symbol
 	returnType     Symbol
+	ModuleName     string
 }
 
 // NewFunctionSymbol creates and returns a new FunctionSymbol with the specified generic type parameters, arity, parameter types, and return type.
-func NewFunctionSymbol(name string, paramNames []string, typeParams []string, arity int, paramTypes []Symbol, returnType Symbol) *FunctionSymbol {
+func NewFunctionSymbol(moduleName string, name string, paramNames []string, typeParams []string, arity int, paramTypes []Symbol, returnType Symbol) *FunctionSymbol {
 	return &FunctionSymbol{
 		symbolType:     environment.FUNCTION_OBJ,
 		Name:           name,
@@ -27,6 +28,7 @@ func NewFunctionSymbol(name string, paramNames []string, typeParams []string, ar
 		arity:          arity,
 		paramTypes:     paramTypes,
 		returnType:     returnType,
+		ModuleName:     moduleName,
 	}
 }
 

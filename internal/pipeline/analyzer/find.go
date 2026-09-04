@@ -167,7 +167,7 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 			allOk = false
 		}
 
-		return symbol.NewFunctionSymbol("", nil, nil, len(params), paramSymbols, retSym), allOk
+		return symbol.NewFunctionSymbol("", "", nil, nil, len(params), paramSymbols, retSym), allOk
 	}
 
 	if strings.HasPrefix(typeName, "[") && strings.HasSuffix(typeName, "]") {

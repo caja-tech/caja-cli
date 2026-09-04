@@ -1,0 +1,26 @@
+import { PI, max, min, floor } from "math"
+import "math" as m
+
+let max_val = max(10, 20)
+let min_val = m.min(10, 20)
+let pi_val = PI
+
+let floor_val = floor(PI)
+
+if (max_val != 20) {
+    return 1
+}
+
+if (min_val != 10) {
+    return 1
+}
+
+if (pi_val <= 3.14) {
+    return 1
+}
+
+if (floor_val != 3) {
+    return 1
+}
+
+return 0
