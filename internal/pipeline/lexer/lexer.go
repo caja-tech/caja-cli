@@ -47,6 +47,14 @@ func New(input string) *Lexer {
 	return t
 }
 
+// Clone creates a shallow copy of the Lexer without sharing the Errors slice,
+// allowing safe lookahead without modifying the original lexer's error state.
+func (l *Lexer) Clone() *Lexer {
+	clone := *l
+	clone.Errors = nil
+	return &clone
+}
+
 // nextToken skips any leading whitespace and then reads the next token from the
 // input. Single-character operators and delimiters are matched via a switch
 // statement; identifiers and numbers are handled by their respective read

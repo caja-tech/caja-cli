@@ -18,6 +18,7 @@ const (
 	PLUS     TokenType = "PLUS"
 	MINUS    TokenType = "MINUS"
 	ARROW    TokenType = "ARROW"
+	FAT_ARROW TokenType = "FAT_ARROW"
 	ASTERISK TokenType = "ASTERISK"
 	SLASH    TokenType = "SLASH"
 	POWER    TokenType = "POWER"

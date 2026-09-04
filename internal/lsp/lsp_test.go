@@ -118,6 +118,34 @@ s.key()`,
 			expectedNil:    false,
 			expectedString: "KeyFunc() -> String",
 		},
+		{
+			name:           "Anonymous function parameter hover (LetStatement)",
+			uri:            "file:///test_anon_func_param_let.caja",
+			input:          `let sum: fn(Number, Number) -> Number = (p, q) => p + q`,
+			queryLine:      0,
+			queryChar:      41, // hovering over 'p' in '(p, q)'
+			expectedNil:    false,
+			expectedString: "Number",
+		},
+		{
+			name:           "Anonymous function parameter body hover (LetStatement)",
+			uri:            "file:///test_anon_func_body_let.caja",
+			input:          `let sum: fn(Number, Number) -> Number = (p, q) => p + q`,
+			queryLine:      0,
+			queryChar:      50, // hovering over 'p' in 'p + q'
+			expectedNil:    false,
+			expectedString: "Number",
+		},
+		{
+			name:           "Anonymous function parameter hover (CallExpression)",
+			uri:            "file:///test_anon_func_param_call.caja",
+			input:          `let applyOp = fn(op: fn(Number, String) -> Number) -> Number { return op(1, "a") }
+applyOp((x, y) => 1)`,
+			queryLine:      1,
+			queryChar:      12, // hovering over 'y' in '(x, y)'
+			expectedNil:    false,
+			expectedString: "String",
+		},
 	}
 
 	for _, tt := range tests {
@@ -215,6 +243,16 @@ max(1, 2)`,
 			queryLine:    0,
 			queryChar:    0,
 			expectedNil:  true,
+		},
+		{
+			name:         "Anonymous Function Parameter Definition",
+			uri:          "file:///test_anon_func_def.caja",
+			input:        `let sum = (p, q) => p + q`,
+			queryLine:    0,
+			queryChar:    20, // query over 'p' in 'p + q'
+			expectedNil:  false,
+			expectedLine: 0,
+			expectedCol:  10, // jumps to 'p' in '(p, q)'
 		},
 	}
 

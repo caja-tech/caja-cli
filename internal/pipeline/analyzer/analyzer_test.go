@@ -96,6 +96,24 @@ let f: CustomFunc = fn(x: Number) -> Number { return x }
 			expectedErrors: []string{},
 		},
 		{
+			name: "Anonymous function contextual inference (LetStatement)",
+			input: `
+type CustomFunc fn(Number) -> Number
+let f: CustomFunc = x => x * 2
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Anonymous function contextual inference (CallExpression)",
+			input: `
+let applyOp = fn(op: fn(Number, Number) -> Number) -> Number {
+	return op(10, 20)
+}
+let res = applyOp((x, y) => x + y)
+`,
+			expectedErrors: []string{},
+		},
+		{
 			name: "map.KeyFunc usage",
 			input: `
 import map
@@ -584,6 +602,28 @@ let count = fn(n: Number) -> Number {
 				let a = f("1", m)
 			`,
 			expectedErrors: []string{},
+		},
+		{
+			name: "Anonymous function inference failure (LetStatement wrong return)",
+			input: `
+type CustomFunc fn(Number) -> Number
+let f: CustomFunc = x => "hello"
+`,
+			expectedErrors: []string{
+				"type error: function declared to return Number, but body returns String",
+			},
+		},
+		{
+			name: "Anonymous function inference failure (CallExpression wrong return)",
+			input: `
+let applyOp = fn(op: fn(Number, Number) -> Number) -> Number {
+	return op(10, 20)
+}
+let res = applyOp((x, y) => x == y)
+`,
+			expectedErrors: []string{
+				"type error: function declared to return Number, but body returns Boolean",
+			},
 		},
 		{
 			name: "Generic map passed as argument (invalid generic instantiation mismatch)",

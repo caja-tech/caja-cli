@@ -133,9 +133,12 @@ func (al *ArrayLiteral) String() string {
 // Parameter represents a single parameter in a function declaration, containing
 // its Name and expected Type.
 type Parameter struct {
-	Name string
-	Type string
+	Token lexer.Token // The token for the parameter name
+	Name  string
+	Type  string
 }
+
+func (p *Parameter) TokenLiteral() string { return p.Token.Literal }
 
 func (p *Parameter) String() string {
 	return p.Name + ": " + p.Type

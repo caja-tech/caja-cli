@@ -50,6 +50,13 @@ func decideAssignToken(t *Lexer, line int, column int) deciderResult {
 			t.readChar()
 			return deciderResult{true, Token{Type: EQ, Literal: literal, Line: line, Column: column}}
 		}
+		if t.peekChar() == '>' {
+			ch := t.ch
+			t.readChar()
+			literal := string(ch) + string(t.ch)
+			t.readChar()
+			return deciderResult{true, Token{Type: FAT_ARROW, Literal: literal, Line: line, Column: column}}
+		}
 
 		return deciderResult{true, Token{Type: ASSIGN, Literal: string(t.ch), Line: line, Column: column}}
 	}

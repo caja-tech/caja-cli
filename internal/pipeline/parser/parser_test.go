@@ -14,6 +14,33 @@ type testScenario struct {
 	expected string
 }
 
+func TestAnonymousFunctions(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Single parameter expression body",
+			input:    "p => p + 1",
+			expected: "p(p: ) { ... }",
+		},
+		{
+			name:     "Multiple parameters expression body",
+			input:    "(p, q) => p + q",
+			expected: "((p: , q: ) { ... }",
+		},
+		{
+			name:     "Explicit types and block body",
+			input:    "(p: Number, q: Number) => { return p + q }",
+			expected: "((p: Number, q: Number) { ... }",
+		},
+		{
+			name:     "Assignment to typed variable",
+			input:    "let sum: fn(Number, Number) -> Number = (p, q) => p + q",
+			expected: "let sum: fn(Number, Number) -> Number = ((p: , q: ) { ... }",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
 // TestOperatorPrecedenceParsing verifies that the parser respects arithmetic
 // operator precedence, left-to-right associativity, parenthesized grouping, and
 // assignment combined with complex math.
@@ -777,6 +804,28 @@ func TestFunctionErrors(t *testing.T) {
 	tests := []string{
 		"let f = fn(a: Number): { a }", // Missing return type identifier
 		"let f = fn<type>(x: type) -> String {return \"a\"}", // Keyword in generic type parameters
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+func TestAnonymousFunctionErrors(t *testing.T) {
+	tests := []string{
+		"let f = (a: ) => a",       // Missing type after colon
+		"let f = (type) => 1",      // Keyword as parameter name
+		"let f = (a, b => a + b",   // Missing closing paren
+		"let f = => 1",             // Missing parameters
 	}
 
 	for _, input := range tests {

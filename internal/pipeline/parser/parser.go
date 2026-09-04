@@ -50,11 +50,11 @@ func New(t *lexer.Lexer) *Parser {
 	}
 
 	p.prefixParseFuncs = make(map[lexer.TokenType]prefixParseFunc)
-	p.prefixParseFuncs[lexer.IDENT] = p.parseIdentifier
+	p.prefixParseFuncs[lexer.IDENT] = p.parseIdentifierOrAnonymousFunction
 	p.prefixParseFuncs[lexer.NUMBER] = p.parseNumberLiteral
 	p.prefixParseFuncs[lexer.STRING] = p.parseStringLiteral
 	p.prefixParseFuncs[lexer.DATE] = p.parseDateLiteral
-	p.prefixParseFuncs[lexer.LPAREN] = p.parseGroupedExpression
+	p.prefixParseFuncs[lexer.LPAREN] = p.parseGroupedExpressionOrAnonymousFunction
 	p.prefixParseFuncs[lexer.IF] = p.parseIfExpression
 	p.prefixParseFuncs[lexer.TRUE] = p.parseBooleanLiteral
 	p.prefixParseFuncs[lexer.FALSE] = p.parseBooleanLiteral
@@ -311,7 +311,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a parameter name", p.currToken.Literal))
 			return nil
 		}
-		param := &ast.Parameter{Name: p.currToken.Literal}
+		param := &ast.Parameter{Token: p.currToken, Name: p.currToken.Literal}
 
 		if !p.expectPeek(lexer.COLON) {
 			p.reportError(p.peekToken, fmt.Sprintf("expected ':', got '%s'", param.Type))
@@ -1056,6 +1056,37 @@ func (p *Parser) parseIdentifier() ast.Expression {
 	return &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
 }
 
+// parseIdentifierOrAnonymousFunction parses an identifier, but if it is followed
+// by a FAT_ARROW (=>), it parses it as a single-parameter anonymous function.
+func (p *Parser) parseIdentifierOrAnonymousFunction() ast.Expression {
+	if p.peekToken.Type == lexer.FAT_ARROW {
+		lit := &ast.FunctionLiteral{Token: p.currToken}
+		param := &ast.Parameter{Token: p.currToken, Name: p.currToken.Literal, Type: ""}
+		lit.Parameters = []*ast.Parameter{param}
+		
+		p.nextToken() // move to FAT_ARROW
+		
+		if p.peekToken.Type == lexer.LBRACE {
+			p.nextToken() // move to LBRACE
+			lit.Body = p.parseBlockStatement()
+		} else {
+			p.nextToken() // move to start of expression
+			expr := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+			lit.Body = &ast.BlockStatement{
+				Token: p.currToken,
+				Statements: []ast.Statement{
+					&ast.ReturnStatement{
+						Token:       p.currToken,
+						ReturnValue: expr,
+					},
+				},
+			}
+		}
+		return lit
+	}
+	return p.parseIdentifier()
+}
+
 // parsePrefixExpression parses a prefix operator expression, such as -5 or !true.
 func (p *Parser) parsePrefixExpression() ast.Expression {
 	expression := &ast.PrefixExpression{
@@ -1155,10 +1186,35 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	return exp
 }
 
-// parseGroupedExpression handles parenthesized sub-expressions. It consumes
-// the opening '(', recursively parses the inner expression with the lowest
-// precedence, and expects a closing ')' — recording an error if it is missing.
-func (p *Parser) parseGroupedExpression() ast.Expression {
+// isAnonymousFunctionLookahead checks if the parens enclose a parameter list followed by FAT_ARROW
+func (p *Parser) isAnonymousFunctionLookahead() bool {
+	tmpLexer := p.tknzr.Clone()
+	
+	depth := 1 // currently at '('
+	
+	for {
+		tok := tmpLexer.NextToken()
+		if tok.Type == lexer.EOF {
+			return false
+		}
+		if tok.Type == lexer.LPAREN {
+			depth++
+		} else if tok.Type == lexer.RPAREN {
+			depth--
+			if depth == 0 {
+				nextTok := tmpLexer.NextToken()
+				return nextTok.Type == lexer.FAT_ARROW
+			}
+		}
+	}
+}
+
+// parseGroupedExpressionOrAnonymousFunction handles parenthesized sub-expressions or anonymous functions.
+func (p *Parser) parseGroupedExpressionOrAnonymousFunction() ast.Expression {
+	if p.isAnonymousFunctionLookahead() {
+		return p.parseAnonymousFunction()
+	}
+
 	p.nextToken()
 
 	groupedExpression := p.parseExpression(lexer.LOWEST_PRECEDENCE)
@@ -1168,6 +1224,80 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	}
 
 	return groupedExpression
+}
+
+func (p *Parser) parseAnonymousFunction() ast.Expression {
+	lit := &ast.FunctionLiteral{Token: p.currToken} // Token is '('
+	
+	lit.Parameters = p.parseAnonymousFunctionParameters()
+	
+	if !p.expectPeek(lexer.FAT_ARROW) {
+		return nil
+	}
+	
+	if p.peekToken.Type == lexer.LBRACE {
+		p.nextToken() // move to LBRACE
+		lit.Body = p.parseBlockStatement()
+	} else {
+		p.nextToken() // move to start of expression
+		expr := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+		lit.Body = &ast.BlockStatement{
+			Token: p.currToken,
+			Statements: []ast.Statement{
+				&ast.ReturnStatement{
+					Token:       p.currToken,
+					ReturnValue: expr,
+				},
+			},
+		}
+	}
+	
+	return lit
+}
+
+func (p *Parser) parseAnonymousFunctionParameters() []*ast.Parameter {
+	var parameters []*ast.Parameter
+
+	if p.peekToken.Type == lexer.RPAREN {
+		p.nextToken()
+		return parameters
+	}
+
+	p.nextToken()
+	parseSingleParam := func() *ast.Parameter {
+		if lexer.IsKeyword(p.currToken.Type) {
+			p.reportError(p.currToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a parameter name", p.currToken.Literal))
+			return nil
+		}
+		param := &ast.Parameter{Token: p.currToken, Name: p.currToken.Literal}
+
+		if p.peekToken.Type == lexer.COLON {
+			p.nextToken() // move to colon
+			param.Type = p.parseTypeSignature()
+		} else {
+			param.Type = "" // inferred
+		}
+
+		return param
+	}
+
+	if param := parseSingleParam(); param != nil {
+		parameters = append(parameters, param)
+	}
+
+	for p.peekToken.Type == lexer.COMMA {
+		p.nextToken() // Move to comma
+		p.nextToken() // Move to next parameter name
+
+		if param := parseSingleParam(); param != nil {
+			parameters = append(parameters, param)
+		}
+	}
+
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+	return parameters
 }
 
 // parsePipeExpression rewrites A |> f(B) to f(A, B)
