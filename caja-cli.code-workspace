@@ -1,0 +1,14 @@
+{
+  "folders": [
+	{
+		"path": "."
+	},
+	{
+		"path": "worktrees/spec-site"
+	},
+	{
+		"path": "worktrees/wasm-compiler"
+	}
+],
+  "settings": {}
+}
