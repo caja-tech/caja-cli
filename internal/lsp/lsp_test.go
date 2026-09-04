@@ -248,12 +248,12 @@ max(1, 2)`,
 		{
 			name:         "Anonymous Function Parameter Definition",
 			uri:          "file:///test_anon_func_def.caja",
-			input:        `let sum = (p, q) => p + q`,
+			input:        `let sum = (p: Number, q: Number) => p + q`,
 			queryLine:    0,
-			queryChar:    20, // query over 'p' in 'p + q'
+			queryChar:    36, // query over 'p' in 'p + q'
 			expectedNil:  false,
 			expectedLine: 0,
-			expectedCol:  10, // jumps to 'p' in '(p, q)'
+			expectedCol:  10, // jumps to 'p' in '(p: Number, q: Number)'
 		},
 	}
 

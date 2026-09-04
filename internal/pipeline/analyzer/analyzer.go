@@ -343,6 +343,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 			if expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
 				paramSymbol = expectedFnType.ParamTypes()[i]
 			} else {
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot infer type for parameter '%s'. Provide an explicit type or context.", param.Name))
 				paramSymbol = symbol.AnySymbol()
 			}
 		} else {
@@ -508,6 +509,9 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		for i, param := range fnNode.Parameters {
 			if param.Type == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
 				paramTypes = append(paramTypes, expectedFnType.ParamTypes()[i])
+			} else if param.Type == "" {
+				// Type cannot be inferred from context, handled in function body analysis
+				paramTypes = append(paramTypes, symbol.AnySymbol())
 			} else {
 				typeName, ok := a.findTypeSymbolInTypes(param.Type)
 				if !ok {
@@ -589,18 +593,33 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 	}
 
+	var expectedFnType *symbol.FunctionSymbol
+	if n.ValueType != "" {
+		if explicitType, ok := a.findTypeSymbolInTypes(n.ValueType); ok {
+			if fs, ok := explicitType.(*symbol.FunctionSymbol); ok {
+				expectedFnType = fs
+			}
+		}
+	}
+
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		for _, tParam := range fnNode.TypeParameters {
 			a.types[tParam] = symbol.NewGenericSymbol(tParam)
 		}
 
 		var paramTypes []symbol.Symbol
-		for _, param := range fnNode.Parameters {
-			typeName, ok := a.findTypeSymbolInTypes(param.Type)
-			if !ok {
-				a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+		for i, param := range fnNode.Parameters {
+			if param.Type == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
+				paramTypes = append(paramTypes, expectedFnType.ParamTypes()[i])
+			} else if param.Type == "" {
+				paramTypes = append(paramTypes, symbol.AnySymbol())
+			} else {
+				typeName, ok := a.findTypeSymbolInTypes(param.Type)
+				if !ok {
+					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
+				}
+				paramTypes = append(paramTypes, typeName)
 			}
-			paramTypes = append(paramTypes, typeName)
 		}
 
 		var returnType symbol.Symbol

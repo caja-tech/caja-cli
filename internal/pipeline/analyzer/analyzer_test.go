@@ -626,6 +626,16 @@ let res = applyOp((x, y) => x == y)
 			},
 		},
 		{
+			name: "Anonymous function missing context error",
+			input: `
+let sum = (p, q) => p + q
+`,
+			expectedErrors: []string{
+				"type error: cannot infer type for parameter 'p'. Provide an explicit type or context.",
+				"type error: cannot infer type for parameter 'q'. Provide an explicit type or context.",
+			},
+		},
+		{
 			name: "Generic map passed as argument (invalid generic instantiation mismatch)",
 			input: `
 				let f = fn<T, P>(x: T, m: map[T]P) -> P { return m[x] }
