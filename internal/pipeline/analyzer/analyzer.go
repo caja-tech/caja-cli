@@ -31,6 +31,7 @@ type Analyzer struct {
 	privates            map[string]bool
 	unwrappedPipeArgs   map[ast.Node]symbol.Symbol
 	expectedTypeStack   []symbol.Symbol
+	streamStageTypes    map[*ast.StreamPipeExpression]symbol.Symbol
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -50,6 +51,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		privates:            make(map[string]bool),
 		unwrappedPipeArgs:   make(map[ast.Node]symbol.Symbol),
 		expectedTypeStack:   make([]symbol.Symbol, 0),
+		streamStageTypes:    make(map[*ast.StreamPipeExpression]symbol.Symbol),
 	}
 
 	// Inject Nothing as a global builtin type
@@ -112,6 +114,18 @@ func (a *Analyzer) DiagnosticErrors() []ast.DiagnosticError {
 // GetSymbol retrieves the semantic symbol evaluated for the given AST node.
 func (a *Analyzer) GetSymbol(node ast.Node) (symbol.Symbol, bool) {
 	sym, ok := a.nodeSymbols[node]
+	return sym, ok
+}
+
+// GetStreamStageType retrieves the resolved per-item output type for a
+// stream pipeline stage (the type of a single element flowing out of that
+// |>>/?>> stage), as computed by analyzeStreamPipeExpression. Unlike
+// GetSymbol on the same node (which, for the outermost stage, reflects the
+// whole expression's array type), this always returns the unwrapped element
+// type at that stage boundary — used by the transpiler to type the Go
+// channel at each point in the generated pipeline.
+func (a *Analyzer) GetStreamStageType(node *ast.StreamPipeExpression) (symbol.Symbol, bool) {
+	sym, ok := a.streamStageTypes[node]
 	return sym, ok
 }
 
@@ -186,6 +200,11 @@ func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 		return a.analyzeFunctionLiteral(n)
 	case *ast.SafePipeExpression:
 		return a.analyzeSafePipeExpression(n)
+	case *ast.StreamPipeExpression:
+		return a.analyzeStreamPipeExpression(n)
+	case *ast.JoinGroupExpression:
+		a.reportError(n.Token, "semantic error: a parallel join group (f & g & h) can only be used as a |>>/?>> stage, immediately followed by another stage that consumes its results")
+		return symbol.AnySymbol()
 	case *ast.CallExpression:
 		return a.analyzeCallExpression(n)
 	case *ast.ArrayLiteral:
@@ -1472,6 +1491,113 @@ func (a *Analyzer) analyzeSafePipeExpression(n *ast.SafePipeExpression) symbol.S
 		return resultSym
 	}
 	return &symbol.NullableSymbol{Underlying: resultSym}
+}
+
+// analyzeStreamPipeExpression type-checks a streaming pipeline chain
+// (|>>/?>>). Unlike |>/?>, where the whole collection flows as the next
+// call's first argument, each stream stage operates per-item: the chain is
+// flattened first, the source expression's array element type is threaded
+// through each stage as the expected first-argument type (reusing the same
+// unwrappedPipeArgs override that analyzeSafePipeExpression uses for a
+// single pipe), and the overall expression's type is an array of whatever
+// element type the final stage produces.
+func (a *Analyzer) analyzeStreamPipeExpression(n *ast.StreamPipeExpression) symbol.Symbol {
+	if n.Call == nil {
+		a.reportError(n.Token, "semantic error: a parallel join group (f & g & h) must be followed by another stage that consumes its results")
+		return symbol.NewArraySymbol(symbol.AnySymbol())
+	}
+
+	var stages []*ast.StreamPipeExpression
+	for cur := n; ; {
+		stages = append(stages, cur)
+		next, ok := cur.Left.(*ast.StreamPipeExpression)
+		if !ok {
+			break
+		}
+		cur = next
+	}
+	// stages was collected sink-to-source; reverse it into source-to-sink order.
+	for i, j := 0, len(stages)-1; i < j; i, j = i+1, j-1 {
+		stages[i], stages[j] = stages[j], stages[i]
+	}
+
+	sourceExpr := stages[0].Left
+	sourceSym := a.analyze(sourceExpr)
+
+	var currentElem symbol.Symbol
+	switch sym := sourceSym.(type) {
+	case *symbol.ArraySymbol:
+		currentElem = sym.ElementSymbol()
+	default:
+		if sourceSym.Type() == environment.ANY_OBJ {
+			currentElem = symbol.AnySymbol()
+		} else {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: stream pipe source must be an array, got %s", sourceSym.Type()))
+			currentElem = symbol.AnySymbol()
+		}
+	}
+
+	for _, stage := range stages {
+		expectedElem := currentElem
+		if stage.Safe {
+			if nullable, ok := currentElem.(*symbol.NullableSymbol); ok {
+				expectedElem = nullable.Underlying
+			} else if currentElem.Type() == environment.ANY_OBJ {
+				expectedElem = symbol.AnySymbol()
+			} else {
+				a.reportError(stage.Token, "semantic error: unnecessary safe stream pipe on non-nullable element type")
+			}
+		}
+
+		a.unwrappedPipeArgs[stage.Left] = expectedElem
+
+		var resultSym symbol.Symbol
+		if stage.Join != nil {
+			resultSym = a.analyzeJoinStage(stage)
+		} else {
+			resultSym = a.analyzeCallExpression(stage.Call)
+		}
+
+		delete(a.unwrappedPipeArgs, stage.Left)
+
+		a.streamStageTypes[stage] = resultSym
+		currentElem = resultSym
+	}
+
+	return symbol.NewArraySymbol(currentElem)
+}
+
+// analyzeJoinStage type-checks a fixed-size parallel join stage. Each call in
+// stage.Join.Calls independently receives the stage's upstream element (via
+// the unwrappedPipeArgs override the caller already set on stage.Left,
+// shared by every call in the group since they all read the same upstream
+// item), and their N result types are threaded into stage.Call's reserved
+// leading argument slots (see parseStreamPipeExpressionCommon's fusion
+// logic) before delegating to the normal call-analysis path, which validates
+// them against stage.Call's function signature exactly like any other
+// argument.
+func (a *Analyzer) analyzeJoinStage(stage *ast.StreamPipeExpression) symbol.Symbol {
+	n := len(stage.Join.Calls)
+	placeholders := make([]*ast.Identifier, n)
+	for i, joinCall := range stage.Join.Calls {
+		// Analyzed via a.analyze (not a.analyzeCallExpression directly) so the
+		// result is cached in nodeSymbols/GetSymbol for the transpiler to
+		// retrieve later when typing each join call's temp variable.
+		resultSym := a.analyze(joinCall)
+		ph := &ast.Identifier{Value: fmt.Sprintf("_join%d", i)}
+		a.unwrappedPipeArgs[ph] = resultSym
+		placeholders[i] = ph
+		stage.Call.Arguments[i] = ph
+	}
+
+	resultSym := a.analyzeCallExpression(stage.Call)
+
+	for i, ph := range placeholders {
+		delete(a.unwrappedPipeArgs, ph)
+		stage.Call.Arguments[i] = nil
+	}
+
+	return resultSym
 }
 
 func (a *Analyzer) GlobalEnv() *environment.Environment {

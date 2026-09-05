@@ -38,6 +38,7 @@ var tokenDeciders = []tokenDeciderFunc{
 	decideDotToken,
 	decideQuestionToken,
 	decidePipeToken,
+	decideAmpToken,
 }
 
 // decideAssignToken matches the '=' character and produces an ASSIGN token.
@@ -334,8 +335,14 @@ func decideQuestionToken(t *Lexer, line int, column int) deciderResult {
 		}
 		if t.peekChar() == '>' {
 			ch := t.ch
-			t.readChar()
+			t.readChar() // consume '?', t.ch is now '>'
 			literal := string(ch) + string(t.ch)
+			if t.peekChar() == '>' {
+				t.readChar() // consume first '>', t.ch is now second '>'
+				literal += string(t.ch)
+				t.readChar()
+				return deciderResult{true, Token{Type: SAFE_STREAM_PIPE, Literal: literal, Line: line, Column: column}}
+			}
 			t.readChar()
 			return deciderResult{true, Token{Type: SAFE_PIPE, Literal: literal, Line: line, Column: column}}
 		}
@@ -345,13 +352,20 @@ func decideQuestionToken(t *Lexer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
-// decidePipeToken matches the '|>' sequence and produces a PIPE token.
+// decidePipeToken matches the '|>' sequence and produces a PIPE token, or
+// '|>>' for a STREAM_PIPE token.
 func decidePipeToken(t *Lexer, line int, column int) deciderResult {
 	if t.ch == '|' {
 		if t.peekChar() == '>' {
 			ch := t.ch
-			t.readChar()
+			t.readChar() // consume '|', t.ch is now '>'
 			literal := string(ch) + string(t.ch)
+			if t.peekChar() == '>' {
+				t.readChar() // consume first '>', t.ch is now second '>'
+				literal += string(t.ch)
+				t.readChar()
+				return deciderResult{true, Token{Type: STREAM_PIPE, Literal: literal, Line: line, Column: column}}
+			}
 			t.readChar()
 			return deciderResult{true, Token{Type: PIPE, Literal: literal, Line: line, Column: column}}
 		}
@@ -360,3 +374,12 @@ func decidePipeToken(t *Lexer, line int, column int) deciderResult {
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
 }
 
+// decideAmpToken matches the '&' character and produces an AMP token, used
+// as the separator inside a parallel join group (f1 & f2 & ... & fn).
+func decideAmpToken(t *Lexer, line int, column int) deciderResult {
+	if t.ch == '&' {
+		return deciderResult{true, Token{Type: AMP, Literal: string(t.ch), Line: line, Column: column}}
+	}
+
+	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}
+}

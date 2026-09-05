@@ -1478,6 +1478,107 @@ return m ?> double
 		})
 	}
 }
+
+func TestStreamPipeEvaluator(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Stream pipe applies each stage per-item in order",
+			input: `
+type Sale struct { amount Number }
+
+let calcDiscount = fn(s: Sale, pct: Number) -> Sale {
+    return Sale { amount: s.amount - (s.amount * pct / 100) }
+}
+let calcProfit = fn(s: Sale) -> Number { return s.amount * 0.3 }
+
+let sales = [Sale { amount: 100 }, Sale { amount: 200 }, Sale { amount: 300 }]
+
+let result = sales |>> calcDiscount(5) |>> calcProfit
+return result
+`,
+			expected: "[28.5, 57, 85.5]",
+		},
+		{
+			name: "Safe stream pipe drops nil items before calling the stage function",
+			input: `
+type Sale struct { amount Number }
+define BigSale constraints Sale with: fn(s: Sale) -> Boolean { return s.amount > 150 }
+
+let calcProfit = fn(s: BigSale) -> Number { return s.amount * 0.3 }
+
+let s1: BigSale? = nil
+let s2: BigSale? = Sale { amount: 200 }
+let s3: BigSale? = nil
+let s4: BigSale? = Sale { amount: 300 }
+
+let sales = [s1, s2, s3, s4]
+let result = sales ?>> calcProfit
+return result
+`,
+			expected: "[60, 90]",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+func TestJoinGroupEvaluator(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Parallel join results are all passed to the consuming stage",
+			input: `
+type Loan struct { principal Number }
+type Calendar struct { isHoliday Boolean }
+
+let resolveCalendar = fn(loan: Loan) -> Calendar { return Calendar { isHoliday: false } }
+let fetchIndexRate = fn(loan: Loan) -> Number { return loan.principal * 0.05 }
+let fetchFees = fn(loan: Loan) -> Number { return 10 }
+let calculatePnl = fn(cal: Calendar, rate: Number, fees: Number) -> Number { return rate + fees }
+
+let loans = [Loan { principal: 100 }, Loan { principal: 200 }]
+let pnl = loans |>> (resolveCalendar & fetchIndexRate & fetchFees) |>> calculatePnl
+return pnl
+`,
+			expected: "[15, 20]",
+		},
+		{
+			name: "Safe stream pipe skips the whole join for nil items",
+			input: `
+type Loan struct { principal Number }
+define BigLoan constraints Loan with: fn(l: Loan) -> Boolean { return l.principal > 150 }
+
+let fetchIndexRate = fn(loan: BigLoan) -> Number { return loan.principal * 0.05 }
+let fetchFees = fn(loan: BigLoan) -> Number { return 10 }
+let calculatePnl = fn(rate: Number, fees: Number) -> Number { return rate + fees }
+
+let l1: BigLoan? = nil
+let l2: BigLoan? = Loan { principal: 200 }
+let loans = [l1, l2]
+let pnl = loans ?>> (fetchIndexRate & fetchFees) |>> calculatePnl
+return pnl
+`,
+			expected: "[20]",
+		},
+		{
+			name: "Join member curried arguments work alongside the upstream item",
+			input: `
+type Loan struct { principal Number }
+
+let fetchIndexRate = fn(loan: Loan) -> Number { return loan.principal * 0.05 }
+let fetchFees = fn(loan: Loan, flat: Number) -> Number { return flat }
+let calculatePnl = fn(rate: Number, fees: Number) -> Number { return rate + fees }
+
+let loans = [Loan { principal: 100 }]
+let pnl = loans |>> (fetchIndexRate & fetchFees(7)) |>> calculatePnl
+return pnl
+`,
+			expected: "[12]",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
 // TestEvaluateNamedImports verifies that named imports accurately extract the target values from a module.
 func TestEvaluateNamedImports(t *testing.T) {
 	var tests = []testScenario{

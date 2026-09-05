@@ -1,0 +1,24 @@
+type Loan struct { principal Number }
+type Calendar struct { isHoliday Boolean }
+
+let resolveCalendar = fn(loan: Loan) -> Calendar {
+    return Calendar { isHoliday: false }
+}
+
+let fetchIndexRate = fn(loan: Loan) -> Number {
+    return loan.principal * 0.05
+}
+
+let fetchFees = fn(loan: Loan) -> Number {
+    return 10
+}
+
+let calculatePnl = fn(cal: Calendar, rate: Number, fees: Number) -> Number {
+    return rate + fees
+}
+
+let loans = [Loan { principal: 100 }, Loan { principal: 200 }, Loan { principal: 300 }]
+
+let pnl = loans |>> (resolveCalendar & fetchIndexRate & fetchFees) |>> calculatePnl
+
+return 0

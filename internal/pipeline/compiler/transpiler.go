@@ -134,6 +134,8 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 
 // Transpile walks the AST and returns the equivalent Go source code.
 func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
+	streamPipeCounter = 0
+
 	var bodyBuf bytes.Buffer
 	var pkgLevelBuf bytes.Buffer
 
@@ -229,6 +231,9 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 	}
 	if ctx.usedModules["strconv"] {
 		finalBuf.WriteString("import \"strconv\"\n")
+	}
+	if strings.Contains(bodyCode, "sync.") {
+		finalBuf.WriteString("import \"sync\"\n")
 	}
 
 	needsTime := false
@@ -519,7 +524,7 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		}
 		return e.Value, nil
 	case *ast.NumberLiteral:
-		return fmt.Sprintf("%v", e.Value), nil
+		return formatNumberLiteral(e.Value), nil
 	case *ast.StringLiteral:
 		return fmt.Sprintf("%q", e.Value), nil
 	case *ast.BooleanLiteral:
@@ -703,6 +708,8 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		}
 
 		return fmt.Sprintf("func(_val %s) %s { if _val != nil { return %s }; return nil }(%s)", leftGoType, resultGoType, callExpr, leftExpr), nil
+	case *ast.StreamPipeExpression:
+		return transpileStreamPipeExpression(e, ctx)
 	case *ast.CallExpression:
 		if prop, ok := e.Function.(*ast.PropertyExpression); ok {
 			objSym, _ := a.GetSymbol(prop.Object)
@@ -876,6 +883,194 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		return fmt.Sprintf("UnsupportedExpr(%T)", expr), nil
 	}
 }
+
+// streamPipeCounter generates collision-free variable names for the
+// goroutine/channel plumbing emitted per stream pipeline expression. It is
+// package-level (rather than carried on transpileContext) because nested
+// transpileContexts built for function literals (see the *ast.FunctionLiteral
+// case above) do not copy every context field into child contexts, so a
+// context-carried counter could silently diverge across sibling closures.
+var streamPipeCounter int
+
+// transpileStreamPipeExpression generates a Go IIFE implementing a
+// channel-based concurrency pipeline (generator -> N single-worker stages ->
+// sink) for a |>>/?>> chain, following the classic "Concurrency in Go"
+// pattern. Each stage is exactly one goroutine reading its in-channel in
+// write order and writing to its out-channel, so ordering is preserved
+// end-to-end without any fan-out/fan-in bookkeeping, while still letting item
+// N move on to the next stage before item N+1 finishes the previous one.
+func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileContext) (string, error) {
+	a := ctx.analyzer
+
+	// Flatten the nested chain (e.Left may itself be a *StreamPipeExpression)
+	// into source-to-sink order.
+	var stages []*ast.StreamPipeExpression
+	for cur := e; ; {
+		stages = append(stages, cur)
+		next, ok := cur.Left.(*ast.StreamPipeExpression)
+		if !ok {
+			break
+		}
+		cur = next
+	}
+	for i, j := 0, len(stages)-1; i < j; i, j = i+1, j-1 {
+		stages[i], stages[j] = stages[j], stages[i]
+	}
+
+	sourceExpr := stages[0].Left
+	sourceStr, err := transpileExpressionInternal(sourceExpr, ctx, "")
+	if err != nil {
+		return "", err
+	}
+
+	var elemSym symbol.Symbol
+	if sourceSym, ok := a.GetSymbol(sourceExpr); ok {
+		if arrSym, ok := sourceSym.(*symbol.ArraySymbol); ok {
+			elemSym = arrSym.ElementSymbol()
+		}
+	}
+	elemType := ctx.mapSymbolToGoType(elemSym)
+	if elemType == "" {
+		elemType = "any"
+	}
+
+	resultSym, _ := a.GetSymbol(e)
+	resultGoType := ctx.mapSymbolToGoType(resultSym)
+	if resultGoType == "" {
+		resultGoType = "any"
+	}
+
+	id := streamPipeCounter
+	streamPipeCounter++
+	prefix := fmt.Sprintf("_stream%d", id)
+
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf("func() %s {\n", resultGoType))
+	buf.WriteString(fmt.Sprintf("%s_done := make(chan struct{})\n", prefix))
+	buf.WriteString(fmt.Sprintf("defer close(%s_done)\n\n", prefix))
+
+	buf.WriteString(fmt.Sprintf("%s_ch0 := make(chan %s)\n", prefix, elemType))
+	buf.WriteString("go func() {\n")
+	buf.WriteString(fmt.Sprintf("defer close(%s_ch0)\n", prefix))
+	buf.WriteString(fmt.Sprintf("for _, v := range %s {\n", sourceStr))
+	buf.WriteString("select {\n")
+	buf.WriteString(fmt.Sprintf("case %s_ch0 <- v:\n", prefix))
+	buf.WriteString(fmt.Sprintf("case <-%s_done:\n", prefix))
+	buf.WriteString("return\n")
+	buf.WriteString("}\n}\n}()\n\n")
+
+	prevCh := prefix + "_ch0"
+	for i, stage := range stages {
+		var outElemSym symbol.Symbol
+		if sym, ok := a.GetStreamStageType(stage); ok {
+			outElemSym = sym
+		}
+		outElemType := ctx.mapSymbolToGoType(outElemSym)
+		if outElemType == "" {
+			outElemType = "any"
+		}
+		outCh := fmt.Sprintf("%s_ch%d", prefix, i+1)
+
+		var stageBody bytes.Buffer
+		if stage.Join != nil {
+			if err := writeJoinStageBody(&stageBody, stage, ctx, prefix, i); err != nil {
+				return "", err
+			}
+		} else {
+			originalArg := stage.Call.Arguments[0]
+			stage.Call.Arguments[0] = &ast.Identifier{Value: "v"}
+			callExpr, err := transpileExpressionInternal(stage.Call, ctx, "")
+			stage.Call.Arguments[0] = originalArg
+			if err != nil {
+				return "", err
+			}
+			stageBody.WriteString(fmt.Sprintf("out := %s\n", callExpr))
+		}
+
+		buf.WriteString(fmt.Sprintf("%s := make(chan %s)\n", outCh, outElemType))
+		buf.WriteString("go func() {\n")
+		buf.WriteString(fmt.Sprintf("defer close(%s)\n", outCh))
+		buf.WriteString(fmt.Sprintf("for v := range %s {\n", prevCh))
+		if stage.Safe {
+			buf.WriteString("if v == nil {\ncontinue\n}\n")
+		}
+		buf.Write(stageBody.Bytes())
+		buf.WriteString("select {\n")
+		buf.WriteString(fmt.Sprintf("case %s <- out:\n", outCh))
+		buf.WriteString(fmt.Sprintf("case <-%s_done:\n", prefix))
+		buf.WriteString("return\n")
+		buf.WriteString("}\n}\n}()\n\n")
+
+		prevCh = outCh
+	}
+
+	buf.WriteString(fmt.Sprintf("%s_out := make(%s, 0)\n", prefix, resultGoType))
+	buf.WriteString(fmt.Sprintf("for v := range %s {\n", prevCh))
+	buf.WriteString(fmt.Sprintf("%s_out = append(%s_out, v)\n", prefix, prefix))
+	buf.WriteString("}\n")
+	buf.WriteString(fmt.Sprintf("return %s_out\n", prefix))
+	buf.WriteString("}()")
+
+	return buf.String(), nil
+}
+
+// writeJoinStageBody generates the per-item body of a fixed-size parallel
+// join stage: each of stage.Join.Calls is invoked concurrently (one
+// goroutine per call, joined via a sync.WaitGroup — not a worker pool, since
+// the count is fixed and known at compile time), then stage.Call is invoked
+// with the N results substituted into its reserved leading argument slots
+// (see parseStreamPipeExpressionCommon's fusion logic and
+// analyzeJoinStage), plus whatever extra curried arguments follow them.
+func writeJoinStageBody(buf *bytes.Buffer, stage *ast.StreamPipeExpression, ctx *transpileContext, prefix string, stageIdx int) error {
+	a := ctx.analyzer
+	n := len(stage.Join.Calls)
+	joinVarNames := make([]string, n)
+
+	for j, joinCall := range stage.Join.Calls {
+		joinVarNames[j] = fmt.Sprintf("%s_stage%d_join%d", prefix, stageIdx, j)
+
+		var joinElemSym symbol.Symbol
+		if sym, ok := a.GetSymbol(joinCall); ok {
+			joinElemSym = sym
+		}
+		joinElemType := ctx.mapSymbolToGoType(joinElemSym)
+		if joinElemType == "" {
+			joinElemType = "any"
+		}
+		buf.WriteString(fmt.Sprintf("var %s %s\n", joinVarNames[j], joinElemType))
+	}
+
+	wgName := fmt.Sprintf("%s_stage%d_wg", prefix, stageIdx)
+	buf.WriteString(fmt.Sprintf("var %s sync.WaitGroup\n", wgName))
+	buf.WriteString(fmt.Sprintf("%s.Add(%d)\n", wgName, n))
+
+	for j, joinCall := range stage.Join.Calls {
+		originalArg := joinCall.Arguments[0]
+		joinCall.Arguments[0] = &ast.Identifier{Value: "v"}
+		callExpr, err := transpileExpressionInternal(joinCall, ctx, "")
+		joinCall.Arguments[0] = originalArg
+		if err != nil {
+			return err
+		}
+		buf.WriteString(fmt.Sprintf("go func() {\ndefer %s.Done()\n%s = %s\n}()\n", wgName, joinVarNames[j], callExpr))
+	}
+	buf.WriteString(fmt.Sprintf("%s.Wait()\n", wgName))
+
+	for j, name := range joinVarNames {
+		stage.Call.Arguments[j] = &ast.Identifier{Value: name}
+	}
+	callExpr, err := transpileExpressionInternal(stage.Call, ctx, "")
+	for j := range joinVarNames {
+		stage.Call.Arguments[j] = nil
+	}
+	if err != nil {
+		return err
+	}
+	buf.WriteString(fmt.Sprintf("out := %s\n", callExpr))
+
+	return nil
+}
+
 func getOrderedModules(p *ast.Program, asts map[string]*ast.Program) []string {
 	var ordered []string
 	visited := make(map[string]bool)
@@ -894,6 +1089,25 @@ func getOrderedModules(p *ast.Program, asts map[string]*ast.Program) []string {
 	}
 	visit(p)
 	return ordered
+}
+
+// formatNumberLiteral renders a Caja Number literal as Go source text that is
+// unambiguously an untyped *float* constant, never an untyped int constant.
+// Go decides a numeric literal's default kind purely syntactically (whether
+// the text contains '.'/'e'/'E'), and %v alone drops the decimal point for
+// whole numbers (5.0 -> "5"). That's harmless for a normal (non-generic)
+// float64 parameter, since Go implicitly converts an untyped int constant to
+// float64 there — but it breaks generic calls: Go infers a type parameter
+// from an untyped int constant's *default* type (int), not from the
+// call's surrounding context, so e.g. identity(5) against
+// func identity[T comparable](x T) T infers T=int even though Caja's Number
+// is always float64, producing generated Go that fails to compile.
+func formatNumberLiteral(v float64) string {
+	s := fmt.Sprintf("%v", v)
+	if !strings.ContainsAny(s, ".eE") {
+		s += ".0"
+	}
+	return s
 }
 
 func sanitizeIdentifier(path string) string {

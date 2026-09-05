@@ -1,0 +1,15 @@
+type Sale struct { amount Number }
+
+let calcDiscount = fn(s: Sale, pct: Number) -> Sale {
+    return Sale { amount: s.amount - (s.amount * pct / 100) }
+}
+
+let calcProfit = fn(s: Sale) -> Number {
+    return s.amount * 0.3
+}
+
+let sales = [Sale { amount: 100 }, Sale { amount: 200 }, Sale { amount: 300 }]
+
+let result = sales |>> calcDiscount(5) |>> calcProfit
+
+return 0

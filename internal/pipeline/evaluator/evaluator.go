@@ -73,6 +73,8 @@ func Eval(n ast.Node, env *environment.Environment) (environment.Object, error) 
 			return environment.NullObj, nil
 		}
 		return evalSafePipeCall(node, left, env)
+	case *ast.StreamPipeExpression:
+		return evalStreamPipeExpression(node, env)
 	case *ast.CallExpression:
 		return evalCallExpression(node, env)
 	case *ast.ImportStatement:
@@ -1017,5 +1019,107 @@ func evalSafePipeCall(node *ast.SafePipeExpression, leftObj environment.Object, 
 	node.Call.Arguments[0] = &ast.Identifier{Value: dummyName}
 	res, err := evalCallExpression(node.Call, env)
 	node.Call.Arguments[0] = orig
+	return res, err
+}
+
+// evalStreamPipeExpression evaluates a streaming pipeline (|>>/?>>)
+// sequentially: since the interpreter exposes no channel value type and
+// stream ordering is guaranteed identical to sequential execution (each
+// generated stage is a single, order-preserving goroutine), running each
+// stage over the whole array in turn produces the same result as a true
+// concurrent pipeline, without needing goroutines/channels here.
+func evalStreamPipeExpression(node *ast.StreamPipeExpression, env *environment.Environment) (environment.Object, error) {
+	var stages []*ast.StreamPipeExpression
+	for cur := node; ; {
+		stages = append(stages, cur)
+		next, ok := cur.Left.(*ast.StreamPipeExpression)
+		if !ok {
+			break
+		}
+		cur = next
+	}
+	for i, j := 0, len(stages)-1; i < j; i, j = i+1, j-1 {
+		stages[i], stages[j] = stages[j], stages[i]
+	}
+
+	sourceObj, err := Eval(stages[0].Left, env)
+	if err != nil {
+		return nil, err
+	}
+
+	arr, ok := sourceObj.(*environment.Array)
+	if !ok {
+		return nil, fmt.Errorf("type error: stream pipe source must be an array, got %s", sourceObj.Type())
+	}
+
+	items := arr.Elements
+	for _, stage := range stages {
+		var next []environment.Object
+		for _, item := range items {
+			if stage.Safe && (item == nil || item.Type() == environment.NULL_OBJ) {
+				continue
+			}
+			var result environment.Object
+			var err error
+			if stage.Join != nil {
+				result, err = evalJoinStageCall(stage, item, env)
+			} else {
+				result, err = evalStreamStageCall(stage, item, env)
+			}
+			if err != nil {
+				return nil, err
+			}
+			next = append(next, result)
+		}
+		items = next
+	}
+
+	return &environment.Array{Elements: items}, nil
+}
+
+// evalStreamStageCall invokes a single stream stage's function with item
+// bound as its first argument, using the same argument-substitution trick as
+// evalSafePipeCall.
+func evalStreamStageCall(stage *ast.StreamPipeExpression, item environment.Object, env *environment.Environment) (environment.Object, error) {
+	dummyName := "___stream_pipe_dummy___"
+	env.Set(dummyName, item)
+	orig := stage.Call.Arguments[0]
+	stage.Call.Arguments[0] = &ast.Identifier{Value: dummyName}
+	res, err := evalCallExpression(stage.Call, env)
+	stage.Call.Arguments[0] = orig
+	return res, err
+}
+
+// evalJoinStageCall evaluates a fixed-size parallel join stage sequentially:
+// each call in stage.Join.Calls is invoked in turn (no goroutines needed —
+// same principle as the rest of the evaluator's stream support, since the
+// final result is identical to a true concurrent join as long as the calls
+// are independent), then stage.Call is invoked with the N results bound
+// into its reserved leading argument slots.
+func evalJoinStageCall(stage *ast.StreamPipeExpression, item environment.Object, env *environment.Environment) (environment.Object, error) {
+	itemDummy := "___join_pipe_item___"
+	env.Set(itemDummy, item)
+
+	n := len(stage.Join.Calls)
+	for i, joinCall := range stage.Join.Calls {
+		orig := joinCall.Arguments[0]
+		joinCall.Arguments[0] = &ast.Identifier{Value: itemDummy}
+		result, err := evalCallExpression(joinCall, env)
+		joinCall.Arguments[0] = orig
+		if err != nil {
+			return nil, err
+		}
+
+		resultDummy := fmt.Sprintf("___join_pipe_result_%d___", i)
+		env.Set(resultDummy, result)
+		stage.Call.Arguments[i] = &ast.Identifier{Value: resultDummy}
+	}
+
+	res, err := evalCallExpression(stage.Call, env)
+
+	for i := 0; i < n; i++ {
+		stage.Call.Arguments[i] = nil
+	}
+
 	return res, err
 }

@@ -21,8 +21,8 @@ func TestTranspile(t *testing.T) {
 			`,
 			expected: []string{
 				"type MajorCustomer Customer",
-				"var validate_MajorCustomer func(*Customer) *MajorCustomer = func(val *Customer) *MajorCustomer {\n\tpred := func(c *Customer) bool {\n\treturn (c.Age > 18)\n}\n\tif pred(val) {\n\t\tres := (*MajorCustomer)(val)\n\t\treturn res\n\t}\n\treturn nil\n}",
-				"var m *MajorCustomer = validate_MajorCustomer(&Customer{\nAge: 20,\n})",
+				"var validate_MajorCustomer func(*Customer) *MajorCustomer = func(val *Customer) *MajorCustomer {\n\tpred := func(c *Customer) bool {\n\treturn (c.Age > 18.0)\n}\n\tif pred(val) {\n\t\tres := (*MajorCustomer)(val)\n\t\treturn res\n\t}\n\treturn nil\n}",
+				"var m *MajorCustomer = validate_MajorCustomer(&Customer{\nAge: 20.0,\n})",
 			},
 		},
 		{
@@ -47,8 +47,8 @@ func TestTranspile(t *testing.T) {
 				let pi_val = PI
 			`,
 			expected: []string{
-				"var max_val float64 = math.Max(10, 20)",
-				"var min_val float64 = math.Min(10, 20)",
+				"var max_val float64 = math.Max(10.0, 20.0)",
+				"var min_val float64 = math.Min(10.0, 20.0)",
 				"var pi_val float64 = math.Pi",
 			},
 		},
@@ -64,7 +64,7 @@ func TestTranspile(t *testing.T) {
 				let res = applyOp((x, y) => x + y)
 			`,
 			expected: []string{
-				"var double func(float64) float64 = func(p float64) float64 {\n\treturn (p * 2)\n}",
+				"var double func(float64) float64 = func(p float64) float64 {\n\treturn (p * 2.0)\n}",
 				"var sum func(float64, float64) float64 = func(p float64, q float64) float64 {\n\treturn (p + q)\n}",
 				"var res float64 = applyOp(func(x float64, y float64) float64 {\n\treturn (x + y)\n})",
 			},
@@ -88,7 +88,7 @@ func TestTranspile(t *testing.T) {
 				let result = (10 + 5) * 2
 			`,
 			expected: []string{
-				"var result float64 = ((10 + 5) * 2)",
+				"var result float64 = ((10.0 + 5.0) * 2.0)",
 				"_ = result",
 			},
 		},
@@ -113,7 +113,7 @@ func TestTranspile(t *testing.T) {
 				let arr = [1, 2, 3]
 			`,
 			expected: []string{
-				"var arr []float64 = []float64{1, 2, 3}",
+				"var arr []float64 = []float64{1.0, 2.0, 3.0}",
 			},
 		},
 		{
@@ -127,7 +127,7 @@ func TestTranspile(t *testing.T) {
 				let x = arr[1]
 			`,
 			expected: []string{
-				"var x float64 = arr[int(1)]",
+				"var x float64 = arr[int(1.0)]",
 			},
 		},
 		{
@@ -141,7 +141,7 @@ func TestTranspile(t *testing.T) {
 				arr[0] = 5
 			`,
 			expected: []string{
-				"arr[int(0)] = 5",
+				"arr[int(0.0)] = 5.0",
 			},
 		},
 		{
@@ -150,7 +150,7 @@ func TestTranspile(t *testing.T) {
 				let matrix = [[1, 2], [3, 4]]
 			`,
 			expected: []string{
-				"var matrix [][]float64 = [][]float64{[]float64{1, 2}, []float64{3, 4}}",
+				"var matrix [][]float64 = [][]float64{[]float64{1.0, 2.0}, []float64{3.0, 4.0}}",
 			},
 		},
 		{
@@ -160,7 +160,7 @@ func TestTranspile(t *testing.T) {
 				let x = matrix[1][0]
 			`,
 			expected: []string{
-				"var x float64 = matrix[int(1)][int(0)]",
+				"var x float64 = matrix[int(1.0)][int(0.0)]",
 			},
 		},
 		{
@@ -169,7 +169,7 @@ func TestTranspile(t *testing.T) {
 				let m = {"a": 1}
 			`,
 			expected: []string{
-				"var m map[string]float64 = map[string]float64{\"a\": 1}",
+				"var m map[string]float64 = map[string]float64{\"a\": 1.0}",
 			},
 		},
 		{
@@ -228,7 +228,7 @@ func TestTranspile(t *testing.T) {
 				"Bark func() string",
 				"}",
 				"var root *Node = &Node{",
-				"Value: 10,",
+				"Value: 10.0,",
 				"Left: nil,",
 				"Right: nil,",
 				"}",
@@ -265,8 +265,8 @@ func TestTranspile(t *testing.T) {
 				"var apply func(func(float64) float64, float64) float64 = func(f func(float64) float64, val float64) float64 {",
 				"return f(val)",
 				"}",
-				"var double func(float64) float64 = makeMultiplier(2)",
-				"var result float64 = apply(double, 10)",
+				"var double func(float64) float64 = makeMultiplier(2.0)",
+				"var result float64 = apply(double, 10.0)",
 			},
 		},
 		{
@@ -302,17 +302,17 @@ func TestTranspile(t *testing.T) {
 			expected: []string{
 				"var fact func(float64, float64) float64 = func(n float64, acc float64) float64 {",
 				"for {",
-				"if (n == 0) {",
+				"if (n == 0.0) {",
 				"return acc",
 				"}",
-				"_tco0 := (n - 1)",
+				"_tco0 := (n - 1.0)",
 				"_tco1 := (acc * n)",
 				"n = _tco0",
 				"acc = _tco1",
 				"continue",
 				"}",
 				"}",
-				"var val float64 = fact(10, 1)",
+				"var val float64 = fact(10.0, 1.0)",
 			},
 		},
 		{
@@ -326,7 +326,7 @@ func TestTranspile(t *testing.T) {
 			`,
 			expected: []string{
 				"var isEven func(float64) bool = func(x float64) bool {",
-				"return (math.Mod(x, 2) == 0)",
+				"return (math.Mod(x, 2.0) == 0.0)",
 				"}",
 				"var filter func([]float64, func(float64) bool) []float64 = func(arr []float64, f func(float64) bool) []float64 {",
 				"return arr",
@@ -334,9 +334,101 @@ func TestTranspile(t *testing.T) {
 				"var mapArr func([]float64, func(float64) float64) []float64 = func(arr []float64, f func(float64) float64) []float64 {",
 				"return arr",
 				"}",
-				"var result []float64 = mapArr(filter([]float64{1, 2, 3}, isEven), func(x float64) float64 {",
-				"return (x * 2)",
+				"var result []float64 = mapArr(filter([]float64{1.0, 2.0, 3.0}, isEven), func(x float64) float64 {",
+				"return (x * 2.0)",
 				"})",
+			},
+		},
+		{
+			name: "Stream Pipeline",
+			input: `
+				type Sale struct { amount Number }
+
+				let calcDiscount = fn(s: Sale, pct: Number) -> Sale {
+					return Sale { amount: s.amount - (s.amount * pct / 100) }
+				}
+				let calcProfit = fn(s: Sale) -> Number { return s.amount * 0.3 }
+
+				let sales = [Sale { amount: 100 }]
+				let result = sales |>> calcDiscount(5) |>> calcProfit
+			`,
+			expected: []string{
+				"var result []float64 = func() []float64 {",
+				"_stream0_done := make(chan struct{})",
+				"defer close(_stream0_done)",
+				"_stream0_ch0 := make(chan *Sale)",
+				"go func() {",
+				"defer close(_stream0_ch0)",
+				"for _, v := range sales {",
+				"select {",
+				"case _stream0_ch0 <- v:",
+				"case <-_stream0_done:",
+				"_stream0_ch1 := make(chan *Sale)",
+				"out := calcDiscount(v, 5.0)",
+				"case _stream0_ch1 <- out:",
+				"_stream0_ch2 := make(chan float64)",
+				"out := calcProfit(v)",
+				"case _stream0_ch2 <- out:",
+				"_stream0_out := make([]float64, 0)",
+				"for v := range _stream0_ch2 {",
+				"_stream0_out = append(_stream0_out, v)",
+				"return _stream0_out",
+			},
+		},
+		{
+			name: "Safe Stream Pipeline drops nil items before calling the stage",
+			input: `
+				type Sale struct { amount Number }
+				define BigSale constraints Sale with: fn(s: Sale) -> Boolean { return s.amount > 150 }
+
+				let calcProfit = fn(s: BigSale) -> Number { return s.amount * 0.3 }
+
+				let s1: BigSale? = nil
+				let sales = [s1]
+				let result = sales ?>> calcProfit
+			`,
+			expected: []string{
+				"_stream0_ch0 := make(chan *BigSale)",
+				"for v := range _stream0_ch0 {",
+				"if v == nil {",
+				"continue",
+				"}",
+				"out := calcProfit(v)",
+			},
+		},
+		{
+			name: "Stream Pipeline Parallel Join",
+			input: `
+				type Loan struct { principal Number }
+				type Calendar struct { isHoliday Boolean }
+
+				let resolveCalendar = fn(loan: Loan) -> Calendar { return Calendar { isHoliday: false } }
+				let fetchIndexRate = fn(loan: Loan) -> Number { return 5 }
+				let fetchFees = fn(loan: Loan) -> Number { return 1 }
+				let calculatePnl = fn(cal: Calendar, rate: Number, fees: Number) -> Number { return rate + fees }
+
+				let loans = [Loan { principal: 100 }]
+				let pnl = loans |>> (resolveCalendar & fetchIndexRate & fetchFees) |>> calculatePnl
+			`,
+			expected: []string{
+				"import \"sync\"",
+				"var pnl []float64 = func() []float64 {",
+				"_stream0_ch0 := make(chan *Loan)",
+				// exactly one fused stage/channel — the join group does not
+				// get its own separate channel boundary
+				"_stream0_ch1 := make(chan float64)",
+				"var _stream0_stage0_join0 *Calendar",
+				"var _stream0_stage0_join1 float64",
+				"var _stream0_stage0_join2 float64",
+				"var _stream0_stage0_wg sync.WaitGroup",
+				"_stream0_stage0_wg.Add(3)",
+				"go func() {",
+				"defer _stream0_stage0_wg.Done()",
+				"_stream0_stage0_join0 = resolveCalendar(v)",
+				"_stream0_stage0_join1 = fetchIndexRate(v)",
+				"_stream0_stage0_join2 = fetchFees(v)",
+				"_stream0_stage0_wg.Wait()",
+				"out := calculatePnl(_stream0_stage0_join0, _stream0_stage0_join1, _stream0_stage0_join2)",
 			},
 		},
 		{
@@ -356,11 +448,11 @@ func TestTranspile(t *testing.T) {
 				let pi = math.PI
 			`,
 			expected: []string{
-				"var arr []float64 = []float64{1, 2, 3}",
-				"var arr2 []float64 = caja_array_push(arr, 4)",
+				"var arr []float64 = []float64{1.0, 2.0, 3.0}",
+				"var arr2 []float64 = caja_array_push(arr, 4.0)",
 				"var p []float64 = caja_array_pop(arr2)",
 				"var l float64 = float64(len(p))",
-				"var m float64 = math.Abs((-5))",
+				"var m float64 = math.Abs((-5.0))",
 				"var s string = strings.ToUpper(\"caja\")",
 				"var d time.Time = caja_date_today()",
 				"var pi float64 = math.Pi",
@@ -374,7 +466,7 @@ let a = [1, 2, 3]
 let b = array.push(move a, 4)
 `,
 			expected: []string{
-				"append(a, 4)", // Should use zero-copy in-place append
+				"append(a, 4.0)", // Should use zero-copy in-place append
 			},
 		},
 		{
@@ -385,7 +477,7 @@ let a = [1, 2, 3]
 let b = a |> array.push(4) |> array.push(5)
 `,
 			expected: []string{
-				"append(caja_array_push(a, 4), 5)",
+				"append(caja_array_push(a, 4.0), 5.0)",
 			},
 		},
 		{
@@ -396,7 +488,7 @@ let a = [1, 2, 3]
 let b = move a |> array.push(4)
 `,
 			expected: []string{
-				"append(a, 4)",
+				"append(a, 4.0)",
 			},
 		},
 	}

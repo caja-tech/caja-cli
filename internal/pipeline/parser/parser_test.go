@@ -1601,6 +1601,258 @@ func TestSafePipeOperatorParsing(t *testing.T) {
 	}
 }
 
+func TestStreamPipeOperatorParsing(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"A |>> f(B)",
+			"(A |>> f)",
+		},
+		{
+			"A |>> f",
+			"(A |>> f)",
+		},
+		{
+			"A ?>> f(B)",
+			"(A ?>> f)",
+		},
+		{
+			"A |>> f |>> g",
+			"((A |>> f) |>> g)",
+		},
+		{
+			"sales |>> calcDiscount(5) |>> calcProfit",
+			"((sales |>> calcDiscount) |>> calcProfit)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			program := p.Parse()
+			checkParseErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statements. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			}
+
+			if stmt.Expression.String() != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, stmt.Expression.String())
+			}
+		})
+	}
+}
+
+// TestStreamPipeExpressionStructure verifies that a chained stream pipe
+// parses into properly nested *ast.StreamPipeExpression nodes (rather than
+// desugaring away like plain |>), with each stage's Call carrying the
+// upstream expression prepended as its first argument.
+func TestStreamPipeExpressionStructure(t *testing.T) {
+	input := "sales |>> calcDiscount(5) |>> calcProfit"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+	}
+
+	outer, ok := stmt.Expression.(*ast.StreamPipeExpression)
+	if !ok {
+		t.Fatalf("expression is not *ast.StreamPipeExpression. got=%T", stmt.Expression)
+	}
+	if outer.Safe {
+		t.Errorf("expected outer stage to not be Safe")
+	}
+	if len(outer.Call.Arguments) != 1 {
+		t.Fatalf("expected outer Call to have 1 argument, got %d", len(outer.Call.Arguments))
+	}
+
+	inner, ok := outer.Left.(*ast.StreamPipeExpression)
+	if !ok {
+		t.Fatalf("outer.Left is not *ast.StreamPipeExpression. got=%T", outer.Left)
+	}
+	if len(inner.Call.Arguments) != 2 {
+		t.Fatalf("expected inner Call to have 2 arguments (upstream + curried arg), got %d", len(inner.Call.Arguments))
+	}
+
+	if _, ok := inner.Left.(*ast.Identifier); !ok {
+		t.Fatalf("inner.Left is not *ast.Identifier (the source). got=%T", inner.Left)
+	}
+}
+
+// TestStreamPipeBoundaryMixing verifies that a regular pipe may feed into a
+// stream pipe chain (the array a |> chain produces becomes a stream's
+// source), but a stream pipe chain may not feed back into a regular pipe.
+func TestStreamPipeBoundaryMixing(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantError bool
+	}{
+		{
+			name:      "regular pipe feeding into a stream pipe is allowed",
+			input:     "sales |> filter(active) |>> calcDiscount(5)",
+			wantError: false,
+		},
+		{
+			name:      "stream pipe feeding into a regular pipe is rejected",
+			input:     "sales |>> calcDiscount(5) |> sumArr",
+			wantError: true,
+		},
+		{
+			name:      "stream pipe feeding into a regular safe pipe is rejected",
+			input:     "sales |>> calcDiscount(5) ?> sumArr",
+			wantError: true,
+		},
+		{
+			name:      "stream pipe feeding into another stream pipe is allowed",
+			input:     "sales |>> calcDiscount(5) |>> calcProfit",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := New(l)
+			p.Parse()
+
+			hasErrors := len(p.Errors()) > 0
+			if hasErrors != tt.wantError {
+				t.Fatalf("wantError=%v, got errors=%v", tt.wantError, p.Errors())
+			}
+		})
+	}
+}
+
+// TestJoinGroupParsing verifies that a parallel join group (f1 & f2 & f3)
+// used as a |>>/?>> stage fuses with the immediately following stage: the
+// join's N calls each receive the upstream item as their own first argument,
+// and the consuming stage's Call gets N reserved (nil) leading argument
+// slots standing in for the join's results.
+func TestJoinGroupParsing(t *testing.T) {
+	input := "loans |>> (resolveCalendar & fetchIndexRate & fetchFees) |>> calculatePnl"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+	}
+
+	outer, ok := stmt.Expression.(*ast.StreamPipeExpression)
+	if !ok {
+		t.Fatalf("expression is not *ast.StreamPipeExpression. got=%T", stmt.Expression)
+	}
+
+	if outer.Join == nil {
+		t.Fatalf("expected outer.Join to be set")
+	}
+	if outer.Call == nil {
+		t.Fatalf("expected outer.Call to be set (fused with the consuming stage)")
+	}
+	if outer.Call.Function.String() != "calculatePnl" {
+		t.Fatalf("expected consuming call to be calculatePnl, got %s", outer.Call.Function.String())
+	}
+	if len(outer.Call.Arguments) != 3 {
+		t.Fatalf("expected 3 reserved argument slots on the consuming call, got %d", len(outer.Call.Arguments))
+	}
+	for i, arg := range outer.Call.Arguments {
+		if arg != nil {
+			t.Errorf("expected outer.Call.Arguments[%d] to be a nil placeholder, got %v", i, arg)
+		}
+	}
+
+	if len(outer.Join.Calls) != 3 {
+		t.Fatalf("expected 3 join calls, got %d", len(outer.Join.Calls))
+	}
+	wantFns := []string{"resolveCalendar", "fetchIndexRate", "fetchFees"}
+	for i, call := range outer.Join.Calls {
+		if call.Function.String() != wantFns[i] {
+			t.Errorf("join call %d: expected function %s, got %s", i, wantFns[i], call.Function.String())
+		}
+		if len(call.Arguments) != 1 {
+			t.Fatalf("join call %d: expected 1 argument (the upstream item), got %d", i, len(call.Arguments))
+		}
+		if call.Arguments[0].String() != "loans" {
+			t.Errorf("join call %d: expected upstream argument 'loans', got %s", i, call.Arguments[0].String())
+		}
+	}
+
+	if ident, ok := outer.Left.(*ast.Identifier); !ok || ident.Value != "loans" {
+		t.Fatalf("expected outer.Left to be the original 'loans' identifier, got %T", outer.Left)
+	}
+}
+
+// TestJoinGroupWithCurriedArgs verifies join members can carry their own
+// curried arguments (e.g. fetchFees(feeSchedule)) alongside the implicit
+// upstream item, same as a normal stage.
+func TestJoinGroupWithCurriedArgs(t *testing.T) {
+	input := "loans |>> (fetchIndexRate & fetchFees(feeSchedule)) |>> calculatePnl(extra)"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	stmt := program.Statements[0].(*ast.ExpressionStatement)
+	outer := stmt.Expression.(*ast.StreamPipeExpression)
+
+	feesCall := outer.Join.Calls[1]
+	if len(feesCall.Arguments) != 2 {
+		t.Fatalf("expected fetchFees to have 2 arguments (upstream + curried), got %d", len(feesCall.Arguments))
+	}
+	if feesCall.Arguments[1].String() != "feeSchedule" {
+		t.Errorf("expected curried arg 'feeSchedule', got %s", feesCall.Arguments[1].String())
+	}
+
+	if len(outer.Call.Arguments) != 3 {
+		t.Fatalf("expected 3 arguments on the consuming call (2 join placeholders + 1 curried), got %d", len(outer.Call.Arguments))
+	}
+	if outer.Call.Arguments[0] != nil || outer.Call.Arguments[1] != nil {
+		t.Fatalf("expected the first 2 arguments to be reserved join placeholders")
+	}
+	if outer.Call.Arguments[2].String() != "extra" {
+		t.Errorf("expected trailing curried arg 'extra', got %s", outer.Call.Arguments[2].String())
+	}
+}
+
+// TestJoinGroupDanglingParsesWithoutError verifies a join group with no
+// following consuming stage parses successfully (Call left nil) — rejecting
+// it as "must be followed by another stage" is the analyzer's job, not the
+// parser's, since the parser has no way to know a consumer won't be added by
+// further input.
+func TestJoinGroupDanglingParsesWithoutError(t *testing.T) {
+	input := "loans |>> (resolveCalendar & fetchIndexRate)"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	stmt := program.Statements[0].(*ast.ExpressionStatement)
+	outer, ok := stmt.Expression.(*ast.StreamPipeExpression)
+	if !ok {
+		t.Fatalf("expression is not *ast.StreamPipeExpression. got=%T", stmt.Expression)
+	}
+	if outer.Join == nil {
+		t.Fatalf("expected outer.Join to be set")
+	}
+	if outer.Call != nil {
+		t.Fatalf("expected outer.Call to be nil (dangling, unconsumed join)")
+	}
+}
+
 func TestNamedImportStatement(t *testing.T) {
 	tests := []struct {
 		input           string
