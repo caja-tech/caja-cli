@@ -726,3 +726,63 @@ func (sp *SafePipeExpression) TokenLiteral() string { return sp.Token.Literal }
 func (sp *SafePipeExpression) String() string {
 	return "(" + sp.Left.String() + " ?> " + sp.Call.Function.String() + ")"
 }
+
+// StreamPipeExpression represents a streaming pipeline stage (|>> or ?>>).
+// Left may itself be a *StreamPipeExpression, forming a nested chain that
+// analysis/codegen flatten by walking down Left. Call is the per-item stage
+// function invocation with the upstream element bound as its first argument.
+//
+// When Join is non-nil, this stage's upstream item instead feeds a fixed-size
+// parallel join (see JoinGroupExpression): the N calls in Join.Calls are all
+// invoked concurrently on the same upstream item, and Call (which must be
+// non-nil once parsing completes) consumes their N results as its own first
+// N positional arguments — those N leading arguments are synthesized by
+// analysis/codegen, not present in Call.Arguments as written. A Join with
+// Call == nil is a dangling join group that nothing consumes (e.g. it was
+// the last stage in the chain), which is a semantic error: a parallel join
+// group must always be followed by another stage.
+type StreamPipeExpression struct {
+	Token lexer.Token // The '|>>' or '?>>' token
+	Left  Expression
+	Join  *JoinGroupExpression
+	Call  *CallExpression
+	Safe  bool // true for ?>>
+}
+
+func (sp *StreamPipeExpression) expressionNode()      {}
+func (sp *StreamPipeExpression) TokenLiteral() string { return sp.Token.Literal }
+func (sp *StreamPipeExpression) String() string {
+	op := "|>>"
+	if sp.Safe {
+		op = "?>>"
+	}
+	if sp.Join != nil {
+		if sp.Call == nil {
+			return "(" + sp.Left.String() + " " + op + " " + sp.Join.String() + ")"
+		}
+		return "(" + sp.Left.String() + " " + op + " " + sp.Join.String() + " " + op + " " + sp.Call.Function.String() + ")"
+	}
+	return "(" + sp.Left.String() + " " + op + " " + sp.Call.Function.String() + ")"
+}
+
+// JoinGroupExpression represents a parenthesized, fixed-size group of
+// independent function calls (f1 & f2 & ... & fn) used as a single |>>/?>>
+// stage's input. Each call already has the stage's upstream item prepended
+// as its own first argument (the same convention a normal stage uses). All
+// calls in the group are invoked concurrently per item; the group must be
+// immediately followed by another stream stage that consumes the N results
+// positionally — see StreamPipeExpression.Join.
+type JoinGroupExpression struct {
+	Token lexer.Token // The '(' token
+	Calls []*CallExpression
+}
+
+func (jg *JoinGroupExpression) expressionNode()      {}
+func (jg *JoinGroupExpression) TokenLiteral() string { return jg.Token.Literal }
+func (jg *JoinGroupExpression) String() string {
+	var parts []string
+	for _, c := range jg.Calls {
+		parts = append(parts, c.Function.String())
+	}
+	return "(" + strings.Join(parts, " & ") + ")"
+}

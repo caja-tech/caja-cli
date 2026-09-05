@@ -1064,6 +1064,72 @@ func TestSafePipeToken(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+func TestStreamPipeToken(t *testing.T) {
+	input := "|>>"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Stream pipe operator", Token{STREAM_PIPE, "|>>", 1, 1}},
+		{"End of file", Token{EOF, "", 1, 4}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+func TestSafeStreamPipeToken(t *testing.T) {
+	input := "?>>"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Safe stream pipe operator", Token{SAFE_STREAM_PIPE, "?>>", 1, 1}},
+		{"End of file", Token{EOF, "", 1, 4}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestPipeTokenAdjacency ensures the lexer still emits the correct 2-char
+// pipe tokens (not stream variants) when a plain pipe is immediately
+// followed by unrelated tokens, and doesn't over-consume across whitespace.
+func TestPipeTokenAdjacency(t *testing.T) {
+	input := "a |> b |>> c ?> d ?>> e"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"ident a", Token{IDENT, "a", 1, 1}},
+		{"pipe", Token{PIPE, "|>", 1, 3}},
+		{"ident b", Token{IDENT, "b", 1, 6}},
+		{"stream pipe", Token{STREAM_PIPE, "|>>", 1, 8}},
+		{"ident c", Token{IDENT, "c", 1, 12}},
+		{"safe pipe", Token{SAFE_PIPE, "?>", 1, 14}},
+		{"ident d", Token{IDENT, "d", 1, 17}},
+		{"safe stream pipe", Token{SAFE_STREAM_PIPE, "?>>", 1, 19}},
+		{"ident e", Token{IDENT, "e", 1, 23}},
+		{"End of file", Token{EOF, "", 1, 24}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestAmpToken ensures the '&' character used to separate calls inside a
+// parallel join group (f1 & f2 & f3) is tokenized correctly.
+func TestAmpToken(t *testing.T) {
+	input := "resolveCalendar & fetchIndexRate & fetchFees"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"ident resolveCalendar", Token{IDENT, "resolveCalendar", 1, 1}},
+		{"amp", Token{AMP, "&", 1, 17}},
+		{"ident fetchIndexRate", Token{IDENT, "fetchIndexRate", 1, 19}},
+		{"amp", Token{AMP, "&", 1, 34}},
+		{"ident fetchFees", Token{IDENT, "fetchFees", 1, 36}},
+		{"End of file", Token{EOF, "", 1, 45}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestNamedImportTokenization tests the tokenization of named imports syntax.
 func TestNamedImportTokenization(t *testing.T) {
 	input := "import { where, select } from \"@caja/query\" as q"

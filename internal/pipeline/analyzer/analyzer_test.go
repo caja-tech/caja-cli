@@ -2014,6 +2014,157 @@ m ?> processMajor |> printAge
 	}
 	runTestScenarios(t, tests)
 }
+
+func TestStreamPipeAnalyzer(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid stream pipe chaining",
+			input: `
+type Sale struct { amount Number }
+
+let calcDiscount = fn(s: Sale, pct: Number) -> Sale { return s }
+let calcProfit = fn(s: Sale) -> Number { return s.amount }
+
+let sales = [Sale { amount: 100 }]
+let result = sales |>> calcDiscount(5) |>> calcProfit
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "First stage parameter type mismatch",
+			input: `
+type Sale struct { amount Number }
+
+let calcProfit = fn(s: Sale) -> Number { return s.amount }
+
+let numbers = [1, 2, 3]
+let result = numbers |>> calcProfit
+`,
+			expectedErrors: []string{"type error: argument 1 expected Sale, got Number"},
+		},
+		{
+			name: "Non-array stream pipe source",
+			input: `
+let double = fn(x: Number) -> Number { return x * 2 }
+
+let n: Number = 5
+let result = n |>> double
+`,
+			expectedErrors: []string{"semantic error: stream pipe source must be an array, got Number"},
+		},
+		{
+			name: "Safe stream pipe skip-and-drop over nullable elements",
+			input: `
+type Sale struct { amount Number }
+define BigSale constraints Sale with: fn(s: Sale) -> Boolean { return s.amount > 150 }
+
+let calcProfit = fn(s: BigSale) -> Number { return s.amount }
+
+let s1: BigSale? = nil
+let s2: BigSale? = Sale { amount: 200 }
+let sales = [s1, s2]
+let result = sales ?>> calcProfit
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Unnecessary safe stream pipe on non-nullable element type",
+			input: `
+let double = fn(x: Number) -> Number { return x * 2 }
+
+let numbers = [1, 2, 3]
+let result = numbers ?>> double
+`,
+			expectedErrors: []string{"semantic error: unnecessary safe stream pipe on non-nullable element type"},
+		},
+		{
+			name: "Boundary mixing: regular pipe feeding into a stream pipe",
+			input: `
+let isPositive = fn(x: Number) -> Boolean { return x > 0 }
+let filter = fn(arr: [Number], f: fn(Number) -> Boolean) -> [Number] { return arr }
+let double = fn(x: Number) -> Number { return x * 2 }
+
+let numbers = [1, 2, 3]
+let result = numbers |> filter(isPositive) |>> double
+`,
+			expectedErrors: []string{},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestJoinGroupAnalyzer(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid parallel join consumed by the next stage",
+			input: `
+type Loan struct { principal Number }
+type Calendar struct { isHoliday Boolean }
+
+let resolveCalendar = fn(loan: Loan) -> Calendar { return Calendar { isHoliday: false } }
+let fetchIndexRate = fn(loan: Loan) -> Number { return 5 }
+let fetchFees = fn(loan: Loan) -> Number { return 1 }
+let calculatePnl = fn(cal: Calendar, rate: Number, fees: Number) -> Number { return rate + fees }
+
+let loans = [Loan { principal: 100 }]
+let pnl = loans |>> (resolveCalendar & fetchIndexRate & fetchFees) |>> calculatePnl
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Join result type mismatch against the consuming stage",
+			input: `
+type Loan struct { principal Number }
+
+let fetchIndexRate = fn(loan: Loan) -> Number { return 5 }
+let fetchFees = fn(loan: Loan) -> Number { return 1 }
+let calculatePnl = fn(rate: String, fees: Number) -> Number { return fees }
+
+let loans = [Loan { principal: 100 }]
+let pnl = loans |>> (fetchIndexRate & fetchFees) |>> calculatePnl
+`,
+			expectedErrors: []string{"type error: argument 1 expected String, got Number"},
+		},
+		{
+			name: "Dangling join group with no consuming stage",
+			input: `
+type Loan struct { principal Number }
+
+let fetchIndexRate = fn(loan: Loan) -> Number { return 5 }
+let fetchFees = fn(loan: Loan) -> Number { return 1 }
+
+let loans = [Loan { principal: 100 }]
+let pnl = loans |>> (fetchIndexRate & fetchFees)
+`,
+			expectedErrors: []string{"semantic error: a parallel join group (f & g & h) must be followed by another stage that consumes its results"},
+		},
+		{
+			name: "Join group used outside of a stream pipe context",
+			input: `
+let f = fn(x: Number) -> Number { return x }
+let g = fn(x: Number) -> Number { return x }
+let x = (f & g)
+`,
+			expectedErrors: []string{"semantic error: a parallel join group (f & g & h) can only be used as a |>>/?>> stage"},
+		},
+		{
+			name: "Join member curried arguments are type-checked",
+			input: `
+type Loan struct { principal Number }
+
+let fetchIndexRate = fn(loan: Loan) -> Number { return 5 }
+let fetchFees = fn(loan: Loan, schedule: String) -> Number { return 1 }
+let calculatePnl = fn(rate: Number, fees: Number) -> Number { return rate + fees }
+
+let loans = [Loan { principal: 100 }]
+let pnl = loans |>> (fetchIndexRate & fetchFees(5)) |>> calculatePnl
+`,
+			expectedErrors: []string{"type error: argument 2 expected String, got Number"},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
 func TestSemanticAnalysisNamedImports(t *testing.T) {
 	tests := []struct {
 		name          string

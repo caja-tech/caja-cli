@@ -91,6 +91,8 @@ func New(t *lexer.Lexer) *Parser {
 	p.infixParseFuncs[lexer.XOR] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.PIPE] = p.parsePipeExpression
 	p.infixParseFuncs[lexer.SAFE_PIPE] = p.parseSafePipeExpression
+	p.infixParseFuncs[lexer.STREAM_PIPE] = p.parseStreamPipeExpression
+	p.infixParseFuncs[lexer.SAFE_STREAM_PIPE] = p.parseSafeStreamPipeExpression
 
 	p.nextToken()
 	p.nextToken()
@@ -1210,21 +1212,52 @@ func (p *Parser) isAnonymousFunctionLookahead() bool {
 	}
 }
 
-// parseGroupedExpressionOrAnonymousFunction handles parenthesized sub-expressions or anonymous functions.
+// parseGroupedExpressionOrAnonymousFunction handles parenthesized sub-expressions,
+// anonymous functions, or parallel join groups (f1 & f2 & ... & fn) — a
+// fixed-size set of independent function calls meant to be invoked
+// concurrently as a single |>>/?>> stage's input (see JoinGroupExpression).
 func (p *Parser) parseGroupedExpressionOrAnonymousFunction() ast.Expression {
 	if p.isAnonymousFunctionLookahead() {
 		return p.parseAnonymousFunction()
 	}
 
+	token := p.currToken // the '(' token
 	p.nextToken()
 
-	groupedExpression := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+	first := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+
+	if p.peekToken.Type == lexer.AMP {
+		calls := []*ast.CallExpression{asJoinCall(first)}
+		for p.peekToken.Type == lexer.AMP {
+			p.nextToken() // consume '&'
+			p.nextToken() // move to start of next call
+			next := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+			calls = append(calls, asJoinCall(next))
+		}
+		if !p.expectPeek(lexer.RPAREN) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected ')' after join group, got %s", p.currToken.Type))
+			return nil
+		}
+		return &ast.JoinGroupExpression{Token: token, Calls: calls}
+	}
+
 	if !p.expectPeek(lexer.RPAREN) {
 		p.reportError(p.peekToken, fmt.Sprintf("expected ')' after grouped expression, got %s", p.currToken.Type))
 		return nil
 	}
 
-	return groupedExpression
+	return first
+}
+
+// asJoinCall normalizes one member of a parallel join group into a
+// *ast.CallExpression, wrapping a bare function reference (e.g. an
+// identifier or property expression with no explicit call) the same way
+// parseStreamPipeExpressionCommon does for a normal, non-join stage.
+func asJoinCall(expr ast.Expression) *ast.CallExpression {
+	if ce, ok := expr.(*ast.CallExpression); ok {
+		return ce
+	}
+	return &ast.CallExpression{Function: expr}
 }
 
 func (p *Parser) parseAnonymousFunction() ast.Expression {
@@ -1303,7 +1336,12 @@ func (p *Parser) parseAnonymousFunctionParameters() []*ast.Parameter {
 
 // parsePipeExpression rewrites A |> f(B) to f(A, B)
 func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
-	p.nextToken() // Move past '|>'
+	token := p.currToken // The '|>' token
+	p.nextToken()         // Move past '|>'
+
+	if _, ok := left.(*ast.StreamPipeExpression); ok {
+		p.reportError(token, "syntax error: a stream pipe chain (|>>/?>>) cannot feed into a regular pipe (|>) — chain further stream stages or bind the result to a variable first")
+	}
 
 	right := p.parseExpression(lexer.PIPE_PRECEDENCE)
 
@@ -1407,6 +1445,10 @@ func (p *Parser) parseSafePipeExpression(left ast.Expression) ast.Expression {
 	token := p.currToken // The '?>' token
 	p.nextToken() // Move past '?>'
 
+	if _, ok := left.(*ast.StreamPipeExpression); ok {
+		p.reportError(token, "syntax error: a stream pipe chain (|>>/?>>) cannot feed into a regular pipe (?>) — chain further stream stages or bind the result to a variable first")
+	}
+
 	right := p.parseExpression(lexer.PIPE_PRECEDENCE)
 
 	var callExp *ast.CallExpression
@@ -1424,5 +1466,77 @@ func (p *Parser) parseSafePipeExpression(left ast.Expression) ast.Expression {
 		Token: token,
 		Left:  left,
 		Call:  callExp,
+	}
+}
+
+// parseStreamPipeExpression rewrites A |>> f(B) into a StreamPipeExpression
+// with Left=A, Call=f(A, B), Safe=false.
+func (p *Parser) parseStreamPipeExpression(left ast.Expression) ast.Expression {
+	return p.parseStreamPipeExpressionCommon(left, false)
+}
+
+// parseSafeStreamPipeExpression rewrites A ?>> f(B) into a StreamPipeExpression
+// with Left=A, Call=f(A, B), Safe=true.
+func (p *Parser) parseSafeStreamPipeExpression(left ast.Expression) ast.Expression {
+	return p.parseStreamPipeExpressionCommon(left, true)
+}
+
+// parseStreamPipeExpressionCommon implements the shared rewrite logic for both
+// stream pipe variants (|>> and ?>>). It also handles parallel join groups
+// (see JoinGroupExpression): if the parsed right-hand side is a join group,
+// this stage becomes a dangling join stage (Join set, Call nil) that must be
+// consumed by a following stream stage; if `left` is itself such a dangling
+// join stage, this stage instead fuses with it — the join's N results become
+// this stage's Call's first N (synthesized) positional arguments, and the
+// join's own upstream/Safe are carried through as this stage's Left/effective
+// nullability boundary.
+func (p *Parser) parseStreamPipeExpressionCommon(left ast.Expression, safe bool) ast.Expression {
+	token := p.currToken // The '|>>' or '?>>' token
+	p.nextToken()         // Move past the operator
+
+	right := p.parseExpression(lexer.PIPE_PRECEDENCE)
+
+	if joinGroup, ok := right.(*ast.JoinGroupExpression); ok {
+		for _, call := range joinGroup.Calls {
+			call.Arguments = append([]ast.Expression{left}, call.Arguments...)
+		}
+		return &ast.StreamPipeExpression{
+			Token: token,
+			Left:  left,
+			Join:  joinGroup,
+			Safe:  safe,
+		}
+	}
+
+	var callExp *ast.CallExpression
+	if ce, ok := right.(*ast.CallExpression); ok {
+		callExp = ce
+	} else {
+		callExp = &ast.CallExpression{Function: right}
+	}
+
+	if prevJoinStage, ok := left.(*ast.StreamPipeExpression); ok && prevJoinStage.Join != nil && prevJoinStage.Call == nil {
+		// Fuse: this call consumes the pending join's N results as its own
+		// leading arguments. Those N slots are left nil here — analysis and
+		// codegen each fill them in independently with their own synthesized
+		// placeholders — followed by whatever extra curried arguments were
+		// written explicitly at this call site.
+		placeholders := make([]ast.Expression, len(prevJoinStage.Join.Calls))
+		callExp.Arguments = append(placeholders, callExp.Arguments...)
+		return &ast.StreamPipeExpression{
+			Token: token,
+			Left:  prevJoinStage.Left,
+			Join:  prevJoinStage.Join,
+			Call:  callExp,
+			Safe:  prevJoinStage.Safe,
+		}
+	}
+
+	callExp.Arguments = append([]ast.Expression{left}, callExp.Arguments...)
+	return &ast.StreamPipeExpression{
+		Token: token,
+		Left:  left,
+		Call:  callExp,
+		Safe:  safe,
 	}
 }
