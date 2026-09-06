@@ -217,6 +217,10 @@ func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 		return a.analyzeTypeAliasStatement(n)
 	case *ast.TypeConstraintStatement:
 		return a.analyzeTypeConstraintStatement(n)
+	case *ast.UnionStatement:
+		return a.analyzeUnionStatement(n)
+	case *ast.IsExpression:
+		return a.analyzeIsExpression(n)
 	case *ast.FunctionLiteral:
 		return a.analyzeFunctionLiteral(n)
 	case *ast.SafePipeExpression:
@@ -318,6 +322,13 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 // and returns an ARRAY_OBJ symbol with the inferred ElementType.
 func (a *Analyzer) analyzeArrayLiteral(n *ast.ArrayLiteral) symbol.Symbol {
 	if len(n.Elements) == 0 {
+		// An empty array literal has no elements to infer an element type
+		// from; fall back to whatever element type the surrounding context
+		// expects (e.g. a call argument typed [SomeStruct]), the same way
+		// analyzeFunctionLiteral infers untyped anonymous-function params.
+		if expected, ok := a.peekExpectedType().(*symbol.ArraySymbol); ok {
+			return symbol.NewArraySymbol(expected.ElementSymbol())
+		}
 		return symbol.NewArraySymbol(symbol.AnySymbol())
 	}
 
@@ -986,6 +997,80 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 	}
 
 	return constraint
+}
+
+// analyzeUnionStatement resolves each listed variant to an already-declared
+// struct type and registers a UnionSymbol under the union's own name. A
+// union is a compile-time-only label - it has no runtime representation of
+// its own, unlike a struct definition.
+func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
+	if _, exists := a.types[n.Name.Value]; exists {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: type '%s' is already declared", n.Name.Value))
+	}
+
+	variants := make(map[string]*symbol.StructDefSymbol)
+	for _, variantIdent := range n.Variants {
+		variantSym, ok := a.findTypeSymbolInTypesRaw(variantIdent.Value)
+		if !ok {
+			a.reportError(variantIdent.Token, fmt.Sprintf("semantic error: undefined type '%s'", variantIdent.Value))
+			continue
+		}
+		structDef, ok := variantSym.(*symbol.StructDefSymbol)
+		if !ok {
+			a.reportError(variantIdent.Token, fmt.Sprintf("type error: union variant '%s' must be a struct type", variantIdent.Value))
+			continue
+		}
+		if _, dup := variants[structDef.Name]; dup {
+			a.reportError(variantIdent.Token, fmt.Sprintf("semantic error: duplicate union variant '%s'", structDef.Name))
+			continue
+		}
+		variants[structDef.Name] = structDef
+	}
+
+	union := symbol.NewUnionSymbol(n.Name.Value, variants, a.globalEnv.FileName)
+	a.types[n.Name.Value] = union
+	a.nodeSymbols[n.Name] = union
+
+	if n.IsPrivate {
+		if len(a.scopes) > 1 {
+			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
+		} else {
+			a.privates[n.Name.Value] = true
+		}
+	}
+
+	return union
+}
+
+// analyzeIsExpression narrows a union-typed value to one of its listed
+// variants, e.g. `animal is Cat`, resolving to Cat? (nil at runtime if the
+// value isn't actually a Cat).
+func (a *Analyzer) analyzeIsExpression(n *ast.IsExpression) symbol.Symbol {
+	leftSym := a.analyze(n.Left)
+
+	variantSym, ok := a.findTypeSymbolInTypesRaw(n.TypeName)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: undefined type '%s'", n.TypeName))
+		return symbol.AnySymbol()
+	}
+	variantStructDef, ok := variantSym.(*symbol.StructDefSymbol)
+	if !ok {
+		a.reportError(n.Token, fmt.Sprintf("type error: 'is' target '%s' must be a struct type", n.TypeName))
+		return symbol.AnySymbol()
+	}
+
+	if leftSym.Type() != environment.ANY_OBJ {
+		unionSym, ok := leftSym.(*symbol.UnionSymbol)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("type error: 'is' can only be used on a union type, got %s", leftSym.String()))
+			return &symbol.NullableSymbol{Underlying: variantStructDef}
+		}
+		if _, isVariant := unionSym.Variants[n.TypeName]; !isVariant {
+			a.reportError(n.Token, fmt.Sprintf("type error: '%s' is not a variant of union '%s'", n.TypeName, unionSym.Name))
+		}
+	}
+
+	return &symbol.NullableSymbol{Underlying: variantStructDef}
 }
 
 func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.Symbol {

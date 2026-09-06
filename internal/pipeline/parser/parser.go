@@ -83,9 +83,10 @@ func New(t *lexer.Lexer) *Parser {
 	p.infixParseFuncs[lexer.GTEQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.EQ] = p.parseInfixExpression
 	p.infixParseFuncs[lexer.NEQ] = p.parseInfixExpression
+	p.infixParseFuncs[lexer.IS] = p.parseIsExpression
 	p.infixParseFuncs[lexer.LPAREN] = p.parseFunctionCallExpression
 	p.infixParseFuncs[lexer.DOUBLE_COLON] = p.parseTurbofishExpression
-	p.infixParseFuncs[lexer.LBRACE] = p.parseStructLiteral
+	p.infixParseFuncs[lexer.LBRACE] = p.parseBraceInfixExpression
 	p.infixParseFuncs[lexer.LBRACKET] = p.parseIndexExpression
 	p.infixParseFuncs[lexer.DOT] = p.parsePropertyExpression
 	p.infixParseFuncs[lexer.QUESTIONDOT] = p.parsePropertyExpression
@@ -351,6 +352,77 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 	return parameters
 }
 
+// parseBraceInfixExpression is the sole entry point registered for '{' in
+// infix position. If left is a call expression, '{' introduces a trailing
+// block (Kotlin-style DSL sugar: call(args) { x y } -> call(args, [x, y])).
+// Otherwise it's a struct literal (existing behavior), including the
+// existing error for any other left type.
+func (p *Parser) parseBraceInfixExpression(left ast.Expression) ast.Expression {
+	if call, ok := left.(*ast.CallExpression); ok {
+		return p.parseTrailingBlockCall(call)
+	}
+	return p.parseStructLiteral(left)
+}
+
+// parseTrailingBlockCall implements Kotlin-style trailing-block sugar:
+// call(args) { stmt1 stmt2 ... } desugars into call(args, [stmt1, stmt2, ...]).
+// Every line inside the block must be a bare expression statement; the
+// collected expressions become the elements of a new ArrayLiteral appended
+// as the call's final positional argument. p.currToken is the '{' token on
+// entry, per the infixParseFunc convention.
+func (p *Parser) parseTrailingBlockCall(call *ast.CallExpression) ast.Expression {
+	openBrace := p.currToken
+	block := p.parseBlockStatement() // leaves p.currToken on '}' (or EOF)
+
+	elements := make([]ast.Expression, 0, len(block.Statements))
+	for _, stmt := range block.Statements {
+		exprStmt, ok := stmt.(*ast.ExpressionStatement)
+		if !ok {
+			p.reportError(statementToken(stmt, openBrace), fmt.Sprintf("syntax error: only expressions are allowed inside a trailing block, got '%s'", stmt.TokenLiteral()))
+			continue
+		}
+		elements = append(elements, exprStmt.Expression)
+	}
+
+	call.Arguments = append(call.Arguments, &ast.ArrayLiteral{
+		Token:    openBrace,
+		Elements: elements,
+	})
+	call.RParenToken = p.currToken // extend the call's span to the block's closing '}'
+
+	return call
+}
+
+// statementToken returns the token best representing where a statement
+// begins, used for precise diagnostics. Falls back to fallback for any
+// statement kind not explicitly recognized.
+func statementToken(s ast.Statement, fallback lexer.Token) lexer.Token {
+	switch st := s.(type) {
+	case *ast.LetStatement:
+		return st.Token
+	case *ast.ConstStatement:
+		return st.Token
+	case *ast.ReturnStatement:
+		return st.Token
+	case *ast.ImportStatement:
+		return st.Token
+	case *ast.TypeAliasStatement:
+		return st.Token
+	case *ast.TypeConstraintStatement:
+		return st.Token
+	case *ast.AwaitStatement:
+		return st.Token
+	case *ast.AssignStatement:
+		return st.Token
+	case *ast.IndexAssignmentStatement:
+		return st.Token
+	case *ast.PropertyAssignmentStatement:
+		return st.Token
+	default:
+		return fallback
+	}
+}
+
 // parseStructLiteral parses a struct instantiation of the form `MyStruct { a: 1, b: 2 }` or `MyStruct::<Type> { a: 1 }`.
 func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 	var structName string
@@ -438,8 +510,8 @@ func (p *Parser) parseStatement() ast.Statement {
 	if p.currToken.Type == lexer.PRIVATE {
 		isPrivate = true
 		p.nextToken()
-		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST && p.currToken.Type != lexer.DEFINE {
-			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'")
+		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST && p.currToken.Type != lexer.DEFINE && p.currToken.Type != lexer.UNION {
+			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'")
 			return nil
 		}
 	}
@@ -489,6 +561,15 @@ func (p *Parser) parseStatement() ast.Statement {
 			return nil
 		}
 		// Assuming we don't need IsPrivate for DEFINE for now, or add it if necessary.
+		return stmt
+	}
+
+	if p.currToken.Type == lexer.UNION {
+		stmt := p.parseUnionStatement()
+		if stmt == nil {
+			return nil
+		}
+		stmt.IsPrivate = isPrivate
 		return stmt
 	}
 
@@ -723,6 +804,40 @@ func (p *Parser) parseTypeConstraintStatement() *ast.TypeConstraintStatement {
 
 	p.nextToken() // move past COLON to start of expression
 	stmt.Predicate = p.parseExpression(lexer.LOWEST_PRECEDENCE)
+
+	return stmt
+}
+
+// parseUnionStatement parses a union type declaration of the form
+// "union Name = Variant1 | Variant2 | ... | VariantN".
+func (p *Parser) parseUnionStatement() *ast.UnionStatement {
+	stmt := &ast.UnionStatement{Token: p.currToken}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.ASSIGN) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '=', got %s", p.currToken.Type))
+		return nil
+	}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected variant identifier, got %s", p.currToken.Type))
+		return nil
+	}
+	stmt.Variants = append(stmt.Variants, &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal})
+
+	for p.peekToken.Type == lexer.BAR {
+		p.nextToken() // move to '|'
+		if !p.expectPeek(lexer.IDENT) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected variant identifier, got %s", p.currToken.Type))
+			return nil
+		}
+		stmt.Variants = append(stmt.Variants, &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal})
+	}
 
 	return stmt
 }
@@ -1143,6 +1258,23 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	expression.Right = p.parseExpression(precedence)
 
 	return expression
+}
+
+// parseIsExpression parses a union-narrowing check of the form
+// "left is TypeName". Unlike parseInfixExpression, the right-hand side is a
+// bare type name, not a parsed expression, so it is registered separately
+// and reads the identifier literal directly (mirroring how "as" in
+// parseImportStatement and type-signature parsing treat type names as raw
+// strings rather than expressions).
+func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
+	tok := p.currToken
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected type name after 'is', got %s", p.peekToken.Type))
+		return nil
+	}
+
+	return &ast.IsExpression{Token: tok, Left: left, TypeName: p.currToken.Literal}
 }
 
 // parsePropertyExpression parses an object property access, capturing the left-hand

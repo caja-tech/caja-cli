@@ -1,0 +1,48 @@
+import "array"
+
+# The same builder-function DSL as in the other DSL tests.
+type Transition struct {
+	to String
+}
+
+type State struct {
+	name String
+	transitions [Transition]
+}
+
+let transition = fn(to: String) -> Transition {
+	return Transition { to: to }
+}
+
+let state = fn(name: String, transitions: [Transition]) -> State {
+	return State { name: name, transitions: transitions }
+}
+
+# A predicate subtype layered on top of the DSL's own struct type: any State
+# built by the DSL can be refined into a NonEmptyState, but only if it
+# actually satisfies the invariant. This is what lets a DSL author enforce
+# structural rules on the trees their DSL produces, using nothing but the
+# language's existing constrained-type feature.
+define NonEmptyState constraints State with: fn(s: State) -> Boolean {
+	return array.len(s.transitions) > 0
+}
+
+# A DSL-built config that satisfies the constraint...
+let valid: NonEmptyState? = state("Pending") {
+	transition("Approved")
+	transition("Rejected")
+}
+
+# ...and one that doesn't. Because the target type is nullable (?), a failed
+# constraint narrows the value to nil instead of raising an error.
+let invalid: NonEmptyState? = state("Draft") {
+}
+
+let score = fn(v: NonEmptyState?) -> Number {
+	if (v == nil) {
+		return 0
+	}
+	return 1
+}
+
+return score(valid) * 10 + score(invalid)

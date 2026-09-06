@@ -1,0 +1,24 @@
+type Transition struct {
+	label String
+	count Number
+}
+
+type State struct {
+	name String
+	transitions [Transition]
+}
+
+let transition = fn(label: String) -> Transition {
+	return Transition { label: label, count: 1 }
+}
+
+let state = fn(name: String, transitions: [Transition]) -> State {
+	return State { name: name, transitions: transitions }
+}
+
+let s = state("Pending") {
+	transition("submit")
+	transition("cancel")
+}
+
+return s.transitions[0].count + s.transitions[1].count

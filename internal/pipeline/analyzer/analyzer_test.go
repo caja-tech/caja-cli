@@ -193,6 +193,27 @@ let f = fn() -> MyEmpty {
 `,
 			expectedErrors: []string{},
 		},
+		{
+			name: "Union type declaration and variant assignment",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Cat { name: "Tom" }
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Is expression narrows a union to a variant",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Cat { name: "Tom" }
+let cat: Cat? = animal is Cat
+`,
+			expectedErrors: []string{},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -459,6 +480,56 @@ let x = move data # Error
 `,
 			expectedErrors: []string{
 				"semantic error: cannot move constant variable 'data'",
+			},
+		},
+		{
+			name: "Union: non-variant struct assignment rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+type Pig struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Pig { name: "Porky" }
+`,
+			expectedErrors: []string{
+				"cannot assign",
+			},
+		},
+		{
+			name: "Union: 'is' on a non-union type rejected",
+			input: `
+type Cat struct { name String }
+let c = Cat { name: "Tom" }
+let cat: Cat? = c is Cat
+`,
+			expectedErrors: []string{
+				"'is' can only be used on a union type",
+			},
+		},
+		{
+			name: "Union: 'is' with an unlisted variant rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+type Pig struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Cat { name: "Tom" }
+let p: Pig? = animal is Pig
+`,
+			expectedErrors: []string{
+				"is not a variant of union",
+			},
+		},
+		{
+			name: "Union: duplicate union name rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat
+union Animal = Dog
+`,
+			expectedErrors: []string{
+				"is already declared",
 			},
 		},
 	}

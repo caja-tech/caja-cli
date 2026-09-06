@@ -462,6 +462,31 @@ func (ts *TypeConstraintStatement) String() string {
 // TypeAliasStatement represents a top-level type alias declaration
 // (e.g. "type BinaryOp fn(Number, Number): Number"). It holds the "type" token,
 // Name is the new alias identifier, and Signature is the function signature.
+// UnionStatement declares a closed union type as a named set of existing
+// struct type variants, e.g. `union Animal = Cat | Dog | Pig`.
+type UnionStatement struct {
+	Token     lexer.Token // The 'union' token
+	Name      *Identifier
+	Variants  []*Identifier
+	IsPrivate bool
+}
+
+func (us *UnionStatement) statementNode()       {}
+func (us *UnionStatement) TokenLiteral() string { return us.Token.Literal }
+func (us *UnionStatement) String() string {
+	var names []string
+	for _, v := range us.Variants {
+		names = append(names, v.Value)
+	}
+
+	out := ""
+	if us.IsPrivate {
+		out += "private "
+	}
+	out += us.TokenLiteral() + " " + us.Name.String() + " = " + strings.Join(names, " | ")
+	return out
+}
+
 type TypeAliasStatement struct {
 	Token            lexer.Token
 	Name             *Identifier
@@ -568,6 +593,20 @@ func (i *InfixExpression) TokenLiteral() string {
 }
 func (i *InfixExpression) String() string {
 	return "(" + i.Left.String() + " " + i.Operator + " " + i.Right.String() + ")"
+}
+
+// IsExpression narrows a union-typed value to one of its variants, e.g.
+// `animal is Cat`, evaluating to the matching variant or nil.
+type IsExpression struct {
+	Token    lexer.Token // The 'is' token
+	Left     Expression
+	TypeName string
+}
+
+func (ie *IsExpression) expressionNode()      {}
+func (ie *IsExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IsExpression) String() string {
+	return "(" + ie.Left.String() + " is " + ie.TypeName + ")"
 }
 
 // IfExpression is an expression node that represents a conditional branching

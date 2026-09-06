@@ -26,6 +26,23 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Union Types",
+			input: `
+				type Cat struct { name String }
+				type Dog struct { name String }
+				union Animal = Cat | Dog
+				let animal: Animal = Cat { name: "Tom" }
+				let cat: Cat? = animal is Cat
+			`,
+			expected: []string{
+				"type Animal interface{ isAnimal() }",
+				"func (*Cat) isAnimal() {}",
+				"func (*Dog) isAnimal() {}",
+				"var animal Animal = &Cat{\nName: \"Tom\",\n}",
+				"var cat *Cat = func() *Cat { if v, ok := (animal).(*Cat); ok { return v }; return nil }()",
+			},
+		},
+		{
 			name: "Safe Pipeline",
 			input: `
 				type Customer struct { age Number }
