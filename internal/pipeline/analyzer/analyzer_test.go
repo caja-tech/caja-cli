@@ -2093,6 +2093,158 @@ let result = numbers |> filter(isPositive) |>> double
 	runTestScenarios(t, tests)
 }
 
+func TestAsyncAwaitAnalyzer(t *testing.T) {
+	tests := []testScenario{
+		{
+			// Deliberately no `await p` barrier before `unwrap p` here: unwrap
+			// is safe to call directly on its own, without any preceding
+			// await. It carries its own synchronization — see
+			// transpileUnwrapExpression, which compiles it to `<-p.done`
+			// before ever reading `p.val` — so there is no race condition to
+			// guard against. `await` is an independent, optional barrier for
+			// a different purpose (e.g. waiting on several tasks before
+			// deciding to extract any of their values).
+			name: "Valid async/unwrap round trip (no await barrier needed for correctness)",
+			input: `
+let compute = fn() -> Number { return 5 }
+
+let p = async compute()
+let r = unwrap p
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Valid await barrier followed by individual unwraps",
+			input: `
+let compute = fn() -> Number { return 5 }
+
+let p1 = async compute()
+let p2 = async compute()
+let p3 = async compute()
+await p1 & p2 & p3
+let r1 = unwrap p1
+let r2 = unwrap p2
+let r3 = unwrap p3
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Valid single-operand await barrier",
+			input: `
+let compute = fn() -> Number { return 5 }
+
+let p = async compute()
+await p
+let r = unwrap p
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "async/await/unwrap work with const statements too, not just let",
+			input: `
+let compute = fn() -> Number { return 5 }
+
+const p = async compute()
+await p
+const r = unwrap p
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "unwrap on a non-async const value is a semantic error",
+			input: `
+const n = 5
+const r = unwrap n
+`,
+			expectedErrors: []string{"semantic error: 'unwrap' requires an async value, got Number"},
+		},
+		{
+			name: "unwrap on a non-async value is a semantic error",
+			input: `
+let n = 5
+let r = unwrap n
+`,
+			expectedErrors: []string{"semantic error: 'unwrap' requires an async value, got Number"},
+		},
+		{
+			name: "await operand that is not async is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p1 = async compute()
+let n = 5
+await p1 & n
+`,
+			expectedErrors: []string{"semantic error: 'await' operand is not an async value, got Number"},
+		},
+		{
+			name: "unwrap nested inside a larger expression is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p = async compute()
+let x = 1 + unwrap p
+`,
+			expectedErrors: []string{"semantic error: 'unwrap' can only be used as the value of a let/const statement or as a bare statement"},
+		},
+		// The following cases guard against a real bug this design once had:
+		// AsyncSymbol.Type() used to forward to its underlying symbol's type
+		// (mirroring NullableSymbol), which made every Type()-based check in
+		// the analyzer (arithmetic, comparisons, array-literal homogeneity,
+		// explicit let/const types, etc.) blind to the fact that a value was
+		// still an un-unwrapped async handle rather than its eventual value.
+		// That let code like `let p = async computeNum(); let x = p + 1`
+		// type-check as valid Number arithmetic, when the runtime/transpiled
+		// value is actually a task handle — silently bypassing the
+		// synchronization unwrap/await exist to enforce. Fixed by giving
+		// AsyncSymbol its own distinct Type() (environment.ASYNC_OBJ); these
+		// tests make sure it can't regress.
+		{
+			name: "using an async value directly in arithmetic (without unwrap) is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p = async compute()
+let x = p + 1
+`,
+			expectedErrors: []string{"type error: cannot add Async and Number"},
+		},
+		{
+			name: "using an async value directly in a comparison (without unwrap) is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p = async compute()
+let x = p > 0
+`,
+			expectedErrors: []string{"type error: operator '>' requires two Numbers, got Async and Number"},
+		},
+		{
+			name: "assigning an async value to an explicitly non-async let type is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p: Number = async compute()
+`,
+			expectedErrors: []string{"type error: cannot assign async Number to Number"},
+		},
+		{
+			name: "mixing an async value with a plain value in an array literal is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p = async compute()
+let arr = [p, 2]
+`,
+			expectedErrors: []string{"type error: array elements must have the same type, expected Async, got Number"},
+		},
+		{
+			name: "using an async value directly with a unary operator (without unwrap) is a semantic error",
+			input: `
+let compute = fn() -> Number { return 5 }
+let p = async compute()
+let x = -p
+`,
+			expectedErrors: []string{"type error: operator '-' requires a Number, got Async"},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
 func TestJoinGroupAnalyzer(t *testing.T) {
 	tests := []testScenario{
 		{

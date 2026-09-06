@@ -491,6 +491,46 @@ let b = move a |> array.push(4)
 				"append(a, 4.0)",
 			},
 		},
+		{
+			name: "Async/Unwrap basic",
+			input: `
+let compute = fn(n: Number) -> Number { return n * 2 }
+let p = async compute(1)
+let r = unwrap p
+`,
+			expected: []string{
+				"type asyncTask struct",
+				"go func() {",
+				"close(t.done)",
+				"<-(p).done",
+				".val.(float64)",
+			},
+		},
+		{
+			name: "Await join barrier",
+			input: `
+let compute = fn(n: Number) -> Number { return n * 2 }
+let p1 = async compute(1)
+let p2 = async compute(2)
+await p1 & p2
+`,
+			expected: []string{
+				"<-(p1).done",
+				"<-(p2).done",
+			},
+		},
+		{
+			name: "Async/Unwrap work with const statements too, not just let",
+			input: `
+let compute = fn(n: Number) -> Number { return n * 2 }
+const p = async compute(1)
+const r = unwrap p
+`,
+			expected: []string{
+				"asyncTask{done: make(chan struct{})}",
+				".val.(float64)",
+			},
+		},
 	}
 
 	for _, tt := range tests {

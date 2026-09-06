@@ -786,3 +786,58 @@ func (jg *JoinGroupExpression) String() string {
 	}
 	return "(" + strings.Join(parts, " & ") + ")"
 }
+
+// AsyncExpression represents `async <expr>`. The analyzer restricts it to
+// appearing only as the value of a let/const statement or as a bare
+// statement — never nested inside a larger expression — since Right is
+// parsed at the lowest precedence to greedily capture a full trailing pipe
+// chain, which would otherwise make nesting ambiguous. Right is evaluated
+// eagerly (work begins immediately); the produced value is only observable
+// through a later `await`.
+type AsyncExpression struct {
+	Token lexer.Token // The 'async' token
+	Right Expression
+}
+
+func (ae *AsyncExpression) expressionNode()      {}
+func (ae *AsyncExpression) TokenLiteral() string { return ae.Token.Literal }
+func (ae *AsyncExpression) String() string       { return "async " + ae.Right.String() }
+
+// UnwrapExpression represents `unwrap <expr>`, subject to the same
+// positional restriction as AsyncExpression (only legal as the value of a
+// let/const/return statement or as a bare statement). Right must evaluate to
+// an async value; this extracts its underlying value, blocking until the
+// task is done if it isn't already (in the interpreter this is a no-op,
+// since v1 evaluates async work eagerly and serially — see evaluator.go).
+// Kept as a separate keyword from `await` on purpose: `await` is a pure
+// synchronization barrier that never produces a value, while `unwrap` is the
+// only construct that extracts a value out of an async handle.
+type UnwrapExpression struct {
+	Token lexer.Token // The 'unwrap' token
+	Right Expression
+}
+
+func (uw *UnwrapExpression) expressionNode()      {}
+func (uw *UnwrapExpression) TokenLiteral() string { return uw.Token.Literal }
+func (uw *UnwrapExpression) String() string       { return "unwrap " + uw.Right.String() }
+
+// AwaitStatement represents `await p1 & p2 & ... & pn` (one or more
+// '&'-joined operands) as a bare statement: a synchronization barrier that
+// blocks until every listed async value is done, without producing a usable
+// result itself — `await` is never a value, only `unwrap` extracts one (see
+// UnwrapExpression). Individual results are retrieved afterward via separate
+// `unwrap <name>` expressions.
+type AwaitStatement struct {
+	Token     lexer.Token // The 'await' token
+	Pipelines []Expression
+}
+
+func (as *AwaitStatement) statementNode()       {}
+func (as *AwaitStatement) TokenLiteral() string { return as.Token.Literal }
+func (as *AwaitStatement) String() string {
+	var parts []string
+	for _, p := range as.Pipelines {
+		parts = append(parts, p.String())
+	}
+	return "await " + strings.Join(parts, " & ")
+}

@@ -1169,3 +1169,57 @@ func TestMoveKeyword(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+// TestAsyncKeyword confirms that the "async" keyword is correctly tokenized
+// as ASYNC and that its line/column information is accurate.
+func TestAsyncKeyword(t *testing.T) {
+	input := "let p = async b"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier p", Token{IDENT, "p", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 7}},
+		{"Async keyword", Token{ASYNC, "async", 1, 9}},
+		{"Identifier b", Token{IDENT, "b", 1, 15}},
+		{"End of file", Token{EOF, "", 1, 16}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestAwaitKeyword confirms that the "await" keyword is correctly tokenized
+// as AWAIT, and that a bare "await a & b" join-barrier form tokenizes the
+// AWAIT keyword followed by the existing AMP token used for parallel joins.
+func TestAwaitKeyword(t *testing.T) {
+	input := "await a & b"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Await keyword", Token{AWAIT, "await", 1, 1}},
+		{"Identifier a", Token{IDENT, "a", 1, 7}},
+		{"Amp", Token{AMP, "&", 1, 9}},
+		{"Identifier b", Token{IDENT, "b", 1, 11}},
+		{"End of file", Token{EOF, "", 1, 12}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestUnwrapKeyword confirms that the "unwrap" keyword is correctly
+// tokenized as UNWRAP, and that its line/column information is accurate.
+func TestUnwrapKeyword(t *testing.T) {
+	input := "let r = unwrap p"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Let keyword", Token{LET, "let", 1, 1}},
+		{"Identifier r", Token{IDENT, "r", 1, 5}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 7}},
+		{"Unwrap keyword", Token{UNWRAP, "unwrap", 1, 9}},
+		{"Identifier p", Token{IDENT, "p", 1, 16}},
+		{"End of file", Token{EOF, "", 1, 17}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

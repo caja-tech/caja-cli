@@ -32,6 +32,7 @@ type Analyzer struct {
 	unwrappedPipeArgs   map[ast.Node]symbol.Symbol
 	expectedTypeStack   []symbol.Symbol
 	streamStageTypes    map[*ast.StreamPipeExpression]symbol.Symbol
+	topLevelAwaitAsync map[ast.Node]bool
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -52,6 +53,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		unwrappedPipeArgs:   make(map[ast.Node]symbol.Symbol),
 		expectedTypeStack:   make([]symbol.Symbol, 0),
 		streamStageTypes:    make(map[*ast.StreamPipeExpression]symbol.Symbol),
+		topLevelAwaitAsync:  make(map[ast.Node]bool),
 	}
 
 	// Inject Nothing as a global builtin type
@@ -166,6 +168,24 @@ func (a *Analyzer) analyze(node ast.Node) symbol.Symbol {
 	return sym
 }
 
+// analyzeTopLevelValue analyzes an expression that appears directly as the
+// value of a let/const statement or as a bare expression statement — the
+// only positions where `async`/`await` are legal. `async`/`await` are parsed
+// at the lowest precedence so they can greedily capture a trailing pipe
+// chain, which makes them ambiguous if nested inside a larger expression, so
+// that position is rejected as a semantic error (see the *ast.AsyncExpression
+// / *ast.UnwrapExpression cases in analyzeNode). Marking the node here, right
+// before delegating to the normal a.analyze dispatch, is what distinguishes
+// "legal top-level use" from "illegal nested use" without needing to thread
+// a context flag through every other recursive analysis call site.
+func (a *Analyzer) analyzeTopLevelValue(expr ast.Expression) symbol.Symbol {
+	switch expr.(type) {
+	case *ast.AsyncExpression, *ast.UnwrapExpression:
+		a.topLevelAwaitAsync[expr] = true
+	}
+	return a.analyze(expr)
+}
+
 func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 	switch n := node.(type) {
 	case *ast.Program:
@@ -205,6 +225,20 @@ func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 	case *ast.JoinGroupExpression:
 		a.reportError(n.Token, "semantic error: a parallel join group (f & g & h) can only be used as a |>>/?>> stage, immediately followed by another stage that consumes its results")
 		return symbol.AnySymbol()
+	case *ast.AsyncExpression:
+		if !a.topLevelAwaitAsync[n] {
+			a.reportError(n.Token, "semantic error: 'async' can only be used as the value of a let/const statement or as a bare statement")
+			return symbol.AnySymbol()
+		}
+		return a.analyzeAsyncExpression(n)
+	case *ast.UnwrapExpression:
+		if !a.topLevelAwaitAsync[n] {
+			a.reportError(n.Token, "semantic error: 'unwrap' can only be used as the value of a let/const statement or as a bare statement")
+			return symbol.AnySymbol()
+		}
+		return a.analyzeUnwrapExpression(n)
+	case *ast.AwaitStatement:
+		return a.analyzeAwaitStatement(n)
 	case *ast.CallExpression:
 		return a.analyzeCallExpression(n)
 	case *ast.ArrayLiteral:
@@ -589,7 +623,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		if hasExplicitType {
 			a.pushExpectedType(explicitType)
 		}
-		rhsType := a.analyze(n.Value)
+		rhsType := a.analyzeTopLevelValue(n.Value)
 		if hasExplicitType {
 			a.popExpectedType()
 		}
@@ -701,7 +735,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	}
 
 	if n.Value != nil {
-		rhsType := a.analyze(n.Value)
+		rhsType := a.analyzeTopLevelValue(n.Value)
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to %s", rhsType.String(), explicitType.String()))
@@ -819,7 +853,7 @@ func (a *Analyzer) analyzeReturnStatement(n *ast.ReturnStatement) symbol.Symbol 
 	}
 
 	if n.ReturnValue != nil {
-		return a.analyze(n.ReturnValue)
+		return a.analyzeTopLevelValue(n.ReturnValue)
 	}
 	// Return a special token for empty returns so it doesn't match normal types using AnySymbol
 	return symbol.NewBasicSymbol(environment.RETURN_VALUE_OBJ)
@@ -980,7 +1014,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 // analyzeExpressionStatement wraps the analysis of the inner expression.
 func (a *Analyzer) analyzeExpressionStatement(n *ast.ExpressionStatement) symbol.Symbol {
 	if n.Expression != nil {
-		return a.analyze(n.Expression)
+		return a.analyzeTopLevelValue(n.Expression)
 	}
 	return symbol.AnySymbol()
 }
@@ -1465,6 +1499,50 @@ func (a *Analyzer) enforcePurity(node ast.Node, token lexer.Token) {
 	case *ast.IndexExpression:
 		a.enforcePurity(n.Left, token)
 	}
+}
+
+// analyzeAsyncExpression type-checks `async <expr>`, wrapping the analyzed
+// type of Right in an AsyncSymbol. Only reachable (without a semantic error)
+// when n was registered via analyzeTopLevelValue.
+func (a *Analyzer) analyzeAsyncExpression(n *ast.AsyncExpression) symbol.Symbol {
+	underlying := a.analyze(n.Right)
+	return &symbol.AsyncSymbol{Underlying: underlying}
+}
+
+// analyzeUnwrapExpression type-checks `unwrap <expr>`, requiring Right to be
+// an async value and extracting it to its underlying type. This is the only
+// construct that produces a plain value out of an async handle — `await` is
+// a pure synchronization barrier and never does (see analyzeAwaitStatement).
+// Only reachable (without a semantic error) when n was registered via
+// analyzeTopLevelValue.
+func (a *Analyzer) analyzeUnwrapExpression(n *ast.UnwrapExpression) symbol.Symbol {
+	rightSym := a.analyze(n.Right)
+	if asyncSym, ok := rightSym.(*symbol.AsyncSymbol); ok {
+		return asyncSym.Underlying
+	}
+	if rightSym.Type() == environment.ANY_OBJ {
+		return symbol.AnySymbol()
+	}
+	a.reportError(n.Token, fmt.Sprintf("semantic error: 'unwrap' requires an async value, got %s", rightSym.String()))
+	return rightSym
+}
+
+// analyzeAwaitStatement type-checks `await p1 & p2 & ... & pn`, a
+// synchronization barrier requiring every operand to be an async value. It
+// produces no result of its own (the barrier is not assignable) — individual
+// results are retrieved afterward via separate `unwrap <name>` expressions.
+func (a *Analyzer) analyzeAwaitStatement(n *ast.AwaitStatement) symbol.Symbol {
+	for _, p := range n.Pipelines {
+		sym := a.analyze(p)
+		if _, ok := sym.(*symbol.AsyncSymbol); ok {
+			continue
+		}
+		if sym.Type() == environment.ANY_OBJ {
+			continue
+		}
+		a.reportError(n.Token, fmt.Sprintf("semantic error: 'await' operand is not an async value, got %s", sym.String()))
+	}
+	return symbol.AnySymbol()
 }
 
 func (a *Analyzer) analyzeSafePipeExpression(n *ast.SafePipeExpression) symbol.Symbol {
