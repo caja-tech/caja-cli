@@ -2,17 +2,20 @@ package main
 
 import (
 	"caja-cli/internal/file"
-	"caja-cli/internal/pipeline/environment"
+	"caja-cli/internal/pipeline/compiler"
 	"caja-cli/internal/script"
-	"encoding/csv"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
 
-// NewRunCmd creates and returns the 'run' command, which is responsible for parsing and evaluating a .caja script file.
+// NewRunCmd creates and returns the 'run' command, which transpiles a .caja
+// script to Go and runs it via `go run` — giving interpreter-like ergonomics
+// (no binary left behind) while executing through the same compiler backend
+// `caja build` uses, instead of the separate tree-walking interpreter.
 func NewRunCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -42,50 +45,33 @@ func NewRunCmd() (*cobra.Command, error) {
 
 			baseDir := filepath.Dir(filePath)
 
-			program, globalEnv, _, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
+			program, _, a, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
 			if err != nil {
 				return err
 			}
 
-			eval, err := script.Run(program, globalEnv)
+			goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
 			if err != nil {
-				return err
+				return fmt.Errorf("transpilation failed: %w", err)
 			}
 
-			environment.PrintObject(eval)
+			formattedCode, err := format.Source([]byte(goCode))
+			if err != nil {
+				// Fall back to unformatted code if formatting fails
+				formattedCode = []byte(goCode)
+			}
+			goCode = string(formattedCode)
 
 			exportPath, err := cmd.Flags().GetString("export")
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'export' flag: %w", err)
 			}
-			if exportPath != "" && globalEnv.ExportedValues != nil && len(*globalEnv.ExportedValues) > 0 {
-				file, err := os.Create(exportPath)
-				if err != nil {
-					return fmt.Errorf("failed to create export file '%s': %w", exportPath, err)
-				}
-				defer file.Close()
-
-				writer := csv.NewWriter(file)
-				for _, val := range *globalEnv.ExportedValues {
-					var row []string
-					if arr, ok := val.(*environment.Array); ok {
-						for _, elem := range arr.Elements {
-							row = append(row, environment.FormatObject(elem))
-						}
-					} else {
-						row = []string{environment.FormatObject(val)}
-					}
-					if err := writer.Write(row); err != nil {
-						return fmt.Errorf("failed to write to export file '%s': %w", exportPath, err)
-					}
-				}
-				writer.Flush()
-				if err := writer.Error(); err != nil {
-					return fmt.Errorf("failed to flush export file '%s': %w", exportPath, err)
-				}
+			var extraEnv []string
+			if exportPath != "" {
+				extraEnv = append(extraEnv, "CAJA_EXPORT_PATH="+exportPath)
 			}
 
-			return nil
+			return compiler.Run(goCode, extraEnv, os.Stdin, os.Stdout, os.Stderr)
 		},
 	}
 

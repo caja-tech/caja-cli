@@ -8,10 +8,46 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// resolveOutputBin computes the compiled binary's absolute path from the
+// source file path and an optional cross-compilation target (targetOS/
+// targetArch, either or both possibly empty to mean "use the host's own").
+// hostOS/hostArch are passed in rather than read from the runtime package
+// directly so this stays deterministically testable regardless of which
+// machine runs the test. crossCompiling reports whether either target flag
+// was explicitly given, which controls both the "-{os}-{arch}" naming
+// suffix and the "Compiling ... for os/arch" log message — building for the
+// host with no flags must produce byte-identical naming to before these
+// flags existed.
+func resolveOutputBin(filePath, targetOS, targetArch, hostOS, hostArch string) (outBin, resolvedOS, resolvedArch string, crossCompiling bool, err error) {
+	crossCompiling = targetOS != "" || targetArch != ""
+	resolvedOS, resolvedArch = targetOS, targetArch
+	if resolvedOS == "" {
+		resolvedOS = hostOS
+	}
+	if resolvedArch == "" {
+		resolvedArch = hostArch
+	}
+
+	base := filepath.Base(filePath)
+	outName := strings.TrimSuffix(base, filepath.Ext(base))
+	if crossCompiling {
+		outName = fmt.Sprintf("%s-%s-%s", outName, resolvedOS, resolvedArch)
+	}
+	outBin, err = filepath.Abs(filepath.Join(filepath.Dir(filePath), outName))
+	if err != nil {
+		return "", "", "", false, err
+	}
+	if resolvedOS == "windows" && !strings.HasSuffix(outBin, ".exe") {
+		outBin += ".exe"
+	}
+	return outBin, resolvedOS, resolvedArch, crossCompiling, nil
+}
 
 // NewBuildCmd creates and returns the 'build' command, responsible for compiling a .caja script.
 func NewBuildCmd() (*cobra.Command, error) {
@@ -48,7 +84,7 @@ func NewBuildCmd() (*cobra.Command, error) {
 			}
 
 			// Transpile to Go source
-			goCode, err := compiler.Transpile(program, a)
+			goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
 			if err != nil {
 				return fmt.Errorf("transpilation failed: %w", err)
 			}
@@ -61,10 +97,15 @@ func NewBuildCmd() (*cobra.Command, error) {
 			}
 			goCode = string(formattedCode)
 
-			// Determine output binary name
-			base := filepath.Base(filePath)
-			outName := strings.TrimSuffix(base, filepath.Ext(base))
-			outBin, err := filepath.Abs(filepath.Join(filepath.Dir(filePath), outName))
+			targetOS, err := cmd.Flags().GetString("os")
+			if err != nil {
+				return fmt.Errorf("failed to retrieve 'os' flag: %w", err)
+			}
+			targetArch, err := cmd.Flags().GetString("arch")
+			if err != nil {
+				return fmt.Errorf("failed to retrieve 'arch' flag: %w", err)
+			}
+			outBin, resolvedOS, resolvedArch, crossCompiling, err := resolveOutputBin(filePath, targetOS, targetArch, runtime.GOOS, runtime.GOARCH)
 			if err != nil {
 				return err
 			}
@@ -79,13 +120,14 @@ func NewBuildCmd() (*cobra.Command, error) {
 				fmt.Printf("Generated intermediate Go code at %s\n", outGo)
 			}
 
-			// go build automatically adds .exe if building on Windows. 
-			// We can just rely on go build's default behavior.
-			
-			fmt.Printf("Compiling %s...\n", outBin)
+			if crossCompiling {
+				fmt.Printf("Compiling %s for %s/%s...\n", outBin, resolvedOS, resolvedArch)
+			} else {
+				fmt.Printf("Compiling %s...\n", outBin)
+			}
 
 			// Compile the Go code
-			if err := compiler.Compile(goCode, outBin); err != nil {
+			if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: targetOS, GOARCH: targetArch}); err != nil {
 				return err
 			}
 
@@ -96,6 +138,8 @@ func NewBuildCmd() (*cobra.Command, error) {
 
 	cmd.Flags().StringP("file", "f", "", "File path of the script to compile")
 	cmd.Flags().Bool("emit-go", false, "Emit the intermediate Go source code alongside the binary")
+	cmd.Flags().String("os", "", "Target OS for cross-compilation (mirrors Go's GOOS, e.g. linux, darwin, windows); defaults to the host OS when omitted")
+	cmd.Flags().String("arch", "", "Target architecture for cross-compilation (mirrors Go's GOARCH, e.g. amd64, arm64); defaults to the host architecture when omitted")
 
 	return cmd, nil
 }

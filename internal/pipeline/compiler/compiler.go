@@ -8,8 +8,18 @@ import (
 	"path/filepath"
 )
 
+// CompileOptions controls the target platform Compile builds for.
+type CompileOptions struct {
+	// GOOS and GOARCH override the target OS/architecture for cross-
+	// compilation, mirroring Go's own GOOS/GOARCH environment variables
+	// (same names, same accepted values). Left empty, `go build` defaults to
+	// the host platform — unchanged from before these options existed.
+	GOOS   string
+	GOARCH string
+}
+
 // Compile accepts the transpiled Go code and produces the executable binary.
-func Compile(goSource string, outputBin string) error {
+func Compile(goSource string, outputBin string, opts CompileOptions) error {
 	// 1. Obtain toolchain
 	goBin, err := toolchain.EnsureToolchain()
 	if err != nil {
@@ -41,12 +51,18 @@ func Compile(goSource string, outputBin string) error {
 		return fmt.Errorf("go mod init failed: %w", err)
 	}
 
-	// 4. Invoke `go build` targeting host architecture
+	// 4. Invoke `go build`, optionally cross-compiling via GOOS/GOARCH
 	cmdBuild := exec.Command(goBin, "build", "-o", outputBin, mainGoPath)
 	cmdBuild.Dir = tmpDir
 	cmdBuild.Stdout = os.Stdout
 	cmdBuild.Stderr = os.Stderr
 	cmdBuild.Env = append(os.Environ(), "GOROOT="+goroot)
+	if opts.GOOS != "" {
+		cmdBuild.Env = append(cmdBuild.Env, "GOOS="+opts.GOOS)
+	}
+	if opts.GOARCH != "" {
+		cmdBuild.Env = append(cmdBuild.Env, "GOARCH="+opts.GOARCH)
+	}
 
 	if err := cmdBuild.Run(); err != nil {
 		return fmt.Errorf("go build failed: %w", err)

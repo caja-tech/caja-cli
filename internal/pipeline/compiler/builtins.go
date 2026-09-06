@@ -141,7 +141,8 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 		case "export":
 			ctx.usedModules["log_export"] = true
 			ctx.usedModules["json"] = true
-			ctx.usedModules["fmt"] = true
+			ctx.usedModules["csv"] = true
+			enableValueFormatting(ctx)
 			return fmt.Sprintf("caja_log_export(%s)", argStrs[0]), nil
 		case "info", "warn", "error":
 			ctx.usedModules["log_" + fn] = true
@@ -205,6 +206,75 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 }
 
 func injectBuiltinDependencies(ctx *transpileContext, buf *bytes.Buffer) {
+	// caja_panic_location is always injected: main()'s recover handler always
+	// calls it (see Transpile). Go preserves the full panicking goroutine's
+	// stack across a deferred recover, so runtime.Callers here still sees the
+	// frame where the panic actually originated, not just main()'s own frame.
+	// The `//line` directives emitted per-statement rewrite each frame's
+	// reported File/Line to the original .caja source, so the first frame
+	// found here ending in ".caja" is the statement that panicked.
+	buf.WriteString(`
+func caja_panic_location() string {
+	pcs := make([]uintptr, 64)
+	n := runtime.Callers(0, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		frame, more := frames.Next()
+		if strings.HasSuffix(frame.File, ".caja") {
+			return fmt.Sprintf("%s:%d", frame.File, frame.Line)
+		}
+		if !more {
+			break
+		}
+	}
+	return ""
+}
+`)
+
+	if ctx.usedModules["async_panic_guard"] {
+		buf.WriteString(`
+// A panic inside a spawned goroutine (stream-pipe stage, join call, async
+// task) can't be caught by main()'s own recover -- Go only propagates
+// panic/recover within the same goroutine, so an unrecovered goroutine panic
+// crashes the whole process directly. Each such goroutine instead recovers
+// locally and records the failure here (first panic wins; the program is
+// aborting either way, so later ones are dropped) rather than letting the
+// process crash mid-dump or silently finishing with a truncated/wrong
+// result -- closing a channel for cleanup after a recovered panic looks
+// identical to "no more items" to a downstream consumer, so the synchronous
+// code waiting on that result (a pipe's collector loop, unwrap, await, or
+// main() itself as a last-resort check for a fire-and-forget task) must
+// explicitly check caja_check_async_panic before trusting what it received.
+var cajaAsyncPanicMu sync.Mutex
+var cajaAsyncPanicSet bool
+var cajaAsyncPanicMsg string
+
+func caja_report_async_panic(r any) {
+	cajaAsyncPanicMu.Lock()
+	defer cajaAsyncPanicMu.Unlock()
+	if cajaAsyncPanicSet {
+		return
+	}
+	cajaAsyncPanicSet = true
+	if loc := caja_panic_location(); loc != "" {
+		cajaAsyncPanicMsg = fmt.Sprintf("%v\n    at %s", r, loc)
+	} else {
+		cajaAsyncPanicMsg = fmt.Sprintf("%v", r)
+	}
+}
+
+func caja_check_async_panic() {
+	cajaAsyncPanicMu.Lock()
+	set, msg := cajaAsyncPanicSet, cajaAsyncPanicMsg
+	cajaAsyncPanicMu.Unlock()
+	if set {
+		fmt.Fprintln(os.Stderr, "error:", msg)
+		os.Exit(1)
+	}
+}
+`)
+	}
+
 	if ctx.usedModules["array"] {
 		buf.WriteString(`
 func caja_array_push[T any](arr []T, item T) []T { 
@@ -268,9 +338,109 @@ func caja_date_today() time.Time {
 	
 	if ctx.usedModules["log_export"] {
 		buf.WriteString(`
+var cajaExportedValues []any
+
 func caja_log_export(v any) {
 	b, _ := json.Marshal(v)
 	fmt.Println(string(b))
+	cajaExportedValues = append(cajaExportedValues, v)
+}
+
+// caja_flush_export writes every log.export'd value to CAJA_EXPORT_PATH as
+// CSV, one row per value (an array value's elements become that row's
+// columns; anything else becomes a single-column row). Set only by ` + "`caja run`" + `
+// via --export; absent (e.g. a standalone ` + "`caja build`" + ` binary), this is a
+// no-op so caja_log_export's stdout JSON-line output is unaffected.
+func caja_flush_export() {
+	path := os.Getenv("CAJA_EXPORT_PATH")
+	if path == "" || len(cajaExportedValues) == 0 {
+		return
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "failed to create export file:", err)
+		return
+	}
+	defer f.Close()
+
+	w := csv.NewWriter(f)
+	for _, v := range cajaExportedValues {
+		var row []string
+		rv := reflect.ValueOf(v)
+		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+			for i := 0; i < rv.Len(); i++ {
+				row = append(row, caja_format_value(rv.Index(i).Interface()))
+			}
+		} else {
+			row = []string{caja_format_value(v)}
+		}
+		if err := w.Write(row); err != nil {
+			fmt.Fprintln(os.Stderr, "failed to write export file:", err)
+			return
+		}
+	}
+	w.Flush()
+}
+`)
+	}
+	if ctx.usedModules["print_result"] {
+		buf.WriteString(`
+func caja_print_result(v any) {
+	fmt.Println(caja_format_value(v))
+}
+`)
+	}
+	if ctx.usedModules["format_value"] {
+		buf.WriteString(`
+// caja_format_value renders a compiled runtime value the same way the
+// tree-walking interpreter's environment.Object.Inspect() implementations
+// do, so ` + "`caja run`" + `'s auto-printed result and CSV export match the
+// interpreter's output formatting.
+func caja_format_value(v any) string {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Invalid:
+		return "nil"
+	case reflect.Float64, reflect.Float32:
+		return fmt.Sprintf("%g", rv.Float())
+	case reflect.String:
+		return rv.String()
+	case reflect.Bool:
+		return fmt.Sprintf("%t", rv.Bool())
+	case reflect.Slice, reflect.Array:
+		parts := make([]string, rv.Len())
+		for i := range parts {
+			parts[i] = caja_format_value(rv.Index(i).Interface())
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case reflect.Map:
+		keys := rv.MapKeys()
+		sort.Slice(keys, func(i, j int) bool {
+			return fmt.Sprintf("%v", keys[i].Interface()) < fmt.Sprintf("%v", keys[j].Interface())
+		})
+		parts := make([]string, len(keys))
+		for i, k := range keys {
+			parts[i] = fmt.Sprintf("%s: %s", caja_format_value(k.Interface()), caja_format_value(rv.MapIndex(k).Interface()))
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return "nil"
+		}
+		return caja_format_value(rv.Elem().Interface())
+	case reflect.Struct:
+		if t, ok := v.(time.Time); ok {
+			return t.Format("2006-01-02")
+		}
+		rt := rv.Type()
+		parts := make([]string, rv.NumField())
+		for i := 0; i < rv.NumField(); i++ {
+			parts[i] = fmt.Sprintf("%s: %s", rt.Field(i).Name, caja_format_value(rv.Field(i).Interface()))
+		}
+		return rt.Name() + " { " + strings.Join(parts, ", ") + " }"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 `)
 	}

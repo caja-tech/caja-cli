@@ -11,6 +11,17 @@ import (
 	"strings"
 )
 
+// TranspileOptions controls transpiler behavior that must differ between
+// `caja build` (produces a standalone binary) and `caja run` (wants
+// interpreter-like ergonomics from the same generated code).
+type TranspileOptions struct {
+	// PrintResult, when true, prints the value of the program's last
+	// top-level statement if it is an expression statement — mirroring the
+	// tree-walking interpreter's `caja run` behavior. Left false for `caja
+	// build` so standalone binaries keep their existing output.
+	PrintResult bool
+}
+
 type transpileContext struct {
 	analyzer              *analyzer.Analyzer
 	currentFuncName       string
@@ -18,9 +29,107 @@ type transpileContext struct {
 	hasTailCall           bool
 	usedModules           map[string]bool
 	CurrentModulePath     string
-	packageLevelCode      *bytes.Buffer
-	inFunction            bool
-	usesAsync             bool
+	// CurrentSourceFile is the .caja file the statement currently being
+	// transpiled came from — the top-level script, or a resolved imported
+	// module path. Used to emit `//line` directives (see lineDirective) so a
+	// Go panic or compile error reports a .caja file/line instead of a
+	// position in the generated (and later deleted) temp Go file.
+	CurrentSourceFile string
+	packageLevelCode  *bytes.Buffer
+	inFunction        bool
+	usesAsync         bool
+}
+
+// enableValueFormatting marks the shared caja_format_value runtime helper (and
+// the stdlib imports it needs) as required. Used by both the `caja run`
+// final-value auto-print and the `log.export` CSV writer, so a value never
+// needs two independent formatting implementations.
+func enableValueFormatting(ctx *transpileContext) {
+	ctx.usedModules["format_value"] = true
+	ctx.usedModules["reflect"] = true
+	ctx.usedModules["sort"] = true
+	ctx.usedModules["time"] = true
+	ctx.usedModules["fmt"] = true
+	ctx.usedModules["strings"] = true
+}
+
+// statementLine returns the .caja source line a top-level ast.Statement
+// starts at, or 0 if unknown. There's no Pos()/line accessor on the
+// ast.Statement interface itself, so this mirrors transpileStatement's own
+// type switch — every concrete statement type embeds a Token field.
+func statementLine(stmt ast.Statement) int {
+	switch s := stmt.(type) {
+	case *ast.LetStatement:
+		return s.Token.Line
+	case *ast.ConstStatement:
+		return s.Token.Line
+	case *ast.ImportStatement:
+		return s.Token.Line
+	case *ast.ReturnStatement:
+		return s.Token.Line
+	case *ast.AssignStatement:
+		return s.Token.Line
+	case *ast.BlockStatement:
+		return s.Token.Line
+	case *ast.TypeConstraintStatement:
+		return s.Token.Line
+	case *ast.TypeAliasStatement:
+		return s.Token.Line
+	case *ast.ExpressionStatement:
+		return s.Token.Line
+	case *ast.IndexAssignmentStatement:
+		return s.Token.Line
+	case *ast.PropertyAssignmentStatement:
+		return s.Token.Line
+	case *ast.AwaitStatement:
+		return s.Token.Line
+	default:
+		return 0
+	}
+}
+
+// lineDirective returns a Go `//line file:line` compiler directive that
+// remaps the position Go reports (in panics, compile errors, and stack
+// traces) for whatever generated code immediately follows it, back to the
+// original .caja source. Must be written at column 0 with nothing else on
+// its line — the Go compiler silently ignores an indented `//line` comment,
+// so callers must never prepend a tab before this string.
+func lineDirective(file string, line int) string {
+	if file == "" || line <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("//line %s:%d\n", file, line)
+}
+
+// pinRangeToLine re-asserts the same //line directive before every internal
+// line break in code, so a multi-line generated block (stream-pipe/async/
+// unwrap IIFEs, which bypass transpileStatement's per-statement directives
+// entirely) reports as one single .caja source line on panic, regardless of
+// which physical Go line inside it actually panics. Never inserts a
+// directive after the final line — callers glue real trailing code directly
+// onto it with no separating newline in some contexts (e.g. array/call-
+// argument position), and a dangling directive there would either get
+// silently swallowed into a comment or corrupt that trailing syntax.
+func pinRangeToLine(code, file string, line int) string {
+	if file == "" || line <= 0 {
+		return code
+	}
+	lines := strings.Split(code, "\n")
+	if len(lines) < 2 {
+		return code
+	}
+	directive := lineDirective(file, line)
+	var buf strings.Builder
+	for i, l := range lines {
+		if i > 0 {
+			buf.WriteString("\n")
+			if !(i == len(lines)-1 && l == "") {
+				buf.WriteString(directive)
+			}
+		}
+		buf.WriteString(l)
+	}
+	return buf.String()
 }
 
 // ctx.mapSymbolToGoType converts a semantic symbol to a static Go type string.
@@ -143,16 +252,22 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 }
 
 // Transpile walks the AST and returns the equivalent Go source code.
-func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
+func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions) (string, error) {
 	streamPipeCounter = 0
 
 	var bodyBuf bytes.Buffer
 	var pkgLevelBuf bytes.Buffer
 
+	topSourceFile := ""
+	if a.GlobalEnv() != nil {
+		topSourceFile = a.GlobalEnv().FileName
+	}
+
 	ctx := &transpileContext{
-		analyzer:         a,
-		usedModules:      make(map[string]bool),
-		packageLevelCode: &pkgLevelBuf,
+		analyzer:          a,
+		usedModules:       make(map[string]bool),
+		packageLevelCode:  &pkgLevelBuf,
+		CurrentSourceFile: topSourceFile,
 	}
 
 	// Prepend imported custom modules in topological order
@@ -163,6 +278,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 			modAnalyzer := a.GlobalEnv().ModuleAnalyzers[modPath].(*analyzer.Analyzer)
 			ctx.analyzer = modAnalyzer
 			ctx.CurrentModulePath = modPath
+			ctx.CurrentSourceFile = a.GlobalEnv().ModuleFilePaths[modPath]
 			bodyBuf.WriteString(fmt.Sprintf("\t// --- Module: %s ---\n", modPath))
 			for _, stmt := range modAST.Statements {
 				code, err := transpileStatement(stmt, ctx)
@@ -174,11 +290,15 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 				}
 
 				if _, isTypeAlias := stmt.(*ast.TypeAliasStatement); isTypeAlias {
-					ctx.packageLevelCode.WriteString(code + "\n")
+					ctx.packageLevelCode.WriteString(code)
+					ctx.packageLevelCode.WriteString("\n")
 					continue
 				}
 
-				bodyBuf.WriteString("\t" + code + "\n")
+				bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+				bodyBuf.WriteString("\t")
+				bodyBuf.WriteString(code)
+				bodyBuf.WriteString("\n")
 
 				if letStmt, ok := stmt.(*ast.LetStatement); ok {
 					bodyBuf.WriteString(fmt.Sprintf("\t_ = %s\n", sanitizeIdentifier(ctx.CurrentModulePath)+"_"+letStmt.Name.Value))
@@ -190,9 +310,10 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 		}
 	}
 	ctx.CurrentModulePath = ""
+	ctx.CurrentSourceFile = topSourceFile
 	ctx.analyzer = a
 
-	for _, stmt := range program.Statements {
+	for i, stmt := range program.Statements {
 		code, err := transpileStatement(stmt, ctx)
 		if err != nil {
 			return "", err
@@ -202,11 +323,27 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 		}
 
 		if _, isTypeAlias := stmt.(*ast.TypeAliasStatement); isTypeAlias {
-			ctx.packageLevelCode.WriteString(code + "\n")
+			ctx.packageLevelCode.WriteString(code);
+			ctx.packageLevelCode.WriteString("\n")
 			continue
 		}
 
-		bodyBuf.WriteString("\t" + code + "\n")
+		if opts.PrintResult && i == len(program.Statements)-1 {
+			if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
+				if sym, ok := a.GetSymbol(exprStmt.Expression); ok && sym != nil && sym.Type() != environment.NULL_OBJ {
+					ctx.usedModules["print_result"] = true
+					enableValueFormatting(ctx)
+					bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+					bodyBuf.WriteString(fmt.Sprintf("\t_cajaResult := %s\n\tcaja_print_result(_cajaResult)\n", code))
+					continue
+				}
+			}
+		}
+
+		bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+		bodyBuf.WriteString("\t")
+		bodyBuf.WriteString(code)
+		bodyBuf.WriteString("\n")
 
 		// Add dummy usage for variables to prevent "declared but not used" errors
 		if letStmt, ok := stmt.(*ast.LetStatement); ok {
@@ -221,17 +358,29 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 	var finalBuf bytes.Buffer
 	finalBuf.WriteString("package main\n\n")
 
-	if strings.Contains(bodyCode, "fmt.") || ctx.usedModules["fmt"] {
-		finalBuf.WriteString("import \"fmt\"\n")
+	// fmt, os, runtime, and strings are always needed: every generated
+	// main() opens with a recover handler (see below) that uses all four —
+	// runtime.Callers/CallersFrames plus strings.HasSuffix to locate the
+	// .caja source line a panic originated at — regardless of whether the
+	// caja source itself needs them.
+	finalBuf.WriteString("import \"fmt\"\n")
+	finalBuf.WriteString("import \"os\"\n")
+	finalBuf.WriteString("import \"runtime\"\n")
+	finalBuf.WriteString("import \"strings\"\n")
+	if ctx.usedModules["reflect"] {
+		finalBuf.WriteString("import \"reflect\"\n")
+	}
+	if ctx.usedModules["sort"] {
+		finalBuf.WriteString("import \"sort\"\n")
+	}
+	if ctx.usedModules["csv"] {
+		finalBuf.WriteString("import \"encoding/csv\"\n")
 	}
 	if strings.Contains(bodyCode, "math.") || ctx.usedModules["math"] || ctx.usedModules["math_rand"] {
 		finalBuf.WriteString("import \"math\"\n")
 	}
 	if ctx.usedModules["math_rand"] {
 		finalBuf.WriteString("import \"math/rand\"\n")
-	}
-	if ctx.usedModules["strings"] {
-		finalBuf.WriteString("import \"strings\"\n")
 	}
 	if ctx.usedModules["utf8"] {
 		finalBuf.WriteString("import \"unicode/utf8\"\n")
@@ -261,8 +410,32 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 	}
 
 	finalBuf.WriteString("\nfunc main() {\n")
+	// Turn an unhandled runtime panic into a clean, .caja-source-located
+	// message instead of a raw Go stack trace pointing at line numbers
+	// inside a deleted temp dir. caja_panic_location (builtins.go) walks the
+	// preserved panic stack for the first frame whose file the `//line`
+	// directives (emitted per-statement above) mapped to a .caja file.
+	finalBuf.WriteString("\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\tif loc := caja_panic_location(); loc != \"\" {\n\t\t\t\tfmt.Fprintf(os.Stderr, \"error: %v\\n    at %s\\n\", r, loc)\n\t\t\t} else {\n\t\t\t\tfmt.Fprintln(os.Stderr, \"error:\", r)\n\t\t\t}\n\t\t\tos.Exit(1)\n\t\t}\n\t}()\n")
+	if ctx.usedModules["log_export"] {
+		finalBuf.WriteString("\tdefer caja_flush_export()\n")
+	}
 	finalBuf.WriteString(bodyCode)
+	if ctx.usedModules["async_panic_guard"] {
+		// Best-effort safety net for a fire-and-forget async/pipe task that
+		// panicked but was never unwrap/await-ed: not watertight (a task
+		// that's truly never synchronized with could still be abandoned
+		// mid-execution when main returns, same as any non-panicking
+		// goroutine would be), but catches the common case where it finishes
+		// before the rest of the script does.
+		finalBuf.WriteString("\tcaja_check_async_panic()\n")
+	}
 	finalBuf.WriteString("}\n")
+
+	// A `//line` directive stays in effect until the next one or EOF — reset
+	// it here so it doesn't leak into the injected runtime helpers below
+	// (which aren't .caja source) and get misreported as one by
+	// caja_panic_location's suffix check.
+	finalBuf.WriteString(lineDirective("caja-runtime", 1))
 
 	injectBuiltinDependencies(ctx, &finalBuf)
 
@@ -355,6 +528,7 @@ func transpileMemoBinding(name string, fnLit *ast.FunctionLiteral, ctx *transpil
 		currentFunctionParams: paramNames,
 		usedModules:           ctx.usedModules,
 		CurrentModulePath:     ctx.CurrentModulePath,
+		CurrentSourceFile:     ctx.CurrentSourceFile,
 		packageLevelCode:      ctx.packageLevelCode,
 		inFunction:            true,
 	}
@@ -574,7 +748,10 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			if err != nil {
 				return "", err
 			}
-			buf.WriteString("\t" + code + "\n")
+			buf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(bstmt)))
+			buf.WriteString("\t")
+			buf.WriteString(code)
+			buf.WriteString("\n")
 		}
 		buf.WriteString("}")
 		return buf.String(), nil
@@ -1009,6 +1186,7 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			hasTailCall:           false,
 			usedModules:           ctx.usedModules,
 			CurrentModulePath:     ctx.CurrentModulePath,
+			CurrentSourceFile:     ctx.CurrentSourceFile,
 			inFunction:            true,
 		}
 		if fnSym != nil {
@@ -1070,6 +1248,8 @@ var streamPipeCounter int
 // N move on to the next stage before item N+1 finishes the previous one.
 func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileContext) (string, error) {
 	a := ctx.analyzer
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	// Flatten the nested chain (e.Left may itself be a *StreamPipeExpression)
 	// into source-to-sink order.
@@ -1121,6 +1301,7 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 	buf.WriteString(fmt.Sprintf("%s_ch0 := make(chan %s)\n", prefix, elemType))
 	buf.WriteString("go func() {\n")
 	buf.WriteString(fmt.Sprintf("defer close(%s_ch0)\n", prefix))
+	buf.WriteString("defer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\n")
 	buf.WriteString(fmt.Sprintf("for _, v := range %s {\n", sourceStr))
 	buf.WriteString("select {\n")
 	buf.WriteString(fmt.Sprintf("case %s_ch0 <- v:\n", prefix))
@@ -1159,6 +1340,7 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 		buf.WriteString(fmt.Sprintf("%s := make(chan %s)\n", outCh, outElemType))
 		buf.WriteString("go func() {\n")
 		buf.WriteString(fmt.Sprintf("defer close(%s)\n", outCh))
+		buf.WriteString("defer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\n")
 		buf.WriteString(fmt.Sprintf("for v := range %s {\n", prevCh))
 		if stage.Safe {
 			buf.WriteString("if v == nil {\ncontinue\n}\n")
@@ -1177,10 +1359,11 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 	buf.WriteString(fmt.Sprintf("for v := range %s {\n", prevCh))
 	buf.WriteString(fmt.Sprintf("%s_out = append(%s_out, v)\n", prefix, prefix))
 	buf.WriteString("}\n")
+	buf.WriteString("caja_check_async_panic()\n")
 	buf.WriteString(fmt.Sprintf("return %s_out\n", prefix))
 	buf.WriteString("}()")
 
-	return buf.String(), nil
+	return pinRangeToLine(buf.String(), ctx.CurrentSourceFile, e.Token.Line), nil
 }
 
 // writeJoinStageBody generates the per-item body of a fixed-size parallel
@@ -1221,7 +1404,7 @@ func writeJoinStageBody(buf *bytes.Buffer, stage *ast.StreamPipeExpression, ctx 
 		if err != nil {
 			return err
 		}
-		buf.WriteString(fmt.Sprintf("go func() {\ndefer %s.Done()\n%s = %s\n}()\n", wgName, joinVarNames[j], callExpr))
+		buf.WriteString(fmt.Sprintf("go func() {\ndefer %s.Done()\ndefer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\n%s = %s\n}()\n", wgName, joinVarNames[j], callExpr))
 	}
 	buf.WriteString(fmt.Sprintf("%s.Wait()\n", wgName))
 
@@ -1251,16 +1434,23 @@ func writeJoinStageBody(buf *bytes.Buffer, stage *ast.StreamPipeExpression, ctx 
 // the write to `val` that preceded it, so no extra locking is needed.
 func transpileAsyncExpression(node *ast.AsyncExpression, ctx *transpileContext) (string, error) {
 	ctx.usesAsync = true
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	rightExpr, err := transpileExpression(node.Right, ctx, "")
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf(
-		"func() *asyncTask {\nt := &asyncTask{done: make(chan struct{})}\ngo func() {\nt.val = %s\nclose(t.done)\n}()\nreturn t\n}()",
+	// close(t.done) must be deferred (not a plain trailing statement) so a
+	// panic in the task body still wakes up any unwrap/await waiting on it
+	// instead of leaving them blocked forever; the recover-defer is
+	// registered after it so the panic is recorded before that close fires.
+	code := fmt.Sprintf(
+		"func() *asyncTask {\nt := &asyncTask{done: make(chan struct{})}\ngo func() {\ndefer close(t.done)\ndefer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\nt.val = %s\n}()\nreturn t\n}()",
 		rightExpr,
-	), nil
+	)
+	return pinRangeToLine(code, ctx.CurrentSourceFile, node.Token.Line), nil
 }
 
 // transpileUnwrapExpression compiles `unwrap <expr>` to blocking on the
@@ -1271,6 +1461,8 @@ func transpileAsyncExpression(node *ast.AsyncExpression, ctx *transpileContext) 
 // the same task, since closing `done` is repeatable.
 func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext) (string, error) {
 	ctx.usesAsync = true
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	rightExpr, err := transpileExpressionInternal(node.Right, ctx, "")
 	if err != nil {
@@ -1284,10 +1476,15 @@ func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext
 		}
 	}
 
-	return fmt.Sprintf(
-		"func() %s {\n<-(%s).done\nreturn (%s).val.(%s)\n}()",
+	// caja_check_async_panic runs before the type assertion: if the async
+	// task's body panicked, .val is still its zero value, and asserting that
+	// into elemType would panic again with a confusing generic "interface
+	// conversion" error that masks the real one.
+	code := fmt.Sprintf(
+		"func() %s {\n<-(%s).done\ncaja_check_async_panic()\nreturn (%s).val.(%s)\n}()",
 		elemType, rightExpr, rightExpr, elemType,
-	), nil
+	)
+	return pinRangeToLine(code, ctx.CurrentSourceFile, node.Token.Line), nil
 }
 
 // transpileAwaitStatement compiles the WaitGroup-style join barrier
@@ -1298,6 +1495,8 @@ func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext
 // sequential waits achieve the same result.
 func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (string, error) {
 	ctx.usesAsync = true
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	var buf bytes.Buffer
 	for i, p := range node.Pipelines {
@@ -1310,6 +1509,10 @@ func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (s
 		}
 		buf.WriteString(fmt.Sprintf("<-(%s).done", pExpr))
 	}
+	// Checked once, after every pipeline in the barrier has signaled
+	// completion (not per-pipeline) — must wait for all of them before
+	// deciding whether to abort.
+	buf.WriteString("\ncaja_check_async_panic()")
 	return buf.String(), nil
 }
 

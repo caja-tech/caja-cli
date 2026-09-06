@@ -32,6 +32,7 @@ type EnvRegistry struct {
 	Loading         map[string]bool
 	ModuleASTs      map[string]*ast.Program // ASTs parsed during semantic analysis
 	ModuleAnalyzers map[string]interface{}
+	ModuleFilePaths map[string]string // resolved on-disk path per import specifier, for source-location reporting
 	ExportedValues  *[]Object
 	privates        map[string]bool
 	typeConstraints map[string]Object
@@ -63,6 +64,7 @@ func NewEnvironment(baseDir string, fileName string, isModule bool) *Environment
 			ModuleCache:    make(map[string]*Module),
 			Loading:        make(map[string]bool),
 			ModuleASTs:      make(map[string]*ast.Program),
+			ModuleFilePaths: make(map[string]string),
 			ExportedValues:  &exportedValues,
 			privates:        make(map[string]bool),
 			typeConstraints: make(map[string]Object),
@@ -87,6 +89,7 @@ func NewEnclosedEnvironment(outer *Environment) *Environment {
 		env.ModuleCache = outer.ModuleCache
 		env.Loading = outer.Loading
 		env.ModuleASTs = outer.ModuleASTs
+		env.ModuleFilePaths = outer.ModuleFilePaths
 		env.ExportedValues = outer.ExportedValues
 		env.privates = outer.privates
 		env.typeConstraints = outer.typeConstraints

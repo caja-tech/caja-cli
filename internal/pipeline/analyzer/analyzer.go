@@ -837,7 +837,7 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 		a.loading[modPath] = true
 		defer func() { a.loading[modPath] = false }()
 
-		modProgram, err := modules.Load(a.globalEnv.BaseDir, modPath)
+		modProgram, resolvedModPath, err := modules.Load(a.globalEnv.BaseDir, modPath)
 		if err != nil {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: failed to import '%s': %v", modPath, err))
 			return symbol.AnySymbol()
@@ -846,6 +846,10 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 		// Cache the parsed AST for the evaluator to reuse
 		if a.globalEnv != nil {
 			a.globalEnv.ModuleASTs[modPath] = modProgram
+			if a.globalEnv.ModuleFilePaths == nil {
+				a.globalEnv.ModuleFilePaths = make(map[string]string)
+			}
+			a.globalEnv.ModuleFilePaths[modPath] = resolvedModPath
 		}
 
 		modEnv := environment.NewEnvironment(a.globalEnv.BaseDir, modPath, true)

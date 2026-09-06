@@ -612,17 +612,118 @@ const r = unwrap p
 			}
 
 			// Transpile the AST
-			goCode, err := Transpile(program, a)
+			goCode, err := Transpile(program, a, TranspileOptions{})
 			if err != nil {
 				t.Fatalf("Transpile failed: %v", err)
 			}
 
+			// These assertions check codegen shape, not the //line directives
+			// Transpile now interleaves per-statement (see TestLineDirectives)
+			// — strip them so directives inserted mid-block (e.g. inside a
+			// nested function literal's body) don't break a substring match.
+			goCodeNoDirectives := stripLineDirectives(goCode)
+
 			// Verify the expected Go code is present
 			for _, exp := range tt.expected {
-				if !strings.Contains(goCode, exp) {
-					t.Errorf("Expected output to contain:\n%s\n\nGot:\n%s", exp, goCode)
+				if !strings.Contains(goCodeNoDirectives, exp) {
+					t.Errorf("Expected output to contain:\n%s\n\nGot:\n%s", exp, goCodeNoDirectives)
 				}
 			}
 		})
+	}
+}
+
+// stripLineDirectives removes every `//line file:N` directive Transpile
+// interleaves into the generated source (see lineDirective), so tests that
+// assert on codegen shape don't need to account for them appearing mid-block.
+func stripLineDirectives(code string) string {
+	lines := strings.Split(code, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.HasPrefix(line, "//line ") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// TestTranspileEmitsLineDirectives verifies each top-level statement gets a
+// `//line <file>:<N>` directive at its own source line, at column 0 (required
+// for the Go compiler to honor it — see lineDirective) — the mechanism that
+// lets a runtime panic or compile error in the generated binary be reported
+// against the original .caja file/line instead of a deleted temp Go file.
+func TestTranspileEmitsLineDirectives(t *testing.T) {
+	input := "let arr = [1, 2, 3]\nlet x = 1\narr[10]\n"
+	program, _, a, err := script.ParseWithDir(input, "", "panic_test.caja")
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+
+	for _, want := range []string{"//line panic_test.caja:1\n", "//line panic_test.caja:2\n"} {
+		if !strings.Contains(goCode, want) {
+			t.Errorf("expected generated code to contain %q, got:\n%s", want, goCode)
+		}
+	}
+	for _, line := range strings.Split(goCode, "\n") {
+		if strings.Contains(line, "//line ") && line != strings.TrimLeft(line, " \t") {
+			t.Errorf("found a //line directive with leading whitespace (Go compiler silently ignores these): %q", line)
+		}
+	}
+}
+
+// TestPinRangeToLineCoversStreamPipeAndAsync verifies that
+// transpileStreamPipeExpression and transpileAsyncExpression/
+// transpileUnwrapExpression — which build multi-line Go (goroutines,
+// channels, IIFEs) directly and bypass transpileStatement's per-statement
+// directive injection entirely — still get .caja source coverage via
+// pinRangeToLine: the SAME directive, for the expression's own line, must
+// appear more than once (once per internal line break in the generated
+// block), not just once at the top the way a normal statement gets it.
+func TestPinRangeToLineCoversStreamPipeAndAsync(t *testing.T) {
+	input := `
+		let calcDiscount = fn(s: Number, pct: Number) -> Number {
+			return s - (s * pct / 100)
+		}
+		let sales = [100, 200, 300]
+		let result = sales |>> calcDiscount(5)
+
+		let fetchRate = fn(x: Number) -> Number {
+			return x * 0.05
+		}
+		let pending = async fetchRate(10)
+		let rate = unwrap pending
+	`
+	program, _, a, err := script.ParseWithDir(input, "", "pipe_test.caja")
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+
+	// `sales |>> calcDiscount(5)` is on line 6.
+	pipeDirective := "//line pipe_test.caja:6\n"
+	if n := strings.Count(goCode, pipeDirective); n < 2 {
+		t.Errorf("expected %q to be repeated across the stream-pipe block (pinRangeToLine), found %d occurrence(s) in:\n%s", pipeDirective, n, goCode)
+	}
+
+	// `async fetchRate(10)` is on line 11.
+	asyncDirective := "//line pipe_test.caja:11\n"
+	if n := strings.Count(goCode, asyncDirective); n < 2 {
+		t.Errorf("expected %q to be repeated across the async block (pinRangeToLine), found %d occurrence(s) in:\n%s", asyncDirective, n, goCode)
+	}
+
+	// `unwrap pending` is on line 12.
+	unwrapDirective := "//line pipe_test.caja:12\n"
+	if n := strings.Count(goCode, unwrapDirective); n < 2 {
+		t.Errorf("expected %q to be repeated across the unwrap block (pinRangeToLine), found %d occurrence(s) in:\n%s", unwrapDirective, n, goCode)
 	}
 }

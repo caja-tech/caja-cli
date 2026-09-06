@@ -60,25 +60,28 @@ func resolveNodeModule(baseDir string, moduleName string) (string, error) {
 	return "", fmt.Errorf("module '%s' not found in local paths or node_modules", moduleName)
 }
 
-// Load reads and parses a module file, returning its abstract syntax tree (AST).
+// Load reads and parses a module file, returning its abstract syntax tree
+// (AST) along with the resolved on-disk path it was loaded from (which
+// callers need for accurate error/source-location reporting, since it can
+// differ from moduleName+baseDir when resolved via node_modules).
 // It constructs the absolute file path by joining the baseDir, moduleName, and file.EXTENSION.
-func Load(baseDir string, moduleName string) (*ast.Program, error) {
+func Load(baseDir string, moduleName string) (*ast.Program, string, error) {
 	osPath := filepath.FromSlash(moduleName)
-	
+
 	// 1. Try local file resolution first
 	modPath := filepath.Join(baseDir, osPath+file.EXTENSION)
 	binModcontent, err := os.ReadFile(modPath)
-	
+
 	if err != nil {
 		// 2. Try node_modules resolution
 		resolvedModPath, resolveErr := resolveNodeModule(baseDir, moduleName)
 		if resolveErr != nil {
-			return nil, resolveErr
+			return nil, "", resolveErr
 		}
 		modPath = resolvedModPath
 		binModcontent, err = os.ReadFile(modPath)
 		if err != nil {
-			return nil, fmt.Errorf("unable to read module %s at %s: %s", moduleName, modPath, err)
+			return nil, "", fmt.Errorf("unable to read module %s at %s: %s", moduleName, modPath, err)
 		}
 	}
 
@@ -87,8 +90,8 @@ func Load(baseDir string, moduleName string) (*ast.Program, error) {
 	modParser := parser.New(modTknzr)
 	modProgram := modParser.Parse()
 	if modParser.HasErrors() {
-		return nil, fmt.Errorf("failed to parse module %s: %v", moduleName, modParser.Errors())
+		return nil, "", fmt.Errorf("failed to parse module %s: %v", moduleName, modParser.Errors())
 	}
 
-	return modProgram, nil
+	return modProgram, modPath, nil
 }
