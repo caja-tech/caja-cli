@@ -66,6 +66,7 @@ func New(t *lexer.Lexer) *Parser {
 	p.prefixParseFuncs[lexer.BANG] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MINUS] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MOVE] = p.parsePrefixExpression
+	p.prefixParseFuncs[lexer.MEMO] = p.parseMemoExpression
 
 	p.infixParseFuncs = make(map[lexer.TokenType]infixParseFunc)
 	p.infixParseFuncs[lexer.PLUS] = p.parseInfixExpression
@@ -1099,6 +1100,25 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 	p.nextToken()
 	expression.Right = p.parseExpression(lexer.PREFIX_PRECEDENCE)
 	return expression
+}
+
+// parseMemoExpression parses the 'memo' modifier keyword, which must be
+// immediately followed by a function literal. It sets IsMemo on the parsed
+// FunctionLiteral and returns it directly, rather than introducing a
+// separate wrapper AST node.
+func (p *Parser) parseMemoExpression() ast.Expression {
+	memoToken := p.currToken
+	p.nextToken()
+	expr := p.parseExpression(lexer.PREFIX_PRECEDENCE)
+
+	fnLit, ok := expr.(*ast.FunctionLiteral)
+	if !ok {
+		p.reportError(memoToken, "syntax error: 'memo' modifier must be applied to a function literal")
+		return nil
+	}
+
+	fnLit.IsMemo = true
+	return fnLit
 }
 
 // parseInfixExpression builds an InfixExpression node using the already-parsed

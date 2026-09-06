@@ -2244,3 +2244,74 @@ import { max } from "math"
 		})
 	}
 }
+
+// TestSemanticAnalysisMemoModifier verifies the semantic rules enforced on a
+// 'memo'-modified function literal: no generics, must return a value, no
+// function-typed parameters, and 'memo' must be the direct value of a
+// let/const binding. Array/map/struct/nullable-struct parameters are
+// accepted, since the transpiler keys those via a content hash.
+func TestSemanticAnalysisMemoModifier(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "Valid memo on a single Number parameter",
+			input: `let powerTwo = memo fn(n: Number) -> Number { return n * n }`,
+		},
+		{
+			name:  "Valid memo on an array parameter",
+			input: `let sum = memo fn(list: [Number]) -> Number { return 0 }`,
+		},
+		{
+			name: "Valid memo on a nullable struct parameter",
+			input: `
+type Node struct { val Number }
+let f = memo fn(n: Node?) -> Number { return 0 }
+`,
+		},
+		{
+			name:  "Valid memo on a const binding",
+			input: `const powerTwo = memo fn(n: Number) -> Number { return n * n }`,
+		},
+		{
+			name: "Reject memo const not directly bound via let/const",
+			input: `
+let apply = fn(f: fn(Number) -> Number, x: Number) -> Number { return f(x) }
+const result = apply(memo fn(n: Number) -> Number { return n }, 5)
+`,
+			expectedErrors: []string{
+				"semantic error: 'memo' is currently only supported directly on a let/const binding, e.g. let name = memo fn(...) {...}",
+			},
+		},
+		{
+			name:  "Reject function-typed parameter",
+			input: `let f = memo fn(cb: fn(Number) -> Number) -> Number { return cb(1) }`,
+			expectedErrors: []string{
+				"semantic error: memoized function parameter 'cb' has type",
+			},
+		},
+		{
+			name:  "Reject missing return value",
+			input: `let f = memo fn(n: Number) { }`,
+			expectedErrors: []string{
+				"semantic error: memoized function must have a return type",
+			},
+		},
+		{
+			name:  "Reject generic memoized function",
+			input: `let f = memo fn<T>(x: T) -> T { return x }`,
+			expectedErrors: []string{
+				"semantic error: 'memo' does not support generic functions",
+			},
+		},
+		{
+			name: "Reject memo not directly bound via let/const",
+			input: `
+let apply = fn(f: fn(Number) -> Number, x: Number) -> Number { return f(x) }
+let result = apply(memo fn(n: Number) -> Number { return n }, 5)
+`,
+			expectedErrors: []string{
+				"semantic error: 'memo' is currently only supported directly on a let/const binding, e.g. let name = memo fn(...) {...}",
+			},
+		},
+	}
+	runTestScenarios(t, tests)
+}

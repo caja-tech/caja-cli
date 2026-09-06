@@ -16,6 +16,7 @@ type FunctionSymbol struct {
 	paramTypes     []Symbol
 	returnType     Symbol
 	ModuleName     string
+	IsMemo         bool
 }
 
 // NewFunctionSymbol creates and returns a new FunctionSymbol with the specified generic type parameters, arity, parameter types, and return type.

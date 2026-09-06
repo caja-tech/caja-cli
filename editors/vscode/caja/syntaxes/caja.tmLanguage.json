@@ -86,7 +86,7 @@
           "name": "storage.type.caja"
         },
         {
-          "match": "\\b(private)\\b",
+          "match": "\\b(private|memo)\\b",
           "name": "storage.modifier.caja"
         }
       ]
