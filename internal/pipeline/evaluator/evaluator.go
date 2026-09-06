@@ -83,6 +83,12 @@ func Eval(n ast.Node, env *environment.Environment) (environment.Object, error) 
 		return evalPropertyExpression(node, env)
 	case *ast.StructLiteral:
 		return evalStructLiteral(node, env)
+	case *ast.AsyncExpression:
+		return evalAsyncExpression(node, env)
+	case *ast.UnwrapExpression:
+		return evalUnwrapExpression(node, env)
+	case *ast.AwaitStatement:
+		return evalAwaitStatement(node, env)
 	}
 
 	return nil, fmt.Errorf("unknown node type: %T", n)
@@ -1122,4 +1128,56 @@ func evalJoinStageCall(stage *ast.StreamPipeExpression, item environment.Object,
 	}
 
 	return res, err
+}
+
+// evalAsyncExpression evaluates `async <expr>` immediately and eagerly, with
+// no goroutine — v1 gives the interpreter (`caja run`) only source
+// compatibility with `caja build`'s real concurrency, not actual parallel
+// execution, mirroring the same sequential-fake-concurrency approach already
+// used by evalStreamPipeExpression/evalJoinStageCall above. Real interpreter
+// concurrency (and the environment-locking story it would require) is
+// deliberately left as future work.
+func evalAsyncExpression(node *ast.AsyncExpression, env *environment.Environment) (environment.Object, error) {
+	val, err := Eval(node.Right, env)
+	return &environment.Async{Value: val, Err: err}, nil
+}
+
+// evalUnwrapExpression evaluates `unwrap <expr>`: Right must evaluate to an
+// *environment.Async (already fully resolved, since evalAsyncExpression runs
+// eagerly), and its captured value/error are returned directly. This is the
+// only construct that extracts a value out of an async handle — `await` is
+// a pure synchronization barrier and never does (see evalAwaitStatement).
+func evalUnwrapExpression(node *ast.UnwrapExpression, env *environment.Environment) (environment.Object, error) {
+	obj, err := Eval(node.Right, env)
+	if err != nil {
+		return nil, err
+	}
+	task, ok := obj.(*environment.Async)
+	if !ok {
+		return nil, fmt.Errorf("type error: 'unwrap' requires an async value, got %s", obj.Type())
+	}
+	return task.Value, task.Err
+}
+
+// evalAwaitStatement evaluates the WaitGroup-style join barrier
+// `await p1 & p2 & ... & pn`. Since each async binding is already fully
+// resolved by the time it's evaluated (eager, sequential v1 semantics), this
+// simply evaluates each pipeline in order and propagates the first error
+// encountered — consistent with the whole-script-abort error model used
+// everywhere else in the interpreter. It produces no value of its own.
+func evalAwaitStatement(node *ast.AwaitStatement, env *environment.Environment) (environment.Object, error) {
+	for _, p := range node.Pipelines {
+		obj, err := Eval(p, env)
+		if err != nil {
+			return nil, err
+		}
+		task, ok := obj.(*environment.Async)
+		if !ok {
+			return nil, fmt.Errorf("type error: 'await' operand is not an async value, got %s", obj.Type())
+		}
+		if task.Err != nil {
+			return nil, task.Err
+		}
+	}
+	return nil, nil
 }

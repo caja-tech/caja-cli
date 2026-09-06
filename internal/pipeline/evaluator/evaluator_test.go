@@ -1522,6 +1522,96 @@ return result
 	runTestScenarios(t, tests)
 }
 
+// TestAsyncAwaitEvaluator verifies the v1, serial-execution semantics of
+// async/await/unwrap in the tree-walking interpreter: `async <expr>` is
+// evaluated immediately (no goroutine), `unwrap` extracts its value, `await`
+// is a pure barrier producing nothing, and it's safe to `unwrap` the same
+// binding more than once (each already resolved, so re-unwrapping just
+// returns the cached value again).
+func TestAsyncAwaitEvaluator(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "unwrap async x round-trips to x",
+			input: `
+let p = async 5 * 2
+return unwrap p
+`,
+			expected: 10.0,
+		},
+		{
+			name: "await barrier followed by individual unwraps",
+			input: `
+let compute = fn(n: Number) -> Number { return n * 2 }
+
+let p1 = async compute(1)
+let p2 = async compute(2)
+let p3 = async compute(3)
+await p1 & p2 & p3
+let r1 = unwrap p1
+let r2 = unwrap p2
+let r3 = unwrap p3
+return [r1, r2, r3]
+`,
+			expected: "[2, 4, 6]",
+		},
+		{
+			name: "unwrap works without a preceding await barrier too",
+			input: `
+let p = async 5 * 2
+let r1 = unwrap p
+let r2 = unwrap p
+return [r1, r2]
+`,
+			expected: "[10, 10]",
+		},
+		{
+			name: "async/await/unwrap work with const statements too, not just let",
+			input: `
+let compute = fn(n: Number) -> Number { return n * 2 }
+
+const p1 = async compute(1)
+const p2 = async compute(2)
+await p1 & p2
+const r1 = unwrap p1
+const r2 = unwrap p2
+return [r1, r2]
+`,
+			expected: "[2, 4]",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestAsyncAwaitEvaluatorErrors verifies that a runtime error inside an
+// async binding surfaces at the point it is unwrapped or awaited, aborting
+// the script exactly like any other runtime error.
+func TestAsyncAwaitEvaluatorErrors(t *testing.T) {
+	tests := []testErrorScenario{
+		{
+			name: "runtime error inside async surfaces at unwrap",
+			input: `
+let a = [1, 2]
+let p = async a[5]
+let r = unwrap p
+`,
+			expectedError: "runtime error: array index out of bounds",
+		},
+		{
+			name: "runtime error inside an async join branch surfaces at the barrier",
+			input: `
+let a = [1, 2]
+let p1 = async a[5]
+let p2 = async 1
+await p1 & p2
+`,
+			expectedError: "runtime error: array index out of bounds",
+		},
+	}
+
+	runTestErrorScenarios(t, tests)
+}
+
 func TestJoinGroupEvaluator(t *testing.T) {
 	tests := []testScenario{
 		{

@@ -24,6 +24,7 @@ const (
 	TAIL_CALL_OBJ    ObjectType = "TAIL_CALL"
 	MODULE_OBJ       ObjectType = "MODULE"
 	NULL_OBJ         ObjectType = "NULL"
+	ASYNC_OBJ        ObjectType = "Async"
 )
 
 type Object interface {
@@ -192,6 +193,26 @@ func (tc *TailCall) Inspect() string {
 	}
 	out += ")"
 	return out
+}
+
+// Async represents the value produced by an `async <expr>` expression.
+// The tree-walking interpreter evaluates `expr` immediately and eagerly
+// (v1 does not run async work on a real goroutine — see evaluator.go), so
+// Value/Err are already fully populated by the time an Async is created;
+// `await` simply unwraps them. This mirrors the eager-start semantics the
+// Go transpiler uses for real concurrent execution, without introducing any
+// interpreter concurrency-safety concerns for now.
+type Async struct {
+	Value Object
+	Err   error
+}
+
+func (a *Async) Type() ObjectType { return ASYNC_OBJ }
+func (a *Async) Inspect() string {
+	if a.Err != nil {
+		return "async task (error)"
+	}
+	return "async task"
 }
 
 // Module represents an imported script/module.

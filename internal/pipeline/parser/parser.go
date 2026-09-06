@@ -67,6 +67,8 @@ func New(t *lexer.Lexer) *Parser {
 	p.prefixParseFuncs[lexer.MINUS] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MOVE] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MEMO] = p.parseMemoExpression
+	p.prefixParseFuncs[lexer.ASYNC] = p.parseAsyncExpression
+	p.prefixParseFuncs[lexer.UNWRAP] = p.parseUnwrapExpression
 
 	p.infixParseFuncs = make(map[lexer.TokenType]infixParseFunc)
 	p.infixParseFuncs[lexer.PLUS] = p.parseInfixExpression
@@ -488,6 +490,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		}
 		// Assuming we don't need IsPrivate for DEFINE for now, or add it if necessary.
 		return stmt
+	}
+
+	if p.currToken.Type == lexer.AWAIT {
+		return p.parseAwaitStatement()
 	}
 
 	if p.peekToken.Type == lexer.ASSIGN && lexer.IsKeyword(p.currToken.Type) {
@@ -1230,6 +1236,54 @@ func (p *Parser) isAnonymousFunctionLookahead() bool {
 			}
 		}
 	}
+}
+
+// parseAsyncExpression parses `async <expr>`. The operand is parsed at
+// LOWEST_PRECEDENCE (not PREFIX_PRECEDENCE, unlike parsePrefixExpression)
+// so it greedily captures a full trailing pipe chain — PIPE_PRECEDENCE sits
+// below PREFIX_PRECEDENCE, so a tighter binding would stop before |>/|>>.
+// The analyzer, not the parser, restricts where this node may legally
+// appear (see Analyzer.analyzeTopLevelValue).
+func (p *Parser) parseAsyncExpression() ast.Expression {
+	token := p.currToken // the 'async' token
+	p.nextToken()
+	right := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+	return &ast.AsyncExpression{Token: token, Right: right}
+}
+
+// parseUnwrapExpression parses `unwrap <expr>`, used to extract the value
+// out of an async handle — the only construct that does so, since `await`
+// is a pure synchronization barrier that never produces a value (see
+// parseAwaitStatement and ast.AwaitStatement).
+func (p *Parser) parseUnwrapExpression() ast.Expression {
+	token := p.currToken // the 'unwrap' token
+	p.nextToken()
+	right := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+	return &ast.UnwrapExpression{Token: token, Right: right}
+}
+
+// parseAwaitStatement parses a bare 'await' statement: the WaitGroup-style
+// synchronization barrier `await p1 & p2 & ... & pn` (one or more '&'-joined
+// operands, ast.AwaitStatement) — reusing the same unparenthesized
+// '&'-lookahead pattern already proven for parallel join groups
+// (parseGroupedExpressionOrAnonymousFunction), which works because AMP has
+// no registered precedence/infix function and so
+// parseExpression(LOWEST_PRECEDENCE) naturally stops right before it. Await
+// never produces a value — even a single-operand `await p` is a statement,
+// not an expression; use `unwrap p` to extract a value afterward.
+func (p *Parser) parseAwaitStatement() ast.Statement {
+	token := p.currToken // the 'await' token
+	p.nextToken()
+	first := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+
+	pipelines := []ast.Expression{first}
+	for p.peekToken.Type == lexer.AMP {
+		p.nextToken() // consume '&'
+		p.nextToken() // move to start of next operand
+		next := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+		pipelines = append(pipelines, next)
+	}
+	return &ast.AwaitStatement{Token: token, Pipelines: pipelines}
 }
 
 // parseGroupedExpressionOrAnonymousFunction handles parenthesized sub-expressions,

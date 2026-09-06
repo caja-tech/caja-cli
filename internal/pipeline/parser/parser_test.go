@@ -1853,6 +1853,110 @@ func TestJoinGroupDanglingParsesWithoutError(t *testing.T) {
 	}
 }
 
+// TestAsyncExpressionParsing verifies `async <expr>` greedily captures a
+// full trailing pipe chain as its operand (LOWEST_PRECEDENCE, not
+// PREFIX_PRECEDENCE), when used as a let statement's value.
+func TestAsyncExpressionParsing(t *testing.T) {
+	input := "let p = async loans |> resolveCalendar"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	letStmt, ok := program.Statements[0].(*ast.LetStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.LetStatement. got=%T", program.Statements[0])
+	}
+
+	asyncExpr, ok := letStmt.Value.(*ast.AsyncExpression)
+	if !ok {
+		t.Fatalf("letStmt.Value is not *ast.AsyncExpression. got=%T", letStmt.Value)
+	}
+
+	call, ok := asyncExpr.Right.(*ast.CallExpression)
+	if !ok {
+		t.Fatalf("expected async's operand to swallow the whole pipe chain (a CallExpression), got=%T", asyncExpr.Right)
+	}
+	if call.Function.String() != "resolveCalendar" {
+		t.Errorf("expected pipe-desugared call to resolveCalendar, got %s", call.Function.String())
+	}
+}
+
+// TestUnwrapExpressionParsing verifies `unwrap <expr>` parses correctly as a
+// let statement's value — this is the only construct that extracts a value
+// out of an async handle (`await` is a pure synchronization barrier and
+// never produces one, see TestAwaitStatementParsing).
+func TestUnwrapExpressionParsing(t *testing.T) {
+	input := "let r = unwrap pipeline"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	letStmt, ok := program.Statements[0].(*ast.LetStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.LetStatement. got=%T", program.Statements[0])
+	}
+
+	unwrapExpr, ok := letStmt.Value.(*ast.UnwrapExpression)
+	if !ok {
+		t.Fatalf("letStmt.Value is not *ast.UnwrapExpression. got=%T", letStmt.Value)
+	}
+	if ident, ok := unwrapExpr.Right.(*ast.Identifier); !ok || ident.Value != "pipeline" {
+		t.Fatalf("expected unwrap's operand to be identifier 'pipeline', got %T", unwrapExpr.Right)
+	}
+}
+
+// TestAwaitStatementParsing verifies the bare, unparenthesized
+// WaitGroup-style join barrier `await p1 & p2 & p3` parses as a single
+// *ast.AwaitStatement (a statement, never an assignable expression — await
+// never produces a value, only unwrap does).
+func TestAwaitStatementParsing(t *testing.T) {
+	input := "await p1 & p2 & p3"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	stmt, ok := program.Statements[0].(*ast.AwaitStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.AwaitStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Pipelines) != 3 {
+		t.Fatalf("expected 3 joined pipelines, got %d", len(stmt.Pipelines))
+	}
+	wantNames := []string{"p1", "p2", "p3"}
+	for i, p := range stmt.Pipelines {
+		ident, ok := p.(*ast.Identifier)
+		if !ok || ident.Value != wantNames[i] {
+			t.Errorf("pipeline %d: expected identifier %s, got %v", i, wantNames[i], p)
+		}
+	}
+}
+
+// TestAwaitStatementSingleOperand verifies a bare `await <expr>` statement
+// (no '&') still parses as an *ast.AwaitStatement with exactly one pipeline
+// — a valid, if degenerate, single-operand synchronization barrier.
+func TestAwaitStatementSingleOperand(t *testing.T) {
+	input := "await pipeline"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	stmt, ok := program.Statements[0].(*ast.AwaitStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.AwaitStatement. got=%T", program.Statements[0])
+	}
+	if len(stmt.Pipelines) != 1 {
+		t.Fatalf("expected 1 pipeline, got %d", len(stmt.Pipelines))
+	}
+	if ident, ok := stmt.Pipelines[0].(*ast.Identifier); !ok || ident.Value != "pipeline" {
+		t.Fatalf("expected pipeline operand to be identifier 'pipeline', got %T", stmt.Pipelines[0])
+	}
+}
+
 func TestNamedImportStatement(t *testing.T) {
 	tests := []struct {
 		input           string

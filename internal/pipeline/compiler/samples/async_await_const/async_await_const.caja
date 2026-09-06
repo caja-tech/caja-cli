@@ -1,0 +1,22 @@
+type Loan struct { principal Number }
+
+let fetchIndexRate = fn(loan: Loan) -> Number {
+    return loan.principal * 0.05
+}
+
+let fetchFees = fn(loan: Loan) -> Number {
+    return 10
+}
+
+const loan = Loan { principal: 100 }
+
+const ratePipeline = async fetchIndexRate(loan)
+const feesPipeline = async fetchFees(loan)
+
+await ratePipeline & feesPipeline
+
+const rate = unwrap ratePipeline
+const fees = unwrap feesPipeline
+const pnl = rate + fees
+
+return 0
