@@ -20,6 +20,7 @@ type transpileContext struct {
 	CurrentModulePath     string
 	packageLevelCode      *bytes.Buffer
 	inFunction            bool
+	usesAsync             bool
 }
 
 // ctx.mapSymbolToGoType converts a semantic symbol to a static Go type string.
@@ -42,6 +43,15 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 			return underlyingType
 		}
 		return "*" + underlyingType
+	}
+	if _, ok := sym.(*symbol.AsyncSymbol); ok {
+		// AsyncSymbol.Type() forwards to its underlying symbol (like
+		// NullableSymbol above), so this check must also happen before the
+		// generic sym.Type() switch below. asyncTask stores its value as
+		// `any` internally (see transpileAsyncExpression), so every async
+		// value shares this one non-generic Go type regardless of its
+		// underlying element type.
+		return "*asyncTask"
 	}
 	if arrSym, ok := sym.(*symbol.ArraySymbol); ok {
 		elType := ctx.mapSymbolToGoType(arrSym.ElementSymbol())
@@ -253,6 +263,23 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 
 	injectBuiltinDependencies(ctx, &finalBuf)
 
+	// asyncTask is the runtime representation of an async/await value. Value is
+	// stored as any (rather than a distinct monomorphized struct per element
+	// type) and type-asserted back at each await site, since the analyzer
+	// already guarantees the assertion is safe. Completion is signaled by
+	// closing done, not by sending on it, so a task can be awaited more than
+	// once (e.g. once inside a WaitGroup-style join barrier, then again
+	// individually) — receiving from a closed channel never blocks and can be
+	// done any number of times.
+	if ctx.usesAsync {
+		finalBuf.WriteString(`
+type asyncTask struct {
+	done chan struct{}
+	val  any
+}
+`)
+	}
+
 	if needsTime {
 		finalBuf.WriteString(`
 func parseDate(s string) time.Time {
@@ -362,6 +389,8 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			return "", err
 		}
 		return val, nil
+	case *ast.AwaitStatement:
+		return transpileAwaitStatement(s, ctx)
 	case *ast.IndexAssignmentStatement:
 		left, err := transpileExpression(s.Left, ctx, "")
 		if err != nil {
@@ -710,6 +739,10 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		return fmt.Sprintf("func(_val %s) %s { if _val != nil { return %s }; return nil }(%s)", leftGoType, resultGoType, callExpr, leftExpr), nil
 	case *ast.StreamPipeExpression:
 		return transpileStreamPipeExpression(e, ctx)
+	case *ast.AsyncExpression:
+		return transpileAsyncExpression(e, ctx)
+	case *ast.UnwrapExpression:
+		return transpileUnwrapExpression(e, ctx)
 	case *ast.CallExpression:
 		if prop, ok := e.Function.(*ast.PropertyExpression); ok {
 			objSym, _ := a.GetSymbol(prop.Object)
@@ -1069,6 +1102,79 @@ func writeJoinStageBody(buf *bytes.Buffer, stage *ast.StreamPipeExpression, ctx 
 	buf.WriteString(fmt.Sprintf("out := %s\n", callExpr))
 
 	return nil
+}
+
+// transpileAsyncExpression compiles `async <expr>` to an IIFE that starts a
+// goroutine immediately (eager start) and returns a pointer to a shared
+// asyncTask. Completion is signaled by closing the `done` channel rather
+// than sending the value over it, because closing (unlike a single-value
+// send) can be observed by any number of receives — required so that a
+// binding can be awaited more than once (e.g. once inside a
+// `await p1 & p2 & p3` barrier and again individually afterward). Go's
+// memory model guarantees a receive that observes the close happens-after
+// the write to `val` that preceded it, so no extra locking is needed.
+func transpileAsyncExpression(node *ast.AsyncExpression, ctx *transpileContext) (string, error) {
+	ctx.usesAsync = true
+
+	rightExpr, err := transpileExpression(node.Right, ctx, "")
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf(
+		"func() *asyncTask {\nt := &asyncTask{done: make(chan struct{})}\ngo func() {\nt.val = %s\nclose(t.done)\n}()\nreturn t\n}()",
+		rightExpr,
+	), nil
+}
+
+// transpileUnwrapExpression compiles `unwrap <expr>` to blocking on the
+// task's completion signal and type-asserting the cached value back to its
+// known element type. This is the only construct that extracts a value out
+// of an async handle — `await` is a pure synchronization barrier and never
+// does (see transpileAwaitStatement). Safe to call any number of times on
+// the same task, since closing `done` is repeatable.
+func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext) (string, error) {
+	ctx.usesAsync = true
+
+	rightExpr, err := transpileExpressionInternal(node.Right, ctx, "")
+	if err != nil {
+		return "", err
+	}
+
+	elemType := "any"
+	if sym, ok := ctx.analyzer.GetSymbol(node); ok {
+		if t := ctx.mapSymbolToGoType(sym); t != "" {
+			elemType = t
+		}
+	}
+
+	return fmt.Sprintf(
+		"func() %s {\n<-(%s).done\nreturn (%s).val.(%s)\n}()",
+		elemType, rightExpr, rightExpr, elemType,
+	), nil
+}
+
+// transpileAwaitStatement compiles the WaitGroup-style join barrier
+// `await p1 & p2 & ... & pn` to sequential blocking waits on each task's
+// completion signal, values discarded (this form produces no result — see
+// ast.AwaitStatement). No sync.WaitGroup is needed: every async binding
+// already started its own goroutine at creation (eager start), so the
+// sequential waits achieve the same result.
+func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (string, error) {
+	ctx.usesAsync = true
+
+	var buf bytes.Buffer
+	for i, p := range node.Pipelines {
+		pExpr, err := transpileExpressionInternal(p, ctx, "")
+		if err != nil {
+			return "", err
+		}
+		if i > 0 {
+			buf.WriteString("\n")
+		}
+		buf.WriteString(fmt.Sprintf("<-(%s).done", pExpr))
+	}
+	return buf.String(), nil
 }
 
 func getOrderedModules(p *ast.Program, asts map[string]*ast.Program) []string {

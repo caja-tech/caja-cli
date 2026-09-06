@@ -614,7 +614,7 @@ func TestCompletion(t *testing.T) {
 			text: "let myVar = 10\nmyVar",
 			line: 1,
 			col:  5,
-			expectedLabels: []string{"let", "fn", "myVar"},
+			expectedLabels: []string{"let", "fn", "async", "await", "unwrap", "myVar"},
 			missingLabels:  []string{"otherVar"},
 		},
 		{
