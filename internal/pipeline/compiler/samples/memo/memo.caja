@@ -1,0 +1,68 @@
+import "array"
+import "log"
+
+type Trade struct {
+    price Number
+}
+
+let totalPrice = memo fn(trades: [Trade]) -> Number {
+    if (array.len(trades) == 0) {
+        return 0
+    }
+    return array.head(trades).price + totalPrice(array.tail(trades))
+}
+
+let powerTwo = memo fn(n: Number) -> Number {
+    return n ^ 2
+}
+
+let fib = memo fn(n: Number) -> Number {
+    if (n < 2) {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+
+let fact = memo fn(n: Number, acc: Number) -> Number {
+    if (n == 0) {
+        return acc
+    }
+    return fact(n - 1, acc * n)
+}
+
+let sum = memo fn(list: [Number]) -> Number {
+    if (array.len(list) == 0) {
+        return 0
+    }
+    return array.head(list) + sum(array.tail(list))
+}
+
+const cubeOf = memo fn(n: Number) -> Number {
+    return n * n * n
+}
+
+let a = powerTwo(4)
+let b = powerTwo(4)
+log.info("powerTwo(4) x2:", a)
+log.info("powerTwo(4) x2:", b)
+
+let fibResult = fib(30)
+log.info("fib(30):", fibResult)
+
+let bigFact = fact(1000000, 1)
+log.info("fact(1000000,1) computed:", true)
+
+let sum1 = sum([1, 2, 3, 4, 5])
+let sum2 = sum([1, 2, 3, 4, 5])
+log.info("sum([1..5]) x2:", sum1)
+log.info("sum([1..5]) x2:", sum2)
+
+let total1 = totalPrice([Trade { price: 10 }, Trade { price: 20 }])
+let total2 = totalPrice([Trade { price: 10 }, Trade { price: 20 }])
+log.info("totalPrice(equal-content, distinct struct pointers) x2:", total1)
+log.info("totalPrice(equal-content, distinct struct pointers) x2:", total2)
+
+const cube1 = cubeOf(3)
+const cube2 = cubeOf(3)
+log.info("cubeOf(3) via const binding x2:", cube1)
+log.info("cubeOf(3) via const binding x2:", cube2)

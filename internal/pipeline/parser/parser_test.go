@@ -2052,3 +2052,86 @@ func TestNamedImportStatementErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestMemoModifierParsing verifies that 'memo' is parsed as a prefix modifier
+// on a function literal, setting IsMemo, in both let and const bindings.
+func TestMemoModifierParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Memo let statement",
+			input:    "let powerTwo = memo fn(n: Number) -> Number { return n * n }",
+			expected: "let powerTwo = memo fn(n: Number) -> Number { ... }",
+		},
+		{
+			name:     "Memo const statement",
+			input:    "const sum = memo fn(list: [Number]) -> Number { return 0 }",
+			expected: "const sum = memo fn(list: [Number]) -> Number { ... }",
+		},
+	}
+
+	runTestScenarios(t, tests)
+
+	// Confirm IsMemo is actually set on the parsed FunctionLiteral node, not
+	// just reflected in the rendered String().
+	tknzr := lexer.New("let powerTwo = memo fn(n: Number) -> Number { return n * n }")
+	p := New(tknzr)
+	program := p.Parse()
+	checkParseErrors(t, p)
+
+	letStmt, ok := program.Statements[0].(*ast.LetStatement)
+	if !ok {
+		t.Fatalf("expected *ast.LetStatement, got %T", program.Statements[0])
+	}
+	fnLit, ok := letStmt.Value.(*ast.FunctionLiteral)
+	if !ok {
+		t.Fatalf("expected *ast.FunctionLiteral, got %T", letStmt.Value)
+	}
+	if !fnLit.IsMemo {
+		t.Errorf("expected IsMemo to be true")
+	}
+}
+
+// TestMemoModifierErrors verifies that 'memo' produces a syntax error when
+// applied to anything other than a function literal.
+func TestMemoModifierErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name:          "Memo on number literal",
+			input:         "let x = memo 5",
+			expectedError: "syntax error: 'memo' modifier must be applied to a function literal",
+		},
+		{
+			name:          "Memo on identifier",
+			input:         "let x = memo y",
+			expectedError: "syntax error: 'memo' modifier must be applied to a function literal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for %q, but got none", tt.input)
+			}
+
+			found := false
+			for _, err := range errors {
+				if strings.Contains(err, tt.expectedError) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected error mentioning %q, got: %v", tt.expectedError, errors)
+			}
+		})
+	}
+}

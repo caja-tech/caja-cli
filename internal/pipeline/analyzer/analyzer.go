@@ -32,6 +32,7 @@ type Analyzer struct {
 	unwrappedPipeArgs   map[ast.Node]symbol.Symbol
 	expectedTypeStack   []symbol.Symbol
 	streamStageTypes    map[*ast.StreamPipeExpression]symbol.Symbol
+	memoBindingAllowed  bool
 	topLevelAwaitAsync map[ast.Node]bool
 }
 
@@ -383,6 +384,12 @@ func (a *Analyzer) analyzeMapLiteral(n *ast.MapLiteral) symbol.Symbol {
 // registers its parameters, checks its body's return type against the declared
 // return type, and verifies that the function guarantees a return if needed.
 func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol {
+	// Captured immediately: analyzing the body below may recurse into nested
+	// let/const statements that flip a.memoBindingAllowed for their own
+	// values, so it must not be read again after the body has been analyzed.
+	wasBoundAsMemo := a.memoBindingAllowed
+	a.memoBindingAllowed = false
+
 	expectedType := a.peekExpectedType()
 	var expectedFnType *symbol.FunctionSymbol
 	if expectedType != nil {
@@ -476,7 +483,49 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	for _, p := range n.Parameters {
 		paramNames = append(paramNames, p.Name)
 	}
-	return symbol.NewFunctionSymbol("", "", paramNames, n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
+	fnSymbol := symbol.NewFunctionSymbol("", "", paramNames, n.TypeParameters, len(n.Parameters), paramTypes, expectedReturnSymbol)
+
+	if n.IsMemo {
+		fnSymbol.IsMemo = true
+		a.validateMemoFunction(n, wasBoundAsMemo, paramNames, paramTypes, expectedReturnSymbol)
+	}
+
+	return fnSymbol
+}
+
+// validateMemoFunction enforces the semantic rules for a 'memo'-modified
+// function literal: it must not be generic, must return a value, every
+// parameter must be usable as a cache key (function-typed parameters are
+// rejected — fmt formats a func value as its address, which the transpiler's
+// hashed-key fallback can't use meaningfully; nullable struct parameters are
+// fine, since Go's fmt dereferences struct pointers by content), and 'memo'
+// must appear directly as the value of a let/const binding.
+func (a *Analyzer) validateMemoFunction(n *ast.FunctionLiteral, boundAsLetOrConst bool, paramNames []string, paramTypes []symbol.Symbol, returnType symbol.Symbol) {
+	if !boundAsLetOrConst {
+		a.reportError(n.Token, "semantic error: 'memo' is currently only supported directly on a let/const binding, e.g. let name = memo fn(...) {...}")
+	}
+
+	if len(n.TypeParameters) > 0 {
+		a.reportError(n.Token, "semantic error: 'memo' does not support generic functions")
+	}
+
+	isNothing := returnType == nil
+	if def, ok := returnType.(*symbol.StructDefSymbol); ok && def.Name == "Nothing" {
+		isNothing = true
+	}
+	if isNothing {
+		a.reportError(n.Token, "semantic error: memoized function must have a return type")
+	}
+
+	for i, pt := range paramTypes {
+		name := ""
+		if i < len(paramNames) {
+			name = paramNames[i]
+		}
+		if _, isFn := pt.(*symbol.FunctionSymbol); isFn {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: memoized function parameter '%s' has type '%s' which cannot be used as a cache key", name, pt.String()))
+		}
+	}
 }
 
 // analyzeStructLiteral validates the fields of a struct instantiation
@@ -623,7 +672,11 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		if hasExplicitType {
 			a.pushExpectedType(explicitType)
 		}
+		if fnLit, ok := n.Value.(*ast.FunctionLiteral); ok && fnLit.IsMemo {
+			a.memoBindingAllowed = true
+		}
 		rhsType := a.analyzeTopLevelValue(n.Value)
+		a.memoBindingAllowed = false
 		if hasExplicitType {
 			a.popExpectedType()
 		}
@@ -735,7 +788,11 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	}
 
 	if n.Value != nil {
+		if fnLit, ok := n.Value.(*ast.FunctionLiteral); ok && fnLit.IsMemo {
+			a.memoBindingAllowed = true
+		}
 		rhsType := a.analyzeTopLevelValue(n.Value)
+		a.memoBindingAllowed = false
 		if hasExplicitType {
 			if !explicitType.Equals(rhsType) && rhsType.Type() != environment.NULL_OBJ && rhsType.Type() != environment.ANY_OBJ {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot assign %s to %s", rhsType.String(), explicitType.String()))

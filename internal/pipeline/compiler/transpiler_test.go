@@ -93,6 +93,16 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Power operator",
+			input: `
+				let result = 2 ^ 10
+			`,
+			expected: []string{
+				"var result float64 = math.Pow(2.0, 10.0)",
+				"import \"math\"",
+			},
+		},
+		{
 			name: "Variable assignment",
 			input: `
 				let x = 10
@@ -489,6 +499,66 @@ let b = move a |> array.push(4)
 `,
 			expected: []string{
 				"append(a, 4.0)",
+			},
+		},
+		{
+			name: "Memoized Function",
+			input: `
+				let powerTwo = memo fn(n: Number) -> Number {
+					return n * n
+				}
+				let val = powerTwo(4)
+			`,
+			expected: []string{
+				"var _memo_powerTwo sync.Map",
+				"var powerTwo func(n float64) float64",
+				"var powerTwo_impl func(n float64) float64",
+				"key := n",
+				"if v, ok := _memo_powerTwo.Load(key); ok {",
+				"return v.(float64)",
+				"result := powerTwo_impl(n)",
+				"_memo_powerTwo.Store(key, result)",
+				"powerTwo_impl = func(n float64) float64 {",
+				"import \"sync\"",
+			},
+		},
+		{
+			name: "Memoized Function via const",
+			input: `
+				const powerTwo = memo fn(n: Number) -> Number {
+					return n * n
+				}
+				const val = powerTwo(4)
+			`,
+			expected: []string{
+				"var _memo_powerTwo sync.Map",
+				"var powerTwo func(n float64) float64",
+				"var powerTwo_impl func(n float64) float64",
+				"key := n",
+				"if v, ok := _memo_powerTwo.Load(key); ok {",
+				"return v.(float64)",
+				"result := powerTwo_impl(n)",
+				"_memo_powerTwo.Store(key, result)",
+				"powerTwo_impl = func(n float64) float64 {",
+			},
+		},
+		{
+			name: "Memoized Function With Array Parameter",
+			input: `
+				import "array"
+				let sum = memo fn(list: [Number]) -> Number {
+					if (array.len(list) == 0) {
+						return 0
+					}
+					return array.head(list) + sum(array.tail(list))
+				}
+				let val = sum([1, 2, 3])
+			`,
+			expected: []string{
+				"key := caja_memo_hash(list)",
+				"func caja_memo_hash(v any) uint64 {",
+				"import \"hash/fnv\"",
+				"import \"encoding/json\"",
 			},
 		},
 		{

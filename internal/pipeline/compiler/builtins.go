@@ -295,6 +295,31 @@ func caja_log_error(msg string, args any) {
 }
 `)
 	}
+
+	if ctx.usedModules["fnv"] {
+		buf.WriteString(`
+// caja_memo_hash builds a fixed-size cache key for a memoized function
+// parameter that isn't natively comparable (arrays, maps, structs), by
+// streaming a JSON encoding of its contents through a 64-bit FNV-1a hash
+// instead of materializing a full string. JSON encoding is used instead of
+// fmt formatting because fmt only dereferences a pointer value at the top
+// level (e.g. a lone *Node prints as &{...}) — a pointer nested inside a
+// slice or map (e.g. []*Node, which is how Caja compiles an array of struct
+// instances) prints as its raw address instead, which would silently hash
+// by identity rather than content. encoding/json dereferences pointers
+// recursively at any depth, so two equal-content struct slices always hash
+// the same regardless of which underlying pointers they hold.
+// Known limitation: a 64-bit hash is not guaranteed collision-free, so two
+// distinct values could in principle hash to the same key; the odds are
+// negligible for realistic workloads and this is accepted deliberately
+// rather than paying for a verify-on-hit check on every cache lookup.
+func caja_memo_hash(v any) uint64 {
+	h := fnv.New64a()
+	json.NewEncoder(h).Encode(v)
+	return h.Sum64()
+}
+`)
+	}
 }
 
 func transpileBuiltinProperty(module string, prop string, ctx *transpileContext) (string, error) {

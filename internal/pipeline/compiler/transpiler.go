@@ -242,8 +242,11 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 	if ctx.usedModules["strconv"] {
 		finalBuf.WriteString("import \"strconv\"\n")
 	}
-	if strings.Contains(bodyCode, "sync.") {
+	if strings.Contains(bodyCode, "sync.") || ctx.usedModules["sync"] {
 		finalBuf.WriteString("import \"sync\"\n")
+	}
+	if ctx.usedModules["fnv"] {
+		finalBuf.WriteString("import \"hash/fnv\"\n")
 	}
 
 	needsTime := false
@@ -304,10 +307,136 @@ func hasDateSymbol(node ast.Node, a *analyzer.Analyzer) bool {
 	return false // Simplified for brevity
 }
 
+// comparableGoTypes are the Go types produced by mapSymbolToGoType that are
+// already valid map/sync.Map keys on their own. Anything else (slices, maps,
+// struct pointers) is hashed into a uint64 via caja_memo_hash instead.
+var comparableGoTypes = map[string]bool{
+	"float64":   true,
+	"string":    true,
+	"bool":      true,
+	"time.Time": true,
+}
+
+// transpileMemoBinding emits a memoized function bound via `let`/`const` as
+// two predeclared local closures: `name` is the caching wrapper (checks and
+// populates a package-level sync.Map keyed on the arguments), and
+// `name_impl` holds the original function body. Both are predeclared before
+// either is assigned so they can safely reference each other and anything
+// else in scope — needed for recursive memoized functions (e.g. Fibonacci)
+// and for closures over outer variables, since neither can be a real
+// package-level Go func (see the memoization plan for why).
+func transpileMemoBinding(name string, fnLit *ast.FunctionLiteral, ctx *transpileContext) (string, error) {
+	a := ctx.analyzer
+	sym, _ := a.GetSymbol(fnLit)
+	fnSym, _ := sym.(*symbol.FunctionSymbol)
+
+	var params []string
+	var paramNames []string
+	var paramGoTypes []string
+	for i, param := range fnLit.Parameters {
+		pt := "any"
+		if fnSym != nil && i < len(fnSym.ParamTypes()) {
+			if t := ctx.mapSymbolToGoType(fnSym.ParamTypes()[i]); t != "" {
+				pt = t
+			}
+		}
+		params = append(params, fmt.Sprintf("%s %s", param.Name, pt))
+		paramNames = append(paramNames, param.Name)
+		paramGoTypes = append(paramGoTypes, pt)
+	}
+
+	retType := ""
+	if fnSym != nil && fnSym.ReturnType() != nil && fnSym.ReturnType().Type() != environment.NULL_OBJ {
+		retType = ctx.mapSymbolToGoType(fnSym.ReturnType())
+	}
+
+	fnCtx := &transpileContext{
+		analyzer:              a,
+		currentFunctionParams: paramNames,
+		usedModules:           ctx.usedModules,
+		CurrentModulePath:     ctx.CurrentModulePath,
+		packageLevelCode:      ctx.packageLevelCode,
+		inFunction:            true,
+	}
+	if fnSym != nil {
+		fnCtx.currentFuncName = fnSym.Name
+	}
+
+	body, err := transpileStatement(fnLit.Body, fnCtx)
+	if err != nil {
+		return "", err
+	}
+	if fnCtx.hasTailCall {
+		body = fmt.Sprintf("{\nfor %s\n}", body)
+	}
+
+	wrapperName := prefixIdentifier(ctx, name)
+	implName := wrapperName + "_impl"
+	cacheVar := "_memo_" + wrapperName
+
+	sig := fmt.Sprintf("func(%s)", strings.Join(params, ", "))
+	if retType != "" {
+		sig += " " + retType
+	}
+
+	keyParts := make([]string, len(paramNames))
+	keyFieldTypes := make([]string, len(paramNames))
+	for i, pn := range paramNames {
+		if comparableGoTypes[paramGoTypes[i]] {
+			keyParts[i] = pn
+			keyFieldTypes[i] = paramGoTypes[i]
+		} else {
+			keyParts[i] = fmt.Sprintf("caja_memo_hash(%s)", pn)
+			keyFieldTypes[i] = "uint64"
+			ctx.usedModules["fnv"] = true
+			ctx.usedModules["json"] = true
+		}
+	}
+
+	var keyExpr string
+	switch len(keyParts) {
+	case 0:
+		keyExpr = "struct{}{}"
+	case 1:
+		keyExpr = keyParts[0]
+	default:
+		var fields []string
+		for i := range keyParts {
+			fields = append(fields, fmt.Sprintf("F%d %s", i, keyFieldTypes[i]))
+		}
+		keyExpr = fmt.Sprintf("struct{ %s }{ %s }", strings.Join(fields, "; "), strings.Join(keyParts, ", "))
+	}
+
+	if ctx.packageLevelCode != nil {
+		ctx.packageLevelCode.WriteString(fmt.Sprintf("var %s sync.Map\n", cacheVar))
+	}
+	ctx.usedModules["sync"] = true
+
+	var out bytes.Buffer
+	out.WriteString(fmt.Sprintf("var %s %s\n", wrapperName, sig))
+	out.WriteString(fmt.Sprintf("var %s %s\n", implName, sig))
+	out.WriteString(fmt.Sprintf("%s = %s {\n", wrapperName, sig))
+	out.WriteString(fmt.Sprintf("key := %s\n", keyExpr))
+	out.WriteString(fmt.Sprintf("if v, ok := %s.Load(key); ok {\n", cacheVar))
+	out.WriteString(fmt.Sprintf("return v.(%s)\n", retType))
+	out.WriteString("}\n")
+	out.WriteString(fmt.Sprintf("result := %s(%s)\n", implName, strings.Join(paramNames, ", ")))
+	out.WriteString(fmt.Sprintf("%s.Store(key, result)\n", cacheVar))
+	out.WriteString("return result\n")
+	out.WriteString("}\n")
+	out.WriteString(fmt.Sprintf("%s = %s %s", implName, sig, body))
+
+	return out.String(), nil
+}
+
 func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, error) {
 	a := ctx.analyzer
 	switch s := stmt.(type) {
 	case *ast.LetStatement:
+		if fnLit, ok := s.Value.(*ast.FunctionLiteral); ok && fnLit.IsMemo {
+			return transpileMemoBinding(s.Name.Value, fnLit, ctx)
+		}
+
 		sym, ok := a.GetSymbol(s)
 		varType := ""
 		if ok {
@@ -329,6 +458,10 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		return fmt.Sprintf("%s := %s", prefixIdentifier(ctx, s.Name.Value), val), nil
 
 	case *ast.ConstStatement:
+		if fnLit, ok := s.Value.(*ast.FunctionLiteral); ok && fnLit.IsMemo {
+			return transpileMemoBinding(s.Name.Value, fnLit, ctx)
+		}
+
 		sym, ok := a.GetSymbol(s)
 		varType := ""
 		if ok {
@@ -690,6 +823,9 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		}
 		if e.Operator == "%" {
 			return fmt.Sprintf("math.Mod(%s, %s)", left, right), nil
+		}
+		if e.Operator == "^" {
+			return fmt.Sprintf("math.Pow(%s, %s)", left, right), nil
 		}
 		return fmt.Sprintf("(%s %s %s)", left, e.Operator, right), nil
 	case *ast.SafePipeExpression:

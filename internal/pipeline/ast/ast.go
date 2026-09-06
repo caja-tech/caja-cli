@@ -152,12 +152,17 @@ type FunctionLiteral struct {
 	Parameters     []*Parameter
 	ReturnType     string
 	Body           *BlockStatement
+	IsMemo         bool
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
 func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
 func (fl *FunctionLiteral) String() string {
-	out := fl.Token.Literal
+	out := ""
+	if fl.IsMemo {
+		out += "memo "
+	}
+	out += fl.Token.Literal
 
 	if len(fl.TypeParameters) > 0 {
 		out += "<" + strings.Join(fl.TypeParameters, ", ") + ">"
