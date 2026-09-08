@@ -1687,6 +1687,11 @@ func TestIsExpressionParsing(t *testing.T) {
 			input:    "let cat: Cat? = animal is Cat",
 			expected: "let cat: Cat? = (animal is Cat)",
 		},
+		{
+			name:     "Is expression with module-qualified type name",
+			input:    "animal is animals.Cat",
+			expected: "(animal is animals.Cat)",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -1694,8 +1699,9 @@ func TestIsExpressionParsing(t *testing.T) {
 
 func TestIsExpressionErrors(t *testing.T) {
 	tests := []string{
-		"animal is",     // Missing type name
-		"animal is 123", // Non-identifier after 'is'
+		"animal is",         // Missing type name
+		"animal is 123",     // Non-identifier after 'is'
+		"animal is animals.", // Missing type name after '.'
 	}
 
 	for _, input := range tests {

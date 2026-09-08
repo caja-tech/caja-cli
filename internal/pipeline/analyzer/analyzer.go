@@ -18,7 +18,8 @@ import (
 type Analyzer struct {
 	ctx                 context.Context
 	scopes              []map[string]ScopeEntry
-	types               map[string]symbol.Symbol
+	types               []map[string]symbol.Symbol
+	functionBoundaries  []int
 	diagnosticErrors    []ast.DiagnosticError
 	nodeSymbols         map[ast.Node]symbol.Symbol
 	nodeDefinitions     map[ast.Node]lexer.Token
@@ -41,7 +42,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 	globalScope := make(map[string]ScopeEntry)
 	analyzer := &Analyzer{
 		scopes:              []map[string]ScopeEntry{globalScope},
-		types:               make(map[string]symbol.Symbol),
+		types:               []map[string]symbol.Symbol{make(map[string]symbol.Symbol)},
 		diagnosticErrors:    make([]ast.DiagnosticError, 0),
 		nodeSymbols:         make(map[ast.Node]symbol.Symbol),
 		nodeDefinitions:     make(map[ast.Node]lexer.Token),
@@ -58,7 +59,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 	}
 
 	// Inject Nothing as a global builtin type
-	analyzer.types["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol), "")
+	analyzer.types[0]["Nothing"] = symbol.NewStructDefSymbol("Nothing", nil, make(map[string]symbol.StructFieldSymbol), "")
 
 	return analyzer
 }
@@ -308,7 +309,7 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 			}
 		}
 	}
-	for name, sym := range a.types {
+	for name, sym := range a.types[0] {
 		types[name] = sym
 		if a.privates[name] {
 			privates[name] = true
@@ -409,11 +410,12 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 		}
 	}
 
+	a.pushFunctionBoundary()
 	a.pushScope()
 	a.functionDepth++
 
 	for _, tParam := range n.TypeParameters {
-		a.types[tParam] = symbol.NewGenericSymbol(tParam)
+		a.declareType(tParam, symbol.NewGenericSymbol(tParam))
 	}
 
 	var paramTypes []symbol.Symbol
@@ -443,9 +445,9 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 
 	actualReturnSymbol := a.analyze(n.Body)
 
-	a.functionDepth--
-	a.popScope()
-
+	// Resolve the return type (which may reference n.TypeParameters, e.g.
+	// fn<T>(x: T) -> T) before popping the scope those type parameters were
+	// registered into - popScope() also clears that scope's type registry.
 	var expectedReturnSymbol symbol.Symbol
 	if n.ReturnType != "" {
 		resolvedReturn, ok := a.findTypeSymbolInTypes(n.ReturnType)
@@ -456,6 +458,10 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	} else if expectedFnType != nil {
 		expectedReturnSymbol = expectedFnType.ReturnType()
 	}
+
+	a.functionDepth--
+	a.popScope()
+	a.popFunctionBoundary()
 
 	if expectedReturnSymbol == nil {
 		if actualReturnSymbol != nil && actualReturnSymbol.Type() != environment.RETURN_VALUE_OBJ {
@@ -484,10 +490,6 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 				a.reportError(n.Token, fmt.Sprintf("type error: function declared to return %s, but body returns %s", expectedReturnSymbol.Type(), actualReturnSymbol.Type()))
 			}
 		}
-	}
-
-	for _, tParam := range n.TypeParameters {
-		delete(a.types, tParam)
 	}
 
 	var paramNames []string
@@ -597,16 +599,37 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 	return symbol.NewStructInstanceSymbol(structDef)
 }
 
+// checkNameAvailable reports a semantic error if name is already bound as a
+// type (declared via type/define/union) or as a variable/constant/import
+// within the current function's own scope chain (or, at the top level, the
+// whole module). It's called by every declaration kind (let, const, type,
+// define, union) so that no declaration can silently redeclare or shadow a
+// name already claimed by any of the others - types and variables share
+// one namespace. The search deliberately stops at the current function's
+// boundary rather than walking into an enclosing function or the module
+// scope: since Cajá functions are pure and can never read or mutate
+// anything declared outside them, reusing an outer name inside a function
+// is never actually ambiguous. Returns true if name is free to declare.
+func (a *Analyzer) checkNameAvailable(tok lexer.Token, name string) bool {
+	if a.typeDeclaredInCurrentFunctionScope(name) {
+		a.reportError(tok, fmt.Sprintf("semantic error: '%s' is already declared as a type", name))
+		return false
+	}
+	if entry, exists := a.findVarSymbolInCurrentFunctionScope(name); exists {
+		if entry.IsImport {
+			a.reportError(tok, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", name))
+		} else {
+			a.reportError(tok, fmt.Sprintf("semantic error: variable '%s' is already declared", name))
+		}
+		return false
+	}
+	return true
+}
+
 // analyzeLetStatement checks for variable redeclarations and registers the
 // newly declared variable in the current scope with its analyzed type.
 func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
-	if entry, exists := a.findVarSymbolInScope(n.Name.Value); exists {
-		if entry.IsImport {
-			a.reportError(n.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", n.Name.Value))
-		} else {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
-		}
-	}
+	a.checkNameAvailable(n.Token, n.Name.Value)
 
 	var valType symbol.Symbol
 	var hasExplicitType bool
@@ -626,7 +649,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		for _, tParam := range fnNode.TypeParameters {
-			a.types[tParam] = symbol.NewGenericSymbol(tParam)
+			a.declareType(tParam, symbol.NewGenericSymbol(tParam))
 		}
 
 		var expectedFnType *symbol.FunctionSymbol
@@ -675,7 +698,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 
 		for _, tParam := range fnNode.TypeParameters {
-			delete(a.types, tParam)
+			a.deleteType(tParam)
 		}
 	}
 
@@ -720,13 +743,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 // analyzeConstStatement checks for variable redeclarations and registers the
 // newly declared constant in the current scope with its analyzed type.
 func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
-	if entry, exists := a.findVarSymbolInScope(n.Name.Value); exists {
-		if entry.IsImport {
-			a.reportError(n.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", n.Name.Value))
-		} else {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' is already declared", n.Name.Value))
-		}
-	}
+	a.checkNameAvailable(n.Token, n.Name.Value)
 
 	var expectedFnType *symbol.FunctionSymbol
 	if n.ValueType != "" {
@@ -739,7 +756,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 
 	if fnNode, ok := n.Value.(*ast.FunctionLiteral); ok {
 		for _, tParam := range fnNode.TypeParameters {
-			a.types[tParam] = symbol.NewGenericSymbol(tParam)
+			a.declareType(tParam, symbol.NewGenericSymbol(tParam))
 		}
 
 		var paramTypes []symbol.Symbol
@@ -778,7 +795,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 
 		for _, tParam := range fnNode.TypeParameters {
-			delete(a.types, tParam)
+			a.deleteType(tParam)
 		}
 	}
 
@@ -972,6 +989,9 @@ func (a *Analyzer) analyzeBlockStatement(n *ast.BlockStatement) symbol.Symbol {
 // analyzeTypeAliasStatement resolves the parameter and return types for a type alias
 // and registers the resulting function signature in the analyzer's type registry.
 func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement) symbol.Symbol {
+	a.requireTopLevel(n.Token, "define")
+	a.checkNameAvailable(n.Token, n.Name.Value)
+
 	baseType, ok := a.findTypeSymbolInTypes(n.BaseType.Value)
 	if !ok {
 		a.reportError(n.BaseType.Token, fmt.Sprintf("semantic error: base type '%s' is not declared", n.BaseType.Value))
@@ -979,7 +999,7 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 	}
 
 	constraint := symbol.NewConstraintSymbol(n.Name.Value, baseType, n.Predicate)
-	a.types[n.Name.Value] = constraint
+	a.declareType(n.Name.Value, constraint)
 	a.nodeSymbols[n.BaseType] = baseType
 	a.nodeSymbols[n.Name] = constraint
 
@@ -999,14 +1019,30 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 	return constraint
 }
 
+// requireTopLevel reports a semantic error if a type-introducing statement
+// (type/define/union) appears anywhere other than a module's top level.
+// Standardized across all three: a function-scoped type would only ever be
+// usable within that one function, which cuts against the very reason
+// these declarations exist in Cajá - building DSL trees whose types are
+// shared between a builder function and a separate evaluator function.
+// Union has the added, harder constraint that it cannot work locally at
+// all (it compiles to a Go interface plus per-variant methods, and Go does
+// not allow method declarations inside a function body), so this rule
+// keeps every type-introducing declaration to one consistent shape rather
+// than carving out an exception per statement kind.
+func (a *Analyzer) requireTopLevel(tok lexer.Token, keyword string) {
+	if len(a.scopes) > 1 {
+		a.reportError(tok, fmt.Sprintf("semantic error: '%s' can only be declared at the top level of a module", keyword))
+	}
+}
+
 // analyzeUnionStatement resolves each listed variant to an already-declared
 // struct type and registers a UnionSymbol under the union's own name. A
 // union is a compile-time-only label - it has no runtime representation of
 // its own, unlike a struct definition.
 func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
-	if _, exists := a.types[n.Name.Value]; exists {
-		a.reportError(n.Token, fmt.Sprintf("semantic error: type '%s' is already declared", n.Name.Value))
-	}
+	a.requireTopLevel(n.Token, "union")
+	a.checkNameAvailable(n.Token, n.Name.Value)
 
 	variants := make(map[string]*symbol.StructDefSymbol)
 	for _, variantIdent := range n.Variants {
@@ -1020,15 +1056,20 @@ func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
 			a.reportError(variantIdent.Token, fmt.Sprintf("type error: union variant '%s' must be a struct type", variantIdent.Value))
 			continue
 		}
+		if len(structDef.TypeParameters) > 0 {
+			a.reportError(variantIdent.Token, fmt.Sprintf("type error: union variant '%s' cannot be a generic struct type", variantIdent.Value))
+			continue
+		}
 		if _, dup := variants[structDef.Name]; dup {
 			a.reportError(variantIdent.Token, fmt.Sprintf("semantic error: duplicate union variant '%s'", structDef.Name))
 			continue
 		}
 		variants[structDef.Name] = structDef
+		a.nodeSymbols[variantIdent] = structDef
 	}
 
 	union := symbol.NewUnionSymbol(n.Name.Value, variants, a.globalEnv.FileName)
-	a.types[n.Name.Value] = union
+	a.declareType(n.Name.Value, union)
 	a.nodeSymbols[n.Name] = union
 
 	if n.IsPrivate {
@@ -1065,7 +1106,11 @@ func (a *Analyzer) analyzeIsExpression(n *ast.IsExpression) symbol.Symbol {
 			a.reportError(n.Token, fmt.Sprintf("type error: 'is' can only be used on a union type, got %s", leftSym.String()))
 			return &symbol.NullableSymbol{Underlying: variantStructDef}
 		}
-		if _, isVariant := unionSym.Variants[n.TypeName]; !isVariant {
+		// Key by the resolved struct's own (unqualified) name, not the raw
+		// TypeName string - n.TypeName may be module-qualified (e.g.
+		// "animals.Cat") while UnionSymbol.Variants is always keyed by the
+		// bare struct name, matching how StructDefSymbol.Name is stored.
+		if _, isVariant := unionSym.Variants[variantStructDef.Name]; !isVariant {
 			a.reportError(n.Token, fmt.Sprintf("type error: '%s' is not a variant of union '%s'", n.TypeName, unionSym.Name))
 		}
 	}
@@ -1074,11 +1119,14 @@ func (a *Analyzer) analyzeIsExpression(n *ast.IsExpression) symbol.Symbol {
 }
 
 func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.Symbol {
+	a.requireTopLevel(n.Token, "type")
+	a.checkNameAvailable(n.Token, n.Name.Value)
+
 	var aliasedSymbol symbol.Symbol
 
 	// Temporarily register TypeParameters into the registry to support recursive lookups (e.g. fn(T) -> T)
 	for _, tp := range n.TypeParameters {
-		a.types[tp] = symbol.NewGenericSymbol(tp)
+		a.declareType(tp, symbol.NewGenericSymbol(tp))
 	}
 
 	if n.Signature != nil {
@@ -1111,7 +1159,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 		aliasedSymbol = symbol.NewStructDefSymbol(n.Name.Value, n.TypeParameters, fields, a.globalEnv.FileName)
 
 		// Pre-register the struct in the type registry to allow recursive definitions
-		a.types[n.Name.Value] = aliasedSymbol
+		a.declareType(n.Name.Value, aliasedSymbol)
 
 		for _, field := range n.StructDefinition.Fields {
 			if _, exists := fields[field.Name.Value]; exists {
@@ -1137,10 +1185,10 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 
 	// Clean up temporary TypeParameters
 	for _, tp := range n.TypeParameters {
-		delete(a.types, tp)
+		a.deleteType(tp)
 	}
 
-	a.types[n.Name.Value] = aliasedSymbol
+	a.declareType(n.Name.Value, aliasedSymbol)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {

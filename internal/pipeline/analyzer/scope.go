@@ -24,14 +24,103 @@ func (a *Analyzer) GlobalScope() map[string]ScopeEntry {
 	return make(map[string]ScopeEntry)
 }
 
-// pushScope creates a new inner scope and pushes it onto the scope stack.
+// pushScope creates a new inner variable and type scope and pushes both onto
+// their respective stacks (kept in lockstep, so a.types always has the same
+// depth as a.scopes). This gives type declarations (type/define/union) real
+// lexical scoping: a type declared inside a block is only visible there and
+// in its children, and is cleaned up - not just shadowed - once the block
+// is popped.
 func (a *Analyzer) pushScope() {
 	a.scopes = append(a.scopes, make(map[string]ScopeEntry))
+	a.types = append(a.types, make(map[string]symbol.Symbol))
 }
 
-// popScope removes the most recently added inner scope from the scope stack.
+// popScope removes the most recently added variable and type scope from
+// their respective stacks.
 func (a *Analyzer) popScope() {
 	a.scopes = a.scopes[:len(a.scopes)-1]
+	a.types = a.types[:len(a.types)-1]
+}
+
+// pushFunctionBoundary records the current scope depth as the start of a
+// new function's own scope chain. Combined with findVarSymbolInCurrentFunctionScope
+// and typeDeclaredInCurrentFunctionScope, this lets redeclaration checks stop
+// at a function's own boundary instead of walking into an enclosing function
+// or the module scope - consistent with function purity, which already means
+// a function can never read or mutate anything declared outside it, so a
+// local name reusing an outer one is never actually ambiguous.
+func (a *Analyzer) pushFunctionBoundary() {
+	a.functionBoundaries = append(a.functionBoundaries, len(a.scopes))
+}
+
+// popFunctionBoundary removes the innermost function boundary marker.
+func (a *Analyzer) popFunctionBoundary() {
+	a.functionBoundaries = a.functionBoundaries[:len(a.functionBoundaries)-1]
+}
+
+// currentFunctionBoundary returns the scope-stack index a redeclaration
+// check should stop at: the start of the current function's own scope
+// chain, or 0 (the module scope) if not currently inside any function -
+// preserving today's top-level shadowing-prevention behavior unchanged.
+func (a *Analyzer) currentFunctionBoundary() int {
+	if len(a.functionBoundaries) == 0 {
+		return 0
+	}
+	return a.functionBoundaries[len(a.functionBoundaries)-1]
+}
+
+// findVarSymbolInCurrentFunctionScope searches the same scope chain as
+// findVarSymbolInScope (innermost to outermost), but never looks past the
+// current function's own boundary. Used only for redeclaration checks, not
+// for normal identifier resolution (which must still see - and enforce
+// purity around - outer variables).
+func (a *Analyzer) findVarSymbolInCurrentFunctionScope(varName string) (ScopeEntry, bool) {
+	boundary := a.currentFunctionBoundary()
+	for i := len(a.scopes) - 1; i >= boundary; i-- {
+		if entry, ok := a.scopes[i][varName]; ok {
+			return entry, true
+		}
+	}
+	return ScopeEntry{}, false
+}
+
+// typeDeclaredInCurrentFunctionScope reports whether name is already
+// registered anywhere between the innermost type scope and the current
+// function's own boundary (not beyond it). Used only for redeclaration
+// checks; normal type-name resolution (lookupType) always searches the
+// full stack, since referencing an outer-scope type isn't a purity concern.
+func (a *Analyzer) typeDeclaredInCurrentFunctionScope(name string) bool {
+	boundary := a.currentFunctionBoundary()
+	for i := len(a.types) - 1; i >= boundary; i-- {
+		if _, ok := a.types[i][name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// declareType registers a type name in the current (innermost) type scope.
+func (a *Analyzer) declareType(name string, sym symbol.Symbol) {
+	a.types[len(a.types)-1][name] = sym
+}
+
+// deleteType removes a type name from the current (innermost) type scope.
+// Used to clean up temporary generic type-parameter registrations.
+func (a *Analyzer) deleteType(name string) {
+	delete(a.types[len(a.types)-1], name)
+}
+
+// lookupType searches the type scope chain from innermost to outermost,
+// returning the first match - mirroring the shadowing order findVarSymbolInScope
+// uses for variables. Unrestricted by function boundaries: any function may
+// reference a type declared anywhere in its enclosing scopes.
+func (a *Analyzer) lookupType(name string) (symbol.Symbol, bool) {
+	for i := len(a.types) - 1; i >= 0; i-- {
+		if sym, ok := a.types[i][name]; ok {
+			return sym, true
+		}
+	}
+	return nil, false
 }
 
 // declare registers a variable name in the current (innermost) scope.

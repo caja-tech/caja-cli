@@ -1,0 +1,10 @@
+import "./animals" as animals
+import "log"
+
+let a: animals.Animal = animals.Cat { name: "Tom" }
+
+let matched: animals.Cat? = a is animals.Cat
+let unmatched: animals.Dog? = a is animals.Dog
+
+log.info("is Cat (expect a name):", matched)
+log.info("is Dog (expect nil):", unmatched)

@@ -655,7 +655,15 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 					if !exists {
 						continue
 					}
-					variantGoType := ctx.mapSymbolToGoType(variantDef)
+					// Use the same prefixing prefixIdentifier applies to the
+					// variant's own `type X struct {...}` declaration (not
+					// mapSymbolToGoType's cross-file-relative prefixing,
+					// which is wrong here: within a module's own transpile
+					// pass, a struct declared in that same module is never
+					// "foreign" relative to itself, so it would come back
+					// unprefixed and the method would land on a Go type
+					// name that's never actually declared).
+					variantGoType := "*" + prefixIdentifier(ctx, variantDef.Name)
 					buf.WriteString(fmt.Sprintf("func (%s) is%s() {}\n", variantGoType, unionName))
 				}
 			}

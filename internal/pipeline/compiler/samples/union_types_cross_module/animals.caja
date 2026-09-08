@@ -1,0 +1,9 @@
+type Cat struct {
+	name String
+}
+
+type Dog struct {
+	name String
+}
+
+union Animal = Cat | Dog

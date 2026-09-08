@@ -1273,8 +1273,20 @@ func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
 		p.reportError(p.peekToken, fmt.Sprintf("expected type name after 'is', got %s", p.peekToken.Type))
 		return nil
 	}
+	typeName := p.currToken.Literal
 
-	return &ast.IsExpression{Token: tok, Left: left, TypeName: p.currToken.Literal}
+	// Allow a module-qualified type name (e.g. "animal is animals.Cat"),
+	// mirroring how parseTypeSignature reads dotted type names elsewhere.
+	if p.peekToken.Type == lexer.DOT {
+		p.nextToken() // move to '.'
+		if !p.expectPeek(lexer.IDENT) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected type name after '.', got %s", p.peekToken.Type))
+			return nil
+		}
+		typeName += "." + p.currToken.Literal
+	}
+
+	return &ast.IsExpression{Token: tok, Left: left, TypeName: typeName}
 }
 
 // parsePropertyExpression parses an object property access, capturing the left-hand
