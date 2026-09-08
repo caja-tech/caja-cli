@@ -15,7 +15,7 @@ import (
 // NewRunCmd creates and returns the 'run' command, which transpiles a .caja
 // script to Go and runs it via `go run` — giving interpreter-like ergonomics
 // (no binary left behind) while executing through the same compiler backend
-// `caja build` uses, instead of the separate tree-walking interpreter.
+// `caja build` uses.
 func NewRunCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:   "run",

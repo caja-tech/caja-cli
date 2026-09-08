@@ -165,8 +165,8 @@ func (ao *Array) Inspect() string {
 	return out
 }
 
-// ReturnValue represents a wrapper object that causes the evaluator to halt
-// block execution and return the enclosed value.
+// ReturnValue represents a wrapper object that causes block execution to
+// halt and return the enclosed value.
 type ReturnValue struct {
 	Value Object
 }
@@ -175,8 +175,8 @@ func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_OBJ }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
 
 // TailCall represents an intercepted function call in tail position.
-// It holds the target function and its evaluated arguments, allowing the
-// evaluator to reuse the current stack frame and execute in constant memory space.
+// It holds the target function and its evaluated arguments, allowing
+// execution to reuse the current stack frame and run in constant memory space.
 type TailCall struct {
 	Function  *Function
 	Arguments []Object
@@ -196,12 +196,9 @@ func (tc *TailCall) Inspect() string {
 }
 
 // Async represents the value produced by an `async <expr>` expression.
-// The tree-walking interpreter evaluates `expr` immediately and eagerly
-// (v1 does not run async work on a real goroutine — see evaluator.go), so
-// Value/Err are already fully populated by the time an Async is created;
-// `await` simply unwraps them. This mirrors the eager-start semantics the
-// Go transpiler uses for real concurrent execution, without introducing any
-// interpreter concurrency-safety concerns for now.
+// `expr` is evaluated immediately and eagerly, so Value/Err are already
+// fully populated by the time an Async is created; `await` simply unwraps
+// them.
 type Async struct {
 	Value Object
 	Err   error

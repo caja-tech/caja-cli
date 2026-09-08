@@ -1,10 +1,14 @@
 package script
 
 import (
-	"caja-cli/internal/pipeline/environment"
+	"bytes"
+	"caja-cli/internal/pipeline/compiler"
+	"go/format"
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -251,7 +255,7 @@ func TestModules(t *testing.T) {
 				t.Fatalf("failed to read test file: %v", err)
 			}
 
-			prog, env, _, err := ParseWithDir(string(content), testsDir, path)
+			prog, _, a, err := ParseWithDir(string(content), testsDir, path)
 			if err != nil {
 				if !tc.expectError {
 					t.Fatalf("unexpected parsing error: %v", err)
@@ -259,10 +263,23 @@ func TestModules(t *testing.T) {
 				return
 			}
 
-			val, err := Run(prog, env)
+			goCode, err := compiler.Transpile(prog, a, compiler.TranspileOptions{PrintResult: true})
 			if err != nil {
 				if !tc.expectError {
-					t.Fatalf("unexpected runtime error: %v", err)
+					t.Fatalf("unexpected transpile error: %v", err)
+				}
+				return
+			}
+			if formatted, err := format.Source([]byte(goCode)); err == nil {
+				goCode = string(formatted)
+			} else {
+				t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+			}
+
+			var stdout, stderr bytes.Buffer
+			if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+				if !tc.expectError {
+					t.Fatalf("unexpected runtime error: %v\nstderr:\n%s", err, stderr.String())
 				}
 				return
 			}
@@ -271,13 +288,18 @@ func TestModules(t *testing.T) {
 				t.Fatalf("expected error, but got none")
 			}
 
-			// Verify return value for successful tests
-			if num, ok := val.(*environment.Number); ok {
-				if num.Value != tc.expectVal {
-					t.Errorf("expected value %v, got %v", tc.expectVal, num.Value)
-				}
-			} else {
-				t.Errorf("expected return value to be a Number, got %T", val)
+			// Verify the printed return value for successful tests. Some
+			// scripts print other output (log.info/warn/error, log.export)
+			// before their final result, so only the LAST line is the
+			// result — matching caja_print_result's own fmt.Println.
+			lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+			lastLine := lines[len(lines)-1]
+			got, err := strconv.ParseFloat(strings.TrimSpace(lastLine), 64)
+			if err != nil {
+				t.Fatalf("expected numeric stdout on the last line, got %q: %v", stdout.String(), err)
+			}
+			if got != tc.expectVal {
+				t.Errorf("expected value %v, got %v", tc.expectVal, got)
 			}
 		})
 	}

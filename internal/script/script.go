@@ -4,7 +4,6 @@ import (
 	"caja-cli/internal/pipeline/analyzer"
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/environment"
-	"caja-cli/internal/pipeline/evaluator"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/parser"
 	"fmt"
@@ -30,14 +29,4 @@ func ParseWithDir(input string, baseDir string, filePath string) (*ast.Program, 
 	}
 
 	return prog, globalEnv, a, nil
-}
-
-// Run evaluates a program using the global environment from semantic analysis.
-// Returns the result, the global environment, and any error.
-func Run(program *ast.Program, globalEnv *environment.Environment) (environment.Object, error) {
-	result, err := evaluator.Eval(program, globalEnv)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }

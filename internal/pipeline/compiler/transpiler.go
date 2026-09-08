@@ -26,7 +26,15 @@ type transpileContext struct {
 	analyzer              *analyzer.Analyzer
 	currentFuncName       string
 	currentFunctionParams []string
-	hasTailCall           bool
+	// currentFunctionReturnType is the enclosing function's declared return
+	// type, as the same Go type string used in its signature (see retType at
+	// both fnCtx construction sites). Passed as expectedType when
+	// transpiling a ReturnStatement's value, so an ambiguous literal whose
+	// own inferred type is vague (an empty array/map literal, e.g. `return
+	// []` from a function declared to return [Transition]) resolves against
+	// the function's actual declared type instead of its own "any" default.
+	currentFunctionReturnType string
+	hasTailCall               bool
 	usedModules           map[string]bool
 	CurrentModulePath     string
 	// CurrentSourceFile is the .caja file the statement currently being
@@ -60,6 +68,21 @@ type transpileContext struct {
 	// Identifier source, since the same rebind statement re-executes against
 	// the previous iteration's value on every simulated "call".
 	inLoop bool
+
+	// topLevelFileName is the outermost script's own file identity, captured
+	// once from Transpile's stable `a` parameter and never reassigned.
+	// ctx.analyzer (and any local `a := ctx.analyzer` alias of it) DOES get
+	// swapped to each imported module's own analyzer while that module's
+	// code is being transpiled, so ctx.analyzer.GlobalEnv().FileName is only
+	// correct when transpiling the top-level script itself — comparing a
+	// definition's FilePath against THAT (rather than this fixed field)
+	// while inside a module's own code always sees "same file" (a module
+	// comparing its own FilePath against its own GlobalEnv().FileName), so
+	// a struct/identifier a module refers to that is ALSO defined in that
+	// same module would wrongly skip the module-prefix its own type
+	// definition already got. Every "is this defined outside the top-level
+	// script" check must compare against this field instead.
+	topLevelFileName string
 }
 
 // enableValueFormatting marks the shared caja_format_value runtime helper (and
@@ -242,10 +265,8 @@ func ensureUnshared(expr ast.Expression, ctx *transpileContext, buf *bytes.Buffe
 		if _, isArr := leftSym.(*symbol.ArraySymbol); isArr {
 			elemExpr = fmt.Sprintf("%s.Data[int(%s)]", parent, index)
 		} else {
-			if indexSym, _ := a.GetSymbol(e.Index); indexSym != nil {
-				if _, isStruct := indexSym.(*symbol.StructInstanceSymbol); isStruct {
-					index += ".Key()"
-				}
+			if indexSym, _ := a.GetSymbol(e.Index); isStructKeySymbol(indexSym) {
+				index += ".Key()"
 			}
 			elemExpr = fmt.Sprintf("%s.Data[%s]", parent, index)
 		}
@@ -293,6 +314,22 @@ func isSharableSymbol(sym symbol.Symbol) bool {
 	}
 	switch sym.(type) {
 	case *symbol.StructInstanceSymbol, *symbol.StructDefSymbol, *symbol.ArraySymbol, *symbol.MapSymbol:
+		return true
+	}
+	return false
+}
+
+// isStructKeySymbol reports whether sym resolves to a struct (either
+// StructInstanceSymbol, or StructDefSymbol — the same instance-vs-declared-
+// type split isSharableSymbol unwraps, e.g. a variable declared with an
+// explicit struct type annotation resolves to StructDefSymbol on later
+// references, not StructInstanceSymbol), used as a map key. A struct map key
+// must expose a `key() -> String` field (validated at analysis time), so its
+// Go map index expression needs a trailing ".Key()" to call that closure and
+// get the actual string key, instead of using the struct pointer itself.
+func isStructKeySymbol(sym symbol.Symbol) bool {
+	switch sym.(type) {
+	case *symbol.StructInstanceSymbol, *symbol.StructDefSymbol:
 		return true
 	}
 	return false
@@ -601,7 +638,7 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 	}
 	if structDef, ok := sym.(*symbol.StructDefSymbol); ok {
 		baseName := structDef.Name
-		if structDef.FilePath != "" && ctx != nil && structDef.FilePath != ctx.analyzer.GlobalEnv().FileName {
+		if structDef.FilePath != "" && ctx != nil && structDef.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(structDef.FilePath) + "_" + baseName
 		}
 		if len(structDef.InstantiatedTypes) > 0 {
@@ -615,14 +652,14 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 	}
 	if unionSym, ok := sym.(*symbol.UnionSymbol); ok {
 		baseName := unionSym.Name
-		if unionSym.FilePath != "" && ctx != nil && unionSym.FilePath != ctx.analyzer.GlobalEnv().FileName {
+		if unionSym.FilePath != "" && ctx != nil && unionSym.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(unionSym.FilePath) + "_" + baseName
 		}
 		return baseName
 	}
 	if structInst, ok := sym.(*symbol.StructInstanceSymbol); ok {
 		baseName := structInst.Def.Name
-		if structInst.Def.FilePath != "" && ctx != nil && structInst.Def.FilePath != ctx.analyzer.GlobalEnv().FileName {
+		if structInst.Def.FilePath != "" && ctx != nil && structInst.Def.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(structInst.Def.FilePath) + "_" + baseName
 		}
 		if len(structInst.Def.InstantiatedTypes) > 0 {
@@ -671,6 +708,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 		usedModules:       make(map[string]bool),
 		packageLevelCode:  &pkgLevelBuf,
 		CurrentSourceFile: topSourceFile,
+		topLevelFileName:  topSourceFile,
 	}
 
 	// Prepend imported custom modules in topological order
@@ -743,6 +781,27 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 					continue
 				}
 			}
+			// A top-level `return <expr>` as the script's final statement is
+			// the interpreter-era convention for "this is the script's
+			// result" (transpileStatement's *ast.ReturnStatement case
+			// otherwise discards the value via `_ = val` at top level, since
+			// a bare Go `return` can't carry one out of func main). Print it
+			// the same way a trailing bare expression is printed, instead of
+			// re-emitting the original discarding form.
+			if retStmt, ok := stmt.(*ast.ReturnStatement); ok && retStmt.ReturnValue != nil {
+				if sym, ok := a.GetSymbol(retStmt.ReturnValue); ok && sym != nil && sym.Type() != environment.NULL_OBJ {
+					val, err := transpileExpression(retStmt.ReturnValue, ctx, "")
+					if err != nil {
+						return "", err
+					}
+					val = maybeShareValue(retStmt.ReturnValue, val, ctx)
+					ctx.usedModules["print_result"] = true
+					enableValueFormatting(ctx)
+					bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+					bodyBuf.WriteString(fmt.Sprintf("\t_cajaResult := %s\n\tcaja_print_result(_cajaResult)\n", val))
+					continue
+				}
+			}
 		}
 
 		bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
@@ -781,7 +840,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 	if ctx.usedModules["csv"] {
 		finalBuf.WriteString("import \"encoding/csv\"\n")
 	}
-	if strings.Contains(bodyCode, "math.") || ctx.usedModules["math"] || ctx.usedModules["math_rand"] {
+	if ctx.usedModules["math"] || ctx.usedModules["math_rand"] {
 		finalBuf.WriteString("import \"math\"\n")
 	}
 	if ctx.usedModules["math_rand"] {
@@ -929,13 +988,15 @@ func transpileMemoBinding(name string, fnLit *ast.FunctionLiteral, ctx *transpil
 	}
 
 	fnCtx := &transpileContext{
-		analyzer:              a,
-		currentFunctionParams: paramNames,
-		usedModules:           ctx.usedModules,
-		CurrentModulePath:     ctx.CurrentModulePath,
-		CurrentSourceFile:     ctx.CurrentSourceFile,
-		packageLevelCode:      ctx.packageLevelCode,
-		inFunction:            true,
+		analyzer:                  a,
+		currentFunctionParams:     paramNames,
+		currentFunctionReturnType: retType,
+		usedModules:               ctx.usedModules,
+		CurrentModulePath:         ctx.CurrentModulePath,
+		CurrentSourceFile:         ctx.CurrentSourceFile,
+		packageLevelCode:          ctx.packageLevelCode,
+		topLevelFileName:          ctx.topLevelFileName,
+		inFunction:                true,
 	}
 	if fnSym != nil {
 		fnCtx.currentFuncName = fnSym.Name
@@ -1103,7 +1164,7 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			}
 		}
 
-		val, err := transpileExpression(s.ReturnValue, ctx, "")
+		val, err := transpileExpression(s.ReturnValue, ctx, ctx.currentFunctionReturnType)
 		if err != nil {
 			return "", err
 		}
@@ -1154,10 +1215,8 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			return buf.String(), nil
 		}
 
-		if indexSym, _ := a.GetSymbol(s.Index); indexSym != nil {
-			if _, isStruct := indexSym.(*symbol.StructInstanceSymbol); isStruct {
-				index += ".Key()"
-			}
+		if indexSym, _ := a.GetSymbol(s.Index); isStructKeySymbol(indexSym) {
+			index += ".Key()"
 		}
 
 		buf.WriteString(fmt.Sprintf("%s.Data[%s] = %s", left, index, val))
@@ -1364,6 +1423,23 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			return transpileBuiltinProperty(importedMod, e.Value, ctx)
 		}
 		_, filePath, ok := a.GetDefinition(e)
+		// Deliberately compared against a.GlobalEnv().FileName here, NOT the
+		// stable ctx.topLevelFileName used for struct/union symbol names
+		// above: entry.FilePath (see analyzer/scope.go's declare/
+		// declareImport) is set to "whichever file's analyzer processed
+		// this declaration" for EVERY binding, local params/lets included
+		// — there's no such thing as a "local struct type" the way there
+		// is a local variable, so the struct-symbol case can safely treat
+		// "not the top-level script" as "always prefixed". Here, comparing
+		// against ctx.topLevelFileName would wrongly module-prefix a
+		// perfectly ordinary function parameter or local `let` just
+		// because the function enclosing it happens to live inside an
+		// imported module's file — a.GlobalEnv().FileName instead reflects
+		// "the file whose code is CURRENTLY being transpiled" (ctx.analyzer
+		// is swapped per-module during that loop), which is what a local
+		// binding needs to be compared against to correctly stay
+		// unprefixed while its own enclosing module's code is what's being
+		// generated, and only get prefixed when referenced from elsewhere.
 		if ok && filePath != "" && filePath != a.GlobalEnv().FileName {
 			// Identifier was defined in another module
 			return sanitizeIdentifier(filePath) + "_" + e.Value, nil
@@ -1419,8 +1495,15 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 	case *ast.ArrayLiteral:
 		sym, _ := a.GetSymbol(e)
 		goType := ctx.mapSymbolToGoType(sym)
-		if goType == "" {
+		usedFallback := false
+		// An empty array literal's own symbol is ArraySymbol(Any) — a
+		// non-empty but vague "*cajaArray[any]" that would otherwise never
+		// let expectedType (e.g. a function's declared [Transition] return
+		// type) correct it, exactly the bug already fixed for MapLiteral's
+		// equivalent "*cajaMap[any, any]" case below.
+		if (goType == "" || goType == "*cajaArray[any]") && expectedType != "" {
 			goType = expectedType
+			usedFallback = true
 		}
 		if goType == "" {
 			goType = "*cajaArray[any]"
@@ -1428,7 +1511,7 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		ctx.usedModules["cow_array"] = true
 		wrapperType := strings.TrimPrefix(goType, "*")
 		elemType := "any"
-		if arrSym, ok := sym.(*symbol.ArraySymbol); ok {
+		if arrSym, ok := sym.(*symbol.ArraySymbol); ok && !usedFallback {
 			if et := ctx.mapSymbolToGoType(arrSym.ElementSymbol()); et != "" {
 				elemType = et
 			}
@@ -1484,10 +1567,8 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			if err != nil {
 				return "", err
 			}
-			if kSym, _ := a.GetSymbol(k); kSym != nil {
-				if _, isStruct := kSym.(*symbol.StructInstanceSymbol); isStruct {
-					kStr += ".Key()"
-				}
+			if kSym, _ := a.GetSymbol(k); isStructKeySymbol(kSym) {
+				kStr += ".Key()"
 			}
 
 			vStr, err := transpileExpression(v, ctx, "")
@@ -1513,10 +1594,8 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			return fmt.Sprintf("%s.Data[int(%s)]", left, index), nil
 		}
 
-		if indexSym, _ := a.GetSymbol(e.Index); indexSym != nil {
-			if _, isStruct := indexSym.(*symbol.StructInstanceSymbol); isStruct {
-				index += ".Key()"
-			}
+		if indexSym, _ := a.GetSymbol(e.Index); isStructKeySymbol(indexSym) {
+			index += ".Key()"
 		}
 
 		return fmt.Sprintf("%s.Data[%s]", left, index), nil
@@ -1560,9 +1639,11 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			return "", err
 		}
 		if e.Operator == "%" {
+			ctx.usedModules["math"] = true
 			return fmt.Sprintf("math.Mod(%s, %s)", left, right), nil
 		}
 		if e.Operator == "^" {
+			ctx.usedModules["math"] = true
 			return fmt.Sprintf("math.Pow(%s, %s)", left, right), nil
 		}
 		return fmt.Sprintf("(%s %s %s)", left, e.Operator, right), nil
@@ -1756,13 +1837,15 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		}
 
 		fnCtx := &transpileContext{
-			analyzer:              a,
-			currentFuncName:       "",
-			currentFunctionParams: paramNames,
-			hasTailCall:           false,
-			usedModules:           ctx.usedModules,
-			CurrentModulePath:     ctx.CurrentModulePath,
-			CurrentSourceFile:     ctx.CurrentSourceFile,
+			analyzer:                  a,
+			currentFuncName:           "",
+			currentFunctionParams:     paramNames,
+			currentFunctionReturnType: retType,
+			hasTailCall:               false,
+			usedModules:               ctx.usedModules,
+			CurrentModulePath:         ctx.CurrentModulePath,
+			CurrentSourceFile:         ctx.CurrentSourceFile,
+			topLevelFileName:          ctx.topLevelFileName,
 			inFunction:            true,
 		}
 		if fnSym != nil {
@@ -2145,6 +2228,7 @@ func sanitizeIdentifier(path string) string {
 	s := strings.ReplaceAll(path, "/", "_")
 	s = strings.ReplaceAll(s, ".", "_")
 	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, "@", "_") // scoped node_modules-style paths, e.g. "@caja/query"
 	return s
 }
 

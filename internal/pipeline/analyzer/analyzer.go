@@ -882,6 +882,14 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 
 		modEnv := environment.NewEnvironment(a.globalEnv.BaseDir, modPath, true)
 		modEnv.ModuleASTs = a.globalEnv.ModuleASTs
+		// Share these maps (not just re-derive them) so a TRANSITIVE import
+		// processed while analyzing this module — modAnalyzer's own
+		// analyzeImportStatement call, recursing with modEnv as ITS
+		// globalEnv — registers into the same maps the top-level compiler
+		// pass reads from, instead of into modEnv's own otherwise-isolated
+		// copies (which nothing outside this module would ever see).
+		modEnv.ModuleAnalyzers = a.globalEnv.ModuleAnalyzers
+		modEnv.ModuleFilePaths = a.globalEnv.ModuleFilePaths
 		modAnalyzer := New(modEnv)
 		modAnalyzer.loading = a.loading // Share loading state to detect circular dependencies
 		modSymbol = modAnalyzer.analyze(modProgram)
@@ -1227,7 +1235,30 @@ func (a *Analyzer) analyzeIdentifier(n *ast.Identifier) symbol.Symbol {
 		}
 		a.nodeDefinitions[n] = entry.DefinitionToken
 		if entry.IsImport && entry.FilePath != "" {
-			if a.nodeDefinitionFiles == nil {
+			// Both maps need this use-site node, for two different transpiler
+			// consumers: GetImportedModule (nodeImportedFiles) drives builtin
+			// dispatch for a bare named-imported builtin call like `max(...)`;
+			// GetDefinition (nodeDefinitionFiles) drives the generic
+			// cross-module identifier prefixing (sanitizeIdentifier(file)+"_"+
+			// name) a named import from a CUSTOM module needs, since that
+			// path isn't a builtin and never goes through GetImportedModule's
+			// dispatch branch.
+			//
+			// nodeDefinitionFiles specifically is skipped for a builtin
+			// module: entry.FilePath there is a synthetic module name
+			// ("math"), not a real file on disk, and GetDefinition is also
+			// what the LSP's go-to-definition uses to build a URI — pointing
+			// it at a nonexistent "math.caja" would be wrong. The compiler
+			// never needs this for builtins anyway, since its own Identifier
+			// case checks GetImportedModule/builtinModules first and only
+			// falls through to GetDefinition for a non-builtin import.
+			if _, _, isBuiltin := symbol.GetStandardModule(entry.FilePath); !isBuiltin {
+				if a.nodeDefinitionFiles == nil {
+					a.nodeDefinitionFiles = make(map[ast.Node]string)
+				}
+				a.nodeDefinitionFiles[n] = entry.FilePath
+			}
+			if a.nodeImportedFiles == nil {
 				a.nodeImportedFiles = make(map[ast.Node]string)
 			}
 			a.nodeImportedFiles[n] = entry.FilePath
