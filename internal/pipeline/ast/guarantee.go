@@ -110,7 +110,18 @@ func MightReturn(node Node) bool {
 	case *ReturnStatement:
 		return true
 	case *IfExpression:
-		return MightReturn(n.Consequence) || MightReturn(n.Alternative)
+		// n.Alternative is a concrete *BlockStatement; when there's no else
+		// branch it's nil, and passing a nil pointer through the Node
+		// interface parameter would box it as a non-nil interface value,
+		// bypassing the node == nil check above and panicking on n.Statements
+		// below - so it must be checked before recursing, not after.
+		if MightReturn(n.Consequence) {
+			return true
+		}
+		if n.Alternative == nil {
+			return false
+		}
+		return MightReturn(n.Alternative)
 	case *BlockStatement:
 		for _, stmt := range n.Statements {
 			if MightReturn(stmt) {

@@ -78,7 +78,7 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 				typeArgs = append(typeArgs, strings.TrimSpace(current))
 			}
 
-			if aliasSym, exists := a.types[baseName]; exists {
+			if aliasSym, exists := a.lookupType(baseName); exists {
 				var typeParams []string
 				if fnSym, ok := aliasSym.(*symbol.FunctionSymbol); ok {
 					typeParams = fnSym.TypeParameters
@@ -221,7 +221,7 @@ func (a *Analyzer) findTypeSymbolInTypesRaw(typeName string) (symbol.Symbol, boo
 		return symbol.AnySymbol(), false
 	}
 
-	if sym, ok := a.types[typeName]; ok {
+	if sym, ok := a.lookupType(typeName); ok {
 		return sym, true
 	}
 

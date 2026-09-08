@@ -369,6 +369,10 @@ func decidePipeToken(t *Lexer, line int, column int) deciderResult {
 			t.readChar()
 			return deciderResult{true, Token{Type: PIPE, Literal: literal, Line: line, Column: column}}
 		}
+
+		// A lone '|' (not followed by '>') is the union-variant separator,
+		// e.g. `union Animal = Cat | Dog | Pig`.
+		return deciderResult{true, Token{Type: BAR, Literal: string(t.ch), Line: line, Column: column}}
 	}
 
 	return deciderResult{false, Token{Type: NONE, Literal: string(t.ch), Line: line, Column: column}}

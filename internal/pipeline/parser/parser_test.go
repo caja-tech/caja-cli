@@ -1214,12 +1214,12 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private on import",
 			input:         "private import \"foo\"",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'",
 		},
 		{
 			name:          "Private on return",
 			input:         "private return 10",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'",
 		},
 		{
 			name:          "Return private",
@@ -1239,7 +1239,7 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private standalone",
 			input:         "private",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', or 'define'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'",
 		},
 	}
 
@@ -1442,6 +1442,76 @@ func TestStructLiteralErrors(t *testing.T) {
 	}
 }
 
+// TestTrailingBlockCallParsing verifies that a `{ }` block following a call
+// expression desugars into an ArrayLiteral appended as the call's final
+// argument (Kotlin-style DSL sugar).
+func TestTrailingBlockCallParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Trailing block with single call",
+			input:    "foo() {\nbar()\n}",
+			expected: "foo([bar()])",
+		},
+		{
+			name:     "Trailing block with existing args and multiple statements",
+			input:    "foo(1, 2) {\nbar()\nbaz()\n}",
+			expected: "foo(1, 2, [bar(), baz()])",
+		},
+		{
+			name:     "Empty trailing block",
+			input:    "foo() {\n}",
+			expected: "foo([])",
+		},
+		{
+			name:     "Trailing block on turbofish call",
+			input:    "f::<Number>(1) {\ng()\n}",
+			expected: "f::<Number>(1, [g()])",
+		},
+		{
+			name:     "Trailing block on property call",
+			input:    "mod.foo() {\nbar()\n}",
+			expected: "(mod.foo)([bar()])",
+		},
+		{
+			name:     "Struct literal argument before trailing block",
+			input:    "state(Config { retries: 3 }) {\ntransition()\n}",
+			expected: "state(Config {retries: 3}, [transition()])",
+		},
+		{
+			name:     "Nested trailing blocks",
+			input:    "workflow(\"Purchase Approval\") {\nstate(\"Pending\") {\ntransition(\"Approved\")\n}\n}",
+			expected: "workflow(\"Purchase Approval\", [state(\"Pending\", [transition(\"Approved\")])])",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestTrailingBlockCallErrors verifies that non-expression statements inside
+// a trailing block are rejected, and that the pre-existing struct-literal
+// error path for invalid left-hand sides is unaffected.
+func TestTrailingBlockCallErrors(t *testing.T) {
+	tests := []string{
+		"foo() {\nlet x = 1\n}", // let statement inside block
+		"foo() {\nreturn 1\n}",  // return statement inside block
+		"foo() {\nx = 1\n}",     // assignment inside block
+		"(1 + 2) { x: 1 }",      // regression: non-identifier left is still invalid
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
 func TestPipeOperatorParsing(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -1544,6 +1614,94 @@ func TestTypeConstraintErrors(t *testing.T) {
 		"define MajorCustomer Customer with: fn() {}",
 		"define MajorCustomer constraints Customer fn() {}",
 		"define MajorCustomer constraints Customer with fn() {}",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+func TestUnionStatementParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Union with two variants",
+			input:    "union Animal = Cat | Dog",
+			expected: "union Animal = Cat | Dog",
+		},
+		{
+			name:     "Union with three variants",
+			input:    "union Animal = Cat | Dog | Pig",
+			expected: "union Animal = Cat | Dog | Pig",
+		},
+		{
+			name:     "Private union",
+			input:    "private union Animal = Cat | Dog",
+			expected: "private union Animal = Cat | Dog",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+func TestUnionStatementErrors(t *testing.T) {
+	tests := []string{
+		"union = Cat | Dog",         // Missing union name
+		"union Animal Cat | Dog",    // Missing '='
+		"union Animal =",            // Missing first variant
+		"union Animal = Cat |",      // Missing variant after '|'
+		"union Animal = Cat, Dog",   // Comma instead of pipe
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+func TestIsExpressionParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Is expression on identifier",
+			input:    "animal is Cat",
+			expected: "(animal is Cat)",
+		},
+		{
+			name:     "Is expression narrowed in a let statement",
+			input:    "let cat: Cat? = animal is Cat",
+			expected: "let cat: Cat? = (animal is Cat)",
+		},
+		{
+			name:     "Is expression with module-qualified type name",
+			input:    "animal is animals.Cat",
+			expected: "(animal is animals.Cat)",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+func TestIsExpressionErrors(t *testing.T) {
+	tests := []string{
+		"animal is",         // Missing type name
+		"animal is 123",     // Non-identifier after 'is'
+		"animal is animals.", // Missing type name after '.'
 	}
 
 	for _, input := range tests {

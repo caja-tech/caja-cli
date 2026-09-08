@@ -76,6 +76,9 @@ const (
 	ASYNC   TokenType = "ASYNC"
 	AWAIT   TokenType = "AWAIT"
 	UNWRAP  TokenType = "UNWRAP"
+	UNION   TokenType = "UNION"
+	IS      TokenType = "IS"
+	BAR     TokenType = "BAR"
 )
 
 type Token struct {
@@ -114,6 +117,8 @@ var keywords = map[string]TokenType{
 	"async":   ASYNC,
 	"await":   AWAIT,
 	"unwrap":  UNWRAP,
+	"union":   UNION,
+	"is":      IS,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the
@@ -129,7 +134,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE, MEMO, ASYNC, AWAIT, UNWRAP:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE, MEMO, ASYNC, AWAIT, UNWRAP, UNION, IS:
 		return true
 	}
 	return false

@@ -26,6 +26,30 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Union Types",
+			input: `
+				type Cat struct { name String }
+				type Dog struct { name String }
+				union Animal = Cat | Dog
+				let animal: Animal = Cat { name: "Tom" }
+				let cat: Cat? = animal is Cat
+			`,
+			expected: []string{
+				"type Animal interface{ isAnimal() }",
+				"func (*Cat) isAnimal() {}",
+				"func (*Dog) isAnimal() {}",
+				// (&Cat{...}) is self-parenthesized (see the struct-literal
+				// codegen comment) to avoid Go parsing &Type{...}.Field as
+				// &(Type{...}.Field). The `is` narrowing result is wrapped in
+				// cajaShare: it aliases animal's own underlying struct (an
+				// IsExpression isn't in isOwned's fresh-temporary list), so
+				// mutating the narrowed value must not corrupt a second,
+				// independent narrowing of the same union value.
+				"var animal Animal = (&Cat{\nName: \"Tom\",\n})",
+				"var cat *Cat = cajaShare(func() *Cat { if v, ok := (animal).(*Cat); ok { return v }; return nil }())",
+			},
+		},
+		{
 			name: "Safe Pipeline",
 			input: `
 				type Customer struct { age Number }

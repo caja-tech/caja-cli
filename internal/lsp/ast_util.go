@@ -48,6 +48,21 @@ func findTightestNode(node ast.Node, line, col int) ast.Node {
 		} else if child := findTightestNode(n.Predicate, line, col); child != nil {
 			bestChild = child
 		}
+	case *ast.UnionStatement:
+		if child := findTightestNode(n.Name, line, col); child != nil {
+			bestChild = child
+		} else {
+			for _, variant := range n.Variants {
+				if child := findTightestNode(variant, line, col); child != nil {
+					bestChild = child
+					break
+				}
+			}
+		}
+	case *ast.IsExpression:
+		if child := findTightestNode(n.Left, line, col); child != nil {
+			bestChild = child
+		}
 	case *ast.SafePipeExpression:
 		if child := findTightestNode(n.Left, line, col); child != nil {
 			bestChild = child
@@ -335,6 +350,10 @@ func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
 		} else if child := findCallExpression(n.Alternative, line, col); child != nil {
 			bestCall = child
 		}
+	case *ast.IsExpression:
+		if child := findCallExpression(n.Left, line, col); child != nil {
+			bestCall = child
+		}
 	}
 
 	return bestCall
@@ -368,7 +387,11 @@ func GetNodeToken(node ast.Node) lexer.Token {
 		t = n.Token
 	case *ast.InfixExpression:
 		t = GetNodeToken(n.Left)
+	case *ast.IsExpression:
+		t = GetNodeToken(n.Left)
 	case *ast.PrefixExpression:
+		t = n.Token
+	case *ast.UnionStatement:
 		t = n.Token
 	case *ast.ArrayLiteral:
 		t = n.Token

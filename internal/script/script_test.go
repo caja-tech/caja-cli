@@ -211,6 +211,36 @@ func TestModules(t *testing.T) {
 			expectError: false,
 			expectVal:   220.0,
 		},
+		{
+			name:        "Trailing Block Call Syntax",
+			file:        "test_trailing_block.caja",
+			expectError: false,
+			expectVal:   2.0,
+		},
+		{
+			name:        "Custom DSL Rule Engine With Evaluator",
+			file:        "test_dsl_rule_engine.caja",
+			expectError: false,
+			expectVal:   2.0,
+		},
+		{
+			name:        "Custom DSL Workflow With Evaluator",
+			file:        "test_dsl_workflow_evaluator.caja",
+			expectError: false,
+			expectVal:   3.0,
+		},
+		{
+			name:        "Custom DSL Constrained Subtype Narrowing",
+			file:        "test_dsl_constrained_subtype.caja",
+			expectError: false,
+			expectVal:   10.0,
+		},
+		{
+			name:        "Custom DSL Constrained Subtype Non-Nullable Binding Rejected",
+			file:        "test_dsl_constrained_subtype_errors.caja",
+			expectError: true,
+			errorMsg:    "type error: cannot assign State to NonEmptyState",
+		},
 	}
 
 	for _, tc := range testCases {
