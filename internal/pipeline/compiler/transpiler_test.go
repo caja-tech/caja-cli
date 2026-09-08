@@ -689,6 +689,40 @@ func TestMaybeShareValueElidesDeadRebind(t *testing.T) {
 	}
 }
 
+// TestIsExpressionOwnedWhenSourceIsOwned pins isOwned's *ast.IsExpression
+// case: a union `is` narrowing extracts the same underlying pointer its
+// source already holds, so it's only safe to skip cajaShare when that source
+// itself is owned (here, `move a` — the analyzer has already guaranteed no
+// other reference to a's value exists). Narrowing a NON-owned source (b,
+// used with no move) must still get cajaShare, since the narrowed pointer
+// could otherwise be aliased by whatever else already references b.
+func TestIsExpressionOwnedWhenSourceIsOwned(t *testing.T) {
+	input := `
+		type Cat struct { name String }
+		union Animal = Cat
+		let a: Animal = Cat{name: "Tom"}
+		let cat: Cat? = move a is Cat
+		let b: Animal = Cat{name: "Rex"}
+		let cat2: Cat? = b is Cat
+	`
+	program, _, a, err := script.ParseWithDir(input, "", "test.caja")
+	if err != nil {
+		t.Fatalf("Failed to parse script: %v", err)
+	}
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+	goCode = stripLineDirectives(goCode)
+
+	if !strings.Contains(goCode, "var cat *Cat = func() *Cat { if v, ok := (a).(*Cat); ok { return v }; return nil }()") {
+		t.Errorf("expected `move a is Cat` to skip cajaShare (a is provably the sole owner), got:\n%s", goCode)
+	}
+	if !strings.Contains(goCode, "var cat2 *Cat = cajaShare(func() *Cat { if v, ok := (b).(*Cat); ok { return v }; return nil }())") {
+		t.Errorf("expected `b is Cat` (no move) to still wrap in cajaShare, got:\n%s", goCode)
+	}
+}
+
 // stripLineDirectives removes every `//line file:N` directive Transpile
 // interleaves into the generated source (see lineDirective), so tests that
 // assert on codegen shape don't need to account for them appearing mid-block.

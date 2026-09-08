@@ -30,9 +30,16 @@ func isOwned(n ast.Expression) bool {
 	if prefix, ok := n.(*ast.PrefixExpression); ok && prefix.Operator == "move" {
 		return true
 	}
-	switch n.(type) {
+	switch e := n.(type) {
 	case *ast.CallExpression, *ast.SafePipeExpression, *ast.StreamPipeExpression, *ast.StructLiteral, *ast.ArrayLiteral, *ast.MapLiteral:
 		return true
+	case *ast.IsExpression:
+		// A union `is` narrowing extracts the same underlying pointer its
+		// source already holds — it's only unaliased if the source itself
+		// was (e.g. `move a is Cat`, or narrowing a freshly-returned union
+		// value straight off a call), not merely because narrowing is
+		// itself a distinct expression shape.
+		return isOwned(e.Left)
 	}
 	return false
 }
