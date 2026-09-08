@@ -11,16 +11,556 @@ import (
 	"strings"
 )
 
+// TranspileOptions controls transpiler behavior that must differ between
+// `caja build` (produces a standalone binary) and `caja run` (wants
+// interpreter-like ergonomics from the same generated code).
+type TranspileOptions struct {
+	// PrintResult, when true, prints the value of the program's last
+	// top-level statement if it is an expression statement — mirroring the
+	// tree-walking interpreter's `caja run` behavior. Left false for `caja
+	// build` so standalone binaries keep their existing output.
+	PrintResult bool
+}
+
 type transpileContext struct {
 	analyzer              *analyzer.Analyzer
 	currentFuncName       string
 	currentFunctionParams []string
-	hasTailCall           bool
+	// currentFunctionReturnType is the enclosing function's declared return
+	// type, as the same Go type string used in its signature (see retType at
+	// both fnCtx construction sites). Passed as expectedType when
+	// transpiling a ReturnStatement's value, so an ambiguous literal whose
+	// own inferred type is vague (an empty array/map literal, e.g. `return
+	// []` from a function declared to return [Transition]) resolves against
+	// the function's actual declared type instead of its own "any" default.
+	currentFunctionReturnType string
+	hasTailCall               bool
 	usedModules           map[string]bool
 	CurrentModulePath     string
-	packageLevelCode      *bytes.Buffer
-	inFunction            bool
-	usesAsync             bool
+	// CurrentSourceFile is the .caja file the statement currently being
+	// transpiled came from — the top-level script, or a resolved imported
+	// module path. Used to emit `//line` directives (see lineDirective) so a
+	// Go panic or compile error reports a .caja file/line instead of a
+	// position in the generated (and later deleted) temp Go file.
+	CurrentSourceFile string
+	packageLevelCode  *bytes.Buffer
+	inFunction        bool
+	usesAsync         bool
+
+	// currentFunctionBody is the *ast.BlockStatement of the OUTERMOST
+	// enclosing caja function currently being transpiled — never a nested
+	// closure's own body. nil at the top level (script statements outside
+	// any function), where the dead-name optimization in maybeShareValue
+	// never applies. Nested closures INHERIT this pointer unchanged from
+	// their parent ctx (see the two fnCtx construction sites), so the
+	// liveness search in maybeShareValue always scans a superset scope — a
+	// strict superset can only produce extra conservative false positives (a
+	// missed optimization), never a false negative (a correctness bug),
+	// which is what makes it safe to catch a closure capturing an outer
+	// identifier regardless of where in the function that closure is defined.
+	currentFunctionBody *ast.BlockStatement
+
+	// inLoop is true iff the function whose body is CURRENTLY being
+	// transpiled (the immediate enclosing function — NOT inherited across a
+	// closure boundary, unlike currentFunctionBody) will be wrapped in tail
+	// call optimization's `for { ... }` (see functionBodyHasSelfTailCall).
+	// When true, maybeShareValue never elides the cajaShare wrap for an
+	// Identifier source, since the same rebind statement re-executes against
+	// the previous iteration's value on every simulated "call".
+	inLoop bool
+
+	// topLevelFileName is the outermost script's own file identity, captured
+	// once from Transpile's stable `a` parameter and never reassigned.
+	// ctx.analyzer (and any local `a := ctx.analyzer` alias of it) DOES get
+	// swapped to each imported module's own analyzer while that module's
+	// code is being transpiled, so ctx.analyzer.GlobalEnv().FileName is only
+	// correct when transpiling the top-level script itself — comparing a
+	// definition's FilePath against THAT (rather than this fixed field)
+	// while inside a module's own code always sees "same file" (a module
+	// comparing its own FilePath against its own GlobalEnv().FileName), so
+	// a struct/identifier a module refers to that is ALSO defined in that
+	// same module would wrongly skip the module-prefix its own type
+	// definition already got. Every "is this defined outside the top-level
+	// script" check must compare against this field instead.
+	topLevelFileName string
+}
+
+// enableValueFormatting marks the shared caja_format_value runtime helper (and
+// the stdlib imports it needs) as required. Used by both the `caja run`
+// final-value auto-print and the `log.export` CSV writer, so a value never
+// needs two independent formatting implementations.
+func enableValueFormatting(ctx *transpileContext) {
+	ctx.usedModules["format_value"] = true
+	ctx.usedModules["reflect"] = true
+	ctx.usedModules["sort"] = true
+	ctx.usedModules["time"] = true
+	ctx.usedModules["fmt"] = true
+	ctx.usedModules["strings"] = true
+}
+
+// statementLine returns the .caja source line a top-level ast.Statement
+// starts at, or 0 if unknown. There's no Pos()/line accessor on the
+// ast.Statement interface itself, so this mirrors transpileStatement's own
+// type switch — every concrete statement type embeds a Token field.
+func statementLine(stmt ast.Statement) int {
+	switch s := stmt.(type) {
+	case *ast.LetStatement:
+		return s.Token.Line
+	case *ast.ConstStatement:
+		return s.Token.Line
+	case *ast.ImportStatement:
+		return s.Token.Line
+	case *ast.ReturnStatement:
+		return s.Token.Line
+	case *ast.AssignStatement:
+		return s.Token.Line
+	case *ast.BlockStatement:
+		return s.Token.Line
+	case *ast.TypeConstraintStatement:
+		return s.Token.Line
+	case *ast.TypeAliasStatement:
+		return s.Token.Line
+	case *ast.ExpressionStatement:
+		return s.Token.Line
+	case *ast.IndexAssignmentStatement:
+		return s.Token.Line
+	case *ast.PropertyAssignmentStatement:
+		return s.Token.Line
+	case *ast.AwaitStatement:
+		return s.Token.Line
+	default:
+		return 0
+	}
+}
+
+// lineDirective returns a Go `//line file:line` compiler directive that
+// remaps the position Go reports (in panics, compile errors, and stack
+// traces) for whatever generated code immediately follows it, back to the
+// original .caja source. Must be written at column 0 with nothing else on
+// its line — the Go compiler silently ignores an indented `//line` comment,
+// so callers must never prepend a tab before this string.
+func lineDirective(file string, line int) string {
+	if file == "" || line <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("//line %s:%d\n", file, line)
+}
+
+// pinRangeToLine re-asserts the same //line directive before every internal
+// line break in code, so a multi-line generated block (stream-pipe/async/
+// unwrap IIFEs, which bypass transpileStatement's per-statement directives
+// entirely) reports as one single .caja source line on panic, regardless of
+// which physical Go line inside it actually panics. Never inserts a
+// directive after the final line — callers glue real trailing code directly
+// onto it with no separating newline in some contexts (e.g. array/call-
+// argument position), and a dangling directive there would either get
+// silently swallowed into a comment or corrupt that trailing syntax.
+func pinRangeToLine(code, file string, line int) string {
+	if file == "" || line <= 0 {
+		return code
+	}
+	lines := strings.Split(code, "\n")
+	if len(lines) < 2 {
+		return code
+	}
+	directive := lineDirective(file, line)
+	var buf strings.Builder
+	for i, l := range lines {
+		if i > 0 {
+			buf.WriteString("\n")
+			if !(i == len(lines)-1 && l == "") {
+				buf.WriteString(directive)
+			}
+		}
+		buf.WriteString(l)
+	}
+	return buf.String()
+}
+
+// splitGenericTypeArgs splits the comma-separated type arguments inside the
+// outermost [...] of a generic type instantiation string (e.g.
+// "cajaMap[string, float64]" -> ["string", "float64"]), respecting nested
+// brackets so a nested generic type argument (e.g. a matrix's
+// "cajaArray[*cajaArray[float64]]") isn't split on its own internal commas.
+// Used only as a fallback when an array/map literal's element/key/value type
+// can't be resolved directly from its own analyzer symbol.
+func splitGenericTypeArgs(s string) []string {
+	start := strings.Index(s, "[")
+	end := strings.LastIndex(s, "]")
+	if start == -1 || end == -1 || end <= start {
+		return nil
+	}
+	inner := s[start+1 : end]
+	var args []string
+	depth := 0
+	last := 0
+	for i, r := range inner {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, strings.TrimSpace(inner[last:i]))
+				last = i + 1
+			}
+		}
+	}
+	args = append(args, strings.TrimSpace(inner[last:]))
+	return args
+}
+
+// ensureUnshared walks an lvalue path (an Identifier, or a chain of
+// PropertyExpression/IndexExpression built on top of one — arbitrarily
+// nested, e.g. `a.b[0].c` or a matrix's `matrix[i][j]`) and emits, into buf,
+// whatever "if X.cajaShared { X = X.cajaClone() }" statements are needed so
+// every copy-on-write-tracked container along the path is uniquely owned by
+// the time execution reaches the statement that follows. Returns the Go
+// lvalue expression string that reaches this exact location — reassignable,
+// and safe for the caller to select/index one further step into (the caller
+// is responsible for that final step; this function resolves everything up
+// to, and including making unshared, the container the final step targets).
+//
+// This is the single mechanism behind both chained property/index
+// assignment and array/map copy-on-write: Go already supports assigning
+// through an arbitrarily deep chain natively (`a.B.C.D = val`), so the only
+// thing missing at any level beyond the first was this check — and the
+// check has the same shape everywhere, since structs, arrays, and maps all
+// share the same cajaShared/cajaClone convention (see isSharableSymbol).
+func ensureUnshared(expr ast.Expression, ctx *transpileContext, buf *bytes.Buffer) (string, error) {
+	a := ctx.analyzer
+	switch e := expr.(type) {
+	case *ast.PropertyExpression:
+		parent, err := ensureUnshared(e.Object, ctx, buf)
+		if err != nil {
+			return "", err
+		}
+		if objSym, _ := a.GetSymbol(e.Object); objSym != nil {
+			if modSym, ok := objSym.(*symbol.ModuleSymbol); ok && modSym.FilePath != "" {
+				// A module-level binding, not a COW-tracked container —
+				// resolve exactly like the normal read path does, no chain
+				// to cascade through.
+				return fmt.Sprintf("%s_%s", sanitizeIdentifier(modSym.FilePath), e.Property.Value), nil
+			}
+		}
+		exportedName := strings.ToUpper(e.Property.Value[:1]) + e.Property.Value[1:]
+		fieldExpr := fmt.Sprintf("%s.%s", parent, exportedName)
+		if sym, ok := a.GetSymbol(e); ok && isSharableSymbol(sym) {
+			ctx.usedModules["cow_shared"] = true
+			buf.WriteString(fmt.Sprintf("if %s.cajaShared {\n%s = %s.cajaClone()\n}\n", fieldExpr, fieldExpr, fieldExpr))
+		}
+		return fieldExpr, nil
+	case *ast.IndexExpression:
+		parent, err := ensureUnshared(e.Left, ctx, buf)
+		if err != nil {
+			return "", err
+		}
+		index, err := transpileExpression(e.Index, ctx, "")
+		if err != nil {
+			return "", err
+		}
+		leftSym, _ := a.GetSymbol(e.Left)
+		var elemExpr string
+		if _, isArr := leftSym.(*symbol.ArraySymbol); isArr {
+			elemExpr = fmt.Sprintf("%s.Data[int(%s)]", parent, index)
+		} else {
+			if indexSym, _ := a.GetSymbol(e.Index); isStructKeySymbol(indexSym) {
+				index += ".Key()"
+			}
+			elemExpr = fmt.Sprintf("%s.Data[%s]", parent, index)
+		}
+		if sym, ok := a.GetSymbol(e); ok && isSharableSymbol(sym) {
+			ctx.usedModules["cow_shared"] = true
+			buf.WriteString(fmt.Sprintf("if %s.cajaShared {\n%s = %s.cajaClone()\n}\n", elemExpr, elemExpr, elemExpr))
+		}
+		return elemExpr, nil
+	default:
+		// A plain Identifier (the base case — mirrors the single-level
+		// struct-COW check this function generalizes), or any other
+		// expression shape we don't specifically cascade through: transpile
+		// normally, and if it's an Identifier resolving to a COW-tracked
+		// container, apply the same check with no chain to walk.
+		name, err := transpileExpression(expr, ctx, "")
+		if err != nil {
+			return "", err
+		}
+		if _, ok := expr.(*ast.Identifier); ok {
+			if sym, ok := a.GetSymbol(expr); ok && isSharableSymbol(sym) {
+				ctx.usedModules["cow_shared"] = true
+				buf.WriteString(fmt.Sprintf("if %s.cajaShared {\n%s = %s.cajaClone()\n}\n", name, name, name))
+			}
+		}
+		return name, nil
+	}
+}
+
+// isSharableSymbol unwraps a NullableSymbol (mirroring the exact unwrapping
+// ctx.mapSymbolToGoType already does, since a nullable struct/array/map type
+// is still just a pointer under the hood) and reports whether the resolved
+// type beneath is one of the copy-on-write-tracked containers: a struct
+// (StructInstanceSymbol for a variable holding a struct value, StructDefSymbol
+// for e.g. how a function parameter's struct type resolves — both map to the
+// identical "*StructName" Go type), an array, or a map. Arrays and maps
+// compile to *cajaArray[T]/*cajaMap[K,V] (see mapSymbolToGoType), which carry
+// the same cajaShared/cajaSetShared/cajaClone convention as generated struct
+// types, so one predicate covers all three uniformly.
+func isSharableSymbol(sym symbol.Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if nullableSym, ok := sym.(*symbol.NullableSymbol); ok {
+		return isSharableSymbol(nullableSym.Underlying)
+	}
+	switch sym.(type) {
+	case *symbol.StructInstanceSymbol, *symbol.StructDefSymbol, *symbol.ArraySymbol, *symbol.MapSymbol:
+		return true
+	}
+	return false
+}
+
+// isStructKeySymbol reports whether sym resolves to a struct (either
+// StructInstanceSymbol, or StructDefSymbol — the same instance-vs-declared-
+// type split isSharableSymbol unwraps, e.g. a variable declared with an
+// explicit struct type annotation resolves to StructDefSymbol on later
+// references, not StructInstanceSymbol), used as a map key. A struct map key
+// must expose a `key() -> String` field (validated at analysis time), so its
+// Go map index expression needs a trailing ".Key()" to call that closure and
+// get the actual string key, instead of using the struct pointer itself.
+func isStructKeySymbol(sym symbol.Symbol) bool {
+	switch sym.(type) {
+	case *symbol.StructInstanceSymbol, *symbol.StructDefSymbol:
+		return true
+	}
+	return false
+}
+
+// functionBodyHasSelfTailCall reports whether body contains, anywhere within
+// the recursion topology transpileStatement itself uses when sharing a
+// single ctx across nested transpilation (a plain BlockStatement, or an
+// IfExpression's Consequence/Alternative — every other construct containing
+// a block is a FunctionLiteral, which always forks a fresh transpileContext
+// rather than reusing this one), a `return funcName(...)` that
+// transpileStatement's ReturnStatement case rewrites into `continue` inside
+// a `for{}` wrapper around the whole function body. Must run as a pre-pass
+// before transpileStatement(body, fnCtx) — ctx.hasTailCall is only known
+// partway through that same forward pass, too late for an earlier
+// maybeShareValue call in the body to see it.
+func functionBodyHasSelfTailCall(body *ast.BlockStatement, funcName string) bool {
+	if body == nil || funcName == "" {
+		return false
+	}
+	for _, stmt := range body.Statements {
+		switch s := stmt.(type) {
+		case *ast.ReturnStatement:
+			if call, ok := s.ReturnValue.(*ast.CallExpression); ok {
+				if ident, ok := call.Function.(*ast.Identifier); ok && ident.Value == funcName {
+					return true
+				}
+			}
+		case *ast.ExpressionStatement:
+			if ifExpr, ok := s.Expression.(*ast.IfExpression); ok {
+				if functionBodyHasSelfTailCall(ifExpr.Consequence, funcName) {
+					return true
+				}
+				if ifExpr.Alternative != nil && functionBodyHasSelfTailCall(ifExpr.Alternative, funcName) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// afterPos reports whether (line, col) is strictly after (afterLine, afterCol)
+// in source-position order.
+func afterPos(line, col, afterLine, afterCol int) bool {
+	if line != afterLine {
+		return line > afterLine
+	}
+	return col > afterCol
+}
+
+// identifierReadAfter reports whether name may still be read anywhere within
+// node's subtree after source position (afterLine, afterCol) — a "read"
+// meaning any place *ast.Identifier{Value: name} appears in an expression
+// position that gets evaluated (write targets like an AssignStatement's own
+// Name, or a PropertyExpression's field name, are excluded). Any occurrence
+// found inside a nested *ast.FunctionLiteral body counts as "read after"
+// unconditionally, regardless of its own position relative to
+// (afterLine, afterCol) — a closure can be invoked at an arbitrary future
+// time, even one defined textually before the point being checked, so
+// position comparison inside one is meaningless. An unrecognized node type
+// falls through to the default case, which conservatively returns true
+// (assume it could contain a read) rather than silently under-approximating.
+func identifierReadAfter(node ast.Node, name string, afterLine, afterCol int) bool {
+	return identifierReadAfterWalk(node, name, afterLine, afterCol, false)
+}
+
+func identifierReadAfterWalk(node ast.Node, name string, afterLine, afterCol int, insideClosure bool) bool {
+	rec := func(n ast.Node) bool {
+		return identifierReadAfterWalk(n, name, afterLine, afterCol, insideClosure)
+	}
+	switch n := node.(type) {
+	case nil:
+		return false
+	case *ast.Identifier:
+		if n.Value != name {
+			return false
+		}
+		if insideClosure {
+			return true
+		}
+		return afterPos(n.Token.Line, n.Token.Column, afterLine, afterCol)
+	case *ast.BlockStatement:
+		for _, s := range n.Statements {
+			if rec(s) {
+				return true
+			}
+		}
+		return false
+	case *ast.LetStatement:
+		return rec(n.Value)
+	case *ast.ConstStatement:
+		return rec(n.Value)
+	case *ast.ImportStatement:
+		return false
+	case *ast.ReturnStatement:
+		return rec(n.ReturnValue)
+	case *ast.AssignStatement:
+		return rec(n.Value)
+	case *ast.TypeConstraintStatement:
+		return rec(n.Predicate)
+	case *ast.TypeAliasStatement:
+		return false
+	case *ast.ExpressionStatement:
+		return rec(n.Expression)
+	case *ast.IndexAssignmentStatement:
+		return rec(n.Left) || rec(n.Index) || rec(n.Value)
+	case *ast.PropertyAssignmentStatement:
+		return rec(n.Object) || rec(n.Value)
+	case *ast.AwaitStatement:
+		for _, p := range n.Pipelines {
+			if rec(p) {
+				return true
+			}
+		}
+		return false
+	case *ast.NilLiteral, *ast.NumberLiteral, *ast.StringLiteral, *ast.BooleanLiteral, *ast.DateLiteral:
+		return false
+	case *ast.ArrayLiteral:
+		for _, el := range n.Elements {
+			if rec(el) {
+				return true
+			}
+		}
+		return false
+	case *ast.FunctionLiteral:
+		return identifierReadAfterWalk(n.Body, name, afterLine, afterCol, true)
+	case *ast.StructLiteral:
+		for _, v := range n.Fields {
+			if rec(v) {
+				return true
+			}
+		}
+		return false
+	case *ast.GenericIdentifier:
+		return rec(n.Identifier)
+	case *ast.PrefixExpression:
+		return rec(n.Right)
+	case *ast.InfixExpression:
+		return rec(n.Left) || rec(n.Right)
+	case *ast.IfExpression:
+		if rec(n.Condition) || rec(n.Consequence) {
+			return true
+		}
+		return n.Alternative != nil && rec(n.Alternative)
+	case *ast.CallExpression:
+		if rec(n.Function) {
+			return true
+		}
+		for _, a := range n.Arguments {
+			if rec(a) {
+				return true
+			}
+		}
+		return false
+	case *ast.IndexExpression:
+		return rec(n.Left) || rec(n.Index)
+	case *ast.PropertyExpression:
+		return rec(n.Object)
+	case *ast.MapLiteral:
+		for k, v := range n.Pairs {
+			if rec(k) || rec(v) {
+				return true
+			}
+		}
+		return false
+	case *ast.SafePipeExpression:
+		return rec(n.Left) || (n.Call != nil && rec(n.Call))
+	case *ast.StreamPipeExpression:
+		if rec(n.Left) {
+			return true
+		}
+		if n.Join != nil && rec(n.Join) {
+			return true
+		}
+		return n.Call != nil && rec(n.Call)
+	case *ast.JoinGroupExpression:
+		for _, c := range n.Calls {
+			if rec(c) {
+				return true
+			}
+		}
+		return false
+	case *ast.AsyncExpression:
+		return rec(n.Right)
+	case *ast.UnwrapExpression:
+		return rec(n.Right)
+	default:
+		return true // fail safe: unrecognized node type, assume it could read name
+	}
+}
+
+// maybeShareValue is the single copy-on-write "aliasing" check, called
+// wherever a value currently gets aliased into a new binding (let/const,
+// assignment, return, a call argument, a struct-literal field). If
+// sourceExpr resolves to a struct value and isn't a freshly-constructed,
+// definitely-unaliased temporary (isOwned — a call result, a struct
+// literal, or an explicit `move`), the generated code marks it shared via
+// cajaShare before handing it off. Checking the source expression's own
+// resolved type (rather than a callee's declared parameter type) keeps this
+// uniform across all call sites without needing to resolve callee
+// signatures.
+//
+// When sourceExpr is a plain identifier whose name is never read again
+// within the enclosing function (see identifierReadAfter), this rebind is
+// just a move of the last live reference to the object, not a new alias —
+// nothing needs marking, and whatever cajaShared state the object already
+// carries (set correctly by an earlier, real aliasing event, if any) is left
+// untouched. This is skipped entirely inside a self-tail-recursive function
+// body (ctx.inLoop), since the same rebind statement re-executes against the
+// previous "iteration"'s value there and a skipped share would let one
+// iteration's in-place mutation corrupt what the next iteration reads.
+func maybeShareValue(sourceExpr ast.Expression, code string, ctx *transpileContext) string {
+	sym, _ := ctx.analyzer.GetSymbol(sourceExpr)
+	if !isSharableSymbol(sym) || isOwned(sourceExpr) {
+		return code
+	}
+
+	if ident, ok := sourceExpr.(*ast.Identifier); ok &&
+		!ctx.inLoop &&
+		ctx.currentFunctionBody != nil &&
+		ident.Token.Line > 0 { // exclude synthetic zero-position identifiers spliced
+		// in during stream-pipe/join codegen — a zero line/col isn't a real
+		// source position and must not feed the liveness comparison.
+		if !identifierReadAfter(ctx.currentFunctionBody, ident.Value, ident.Token.Line, ident.Token.Column) {
+			return code
+		}
+	}
+
+	ctx.usedModules["cow_shared"] = true
+	return fmt.Sprintf("cajaShare(%s)", code)
 }
 
 // ctx.mapSymbolToGoType converts a semantic symbol to a static Go type string.
@@ -58,7 +598,8 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		if elType == "" {
 			elType = "any"
 		}
-		return "[]" + elType
+		ctx.usedModules["cow_array"] = true
+		return "*cajaArray[" + elType + "]"
 	}
 	if mapSym, ok := sym.(*symbol.MapSymbol); ok {
 		kType := ctx.mapSymbolToGoType(mapSym.Key)
@@ -71,7 +612,8 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		if vType == "" {
 			vType = "any"
 		}
-		return "map[" + kType + "]" + vType
+		ctx.usedModules["cow_map"] = true
+		return "*cajaMap[" + kType + ", " + vType + "]"
 	}
 	if fnSym, ok := sym.(*symbol.FunctionSymbol); ok {
 		var paramTypes []string
@@ -96,7 +638,7 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 	}
 	if structDef, ok := sym.(*symbol.StructDefSymbol); ok {
 		baseName := structDef.Name
-		if structDef.FilePath != "" && ctx != nil && structDef.FilePath != ctx.analyzer.GlobalEnv().FileName {
+		if structDef.FilePath != "" && ctx != nil && structDef.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(structDef.FilePath) + "_" + baseName
 		}
 		if len(structDef.InstantiatedTypes) > 0 {
@@ -110,14 +652,14 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 	}
 	if unionSym, ok := sym.(*symbol.UnionSymbol); ok {
 		baseName := unionSym.Name
-		if unionSym.FilePath != "" && ctx != nil && unionSym.FilePath != ctx.analyzer.GlobalEnv().FileName {
+		if unionSym.FilePath != "" && ctx != nil && unionSym.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(unionSym.FilePath) + "_" + baseName
 		}
 		return baseName
 	}
 	if structInst, ok := sym.(*symbol.StructInstanceSymbol); ok {
 		baseName := structInst.Def.Name
-		if structInst.Def.FilePath != "" && ctx != nil && structInst.Def.FilePath != ctx.analyzer.GlobalEnv().FileName {
+		if structInst.Def.FilePath != "" && ctx != nil && structInst.Def.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(structInst.Def.FilePath) + "_" + baseName
 		}
 		if len(structInst.Def.InstantiatedTypes) > 0 {
@@ -150,16 +692,23 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 }
 
 // Transpile walks the AST and returns the equivalent Go source code.
-func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
+func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions) (string, error) {
 	streamPipeCounter = 0
 
 	var bodyBuf bytes.Buffer
 	var pkgLevelBuf bytes.Buffer
 
+	topSourceFile := ""
+	if a.GlobalEnv() != nil {
+		topSourceFile = a.GlobalEnv().FileName
+	}
+
 	ctx := &transpileContext{
-		analyzer:         a,
-		usedModules:      make(map[string]bool),
-		packageLevelCode: &pkgLevelBuf,
+		analyzer:          a,
+		usedModules:       make(map[string]bool),
+		packageLevelCode:  &pkgLevelBuf,
+		CurrentSourceFile: topSourceFile,
+		topLevelFileName:  topSourceFile,
 	}
 
 	// Prepend imported custom modules in topological order
@@ -170,6 +719,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 			modAnalyzer := a.GlobalEnv().ModuleAnalyzers[modPath].(*analyzer.Analyzer)
 			ctx.analyzer = modAnalyzer
 			ctx.CurrentModulePath = modPath
+			ctx.CurrentSourceFile = a.GlobalEnv().ModuleFilePaths[modPath]
 			bodyBuf.WriteString(fmt.Sprintf("\t// --- Module: %s ---\n", modPath))
 			for _, stmt := range modAST.Statements {
 				code, err := transpileStatement(stmt, ctx)
@@ -187,7 +737,10 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 					continue
 				}
 
-				bodyBuf.WriteString("\t" + code + "\n")
+				bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+				bodyBuf.WriteString("\t")
+				bodyBuf.WriteString(code)
+				bodyBuf.WriteString("\n")
 
 				if letStmt, ok := stmt.(*ast.LetStatement); ok {
 					bodyBuf.WriteString(fmt.Sprintf("\t_ = %s\n", sanitizeIdentifier(ctx.CurrentModulePath)+"_"+letStmt.Name.Value))
@@ -199,9 +752,10 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 		}
 	}
 	ctx.CurrentModulePath = ""
+	ctx.CurrentSourceFile = topSourceFile
 	ctx.analyzer = a
 
-	for _, stmt := range program.Statements {
+	for i, stmt := range program.Statements {
 		code, err := transpileStatement(stmt, ctx)
 		if err != nil {
 			return "", err
@@ -217,7 +771,43 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 			continue
 		}
 
-		bodyBuf.WriteString("\t" + code + "\n")
+		if opts.PrintResult && i == len(program.Statements)-1 {
+			if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
+				if sym, ok := a.GetSymbol(exprStmt.Expression); ok && sym != nil && sym.Type() != environment.NULL_OBJ {
+					ctx.usedModules["print_result"] = true
+					enableValueFormatting(ctx)
+					bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+					bodyBuf.WriteString(fmt.Sprintf("\t_cajaResult := %s\n\tcaja_print_result(_cajaResult)\n", code))
+					continue
+				}
+			}
+			// A top-level `return <expr>` as the script's final statement is
+			// the interpreter-era convention for "this is the script's
+			// result" (transpileStatement's *ast.ReturnStatement case
+			// otherwise discards the value via `_ = val` at top level, since
+			// a bare Go `return` can't carry one out of func main). Print it
+			// the same way a trailing bare expression is printed, instead of
+			// re-emitting the original discarding form.
+			if retStmt, ok := stmt.(*ast.ReturnStatement); ok && retStmt.ReturnValue != nil {
+				if sym, ok := a.GetSymbol(retStmt.ReturnValue); ok && sym != nil && sym.Type() != environment.NULL_OBJ {
+					val, err := transpileExpression(retStmt.ReturnValue, ctx, "")
+					if err != nil {
+						return "", err
+					}
+					val = maybeShareValue(retStmt.ReturnValue, val, ctx)
+					ctx.usedModules["print_result"] = true
+					enableValueFormatting(ctx)
+					bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+					bodyBuf.WriteString(fmt.Sprintf("\t_cajaResult := %s\n\tcaja_print_result(_cajaResult)\n", val))
+					continue
+				}
+			}
+		}
+
+		bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
+		bodyBuf.WriteString("\t")
+		bodyBuf.WriteString(code)
+		bodyBuf.WriteString("\n")
 
 		// Add dummy usage for variables to prevent "declared but not used" errors
 		if letStmt, ok := stmt.(*ast.LetStatement); ok {
@@ -232,17 +822,29 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 	var finalBuf bytes.Buffer
 	finalBuf.WriteString("package main\n\n")
 
-	if strings.Contains(bodyCode, "fmt.") || ctx.usedModules["fmt"] {
-		finalBuf.WriteString("import \"fmt\"\n")
+	// fmt, os, runtime, and strings are always needed: every generated
+	// main() opens with a recover handler (see below) that uses all four —
+	// runtime.Callers/CallersFrames plus strings.HasSuffix to locate the
+	// .caja source line a panic originated at — regardless of whether the
+	// caja source itself needs them.
+	finalBuf.WriteString("import \"fmt\"\n")
+	finalBuf.WriteString("import \"os\"\n")
+	finalBuf.WriteString("import \"runtime\"\n")
+	finalBuf.WriteString("import \"strings\"\n")
+	if ctx.usedModules["reflect"] {
+		finalBuf.WriteString("import \"reflect\"\n")
 	}
-	if strings.Contains(bodyCode, "math.") || ctx.usedModules["math"] || ctx.usedModules["math_rand"] {
+	if ctx.usedModules["sort"] {
+		finalBuf.WriteString("import \"sort\"\n")
+	}
+	if ctx.usedModules["csv"] {
+		finalBuf.WriteString("import \"encoding/csv\"\n")
+	}
+	if ctx.usedModules["math"] || ctx.usedModules["math_rand"] {
 		finalBuf.WriteString("import \"math\"\n")
 	}
 	if ctx.usedModules["math_rand"] {
 		finalBuf.WriteString("import \"math/rand\"\n")
-	}
-	if ctx.usedModules["strings"] {
-		finalBuf.WriteString("import \"strings\"\n")
 	}
 	if ctx.usedModules["utf8"] {
 		finalBuf.WriteString("import \"unicode/utf8\"\n")
@@ -272,8 +874,32 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 	}
 
 	finalBuf.WriteString("\nfunc main() {\n")
+	// Turn an unhandled runtime panic into a clean, .caja-source-located
+	// message instead of a raw Go stack trace pointing at line numbers
+	// inside a deleted temp dir. caja_panic_location (builtins.go) walks the
+	// preserved panic stack for the first frame whose file the `//line`
+	// directives (emitted per-statement above) mapped to a .caja file.
+	finalBuf.WriteString("\tdefer func() {\n\t\tif r := recover(); r != nil {\n\t\t\tif loc := caja_panic_location(); loc != \"\" {\n\t\t\t\tfmt.Fprintf(os.Stderr, \"error: %v\\n    at %s\\n\", r, loc)\n\t\t\t} else {\n\t\t\t\tfmt.Fprintln(os.Stderr, \"error:\", r)\n\t\t\t}\n\t\t\tos.Exit(1)\n\t\t}\n\t}()\n")
+	if ctx.usedModules["log_export"] {
+		finalBuf.WriteString("\tdefer caja_flush_export()\n")
+	}
 	finalBuf.WriteString(bodyCode)
+	if ctx.usedModules["async_panic_guard"] {
+		// Best-effort safety net for a fire-and-forget async/pipe task that
+		// panicked but was never unwrap/await-ed: not watertight (a task
+		// that's truly never synchronized with could still be abandoned
+		// mid-execution when main returns, same as any non-panicking
+		// goroutine would be), but catches the common case where it finishes
+		// before the rest of the script does.
+		finalBuf.WriteString("\tcaja_check_async_panic()\n")
+	}
 	finalBuf.WriteString("}\n")
+
+	// A `//line` directive stays in effect until the next one or EOF — reset
+	// it here so it doesn't leak into the injected runtime helpers below
+	// (which aren't .caja source) and get misreported as one by
+	// caja_panic_location's suffix check.
+	finalBuf.WriteString(lineDirective("caja-runtime", 1))
 
 	injectBuiltinDependencies(ctx, &finalBuf)
 
@@ -362,15 +988,26 @@ func transpileMemoBinding(name string, fnLit *ast.FunctionLiteral, ctx *transpil
 	}
 
 	fnCtx := &transpileContext{
-		analyzer:              a,
-		currentFunctionParams: paramNames,
-		usedModules:           ctx.usedModules,
-		CurrentModulePath:     ctx.CurrentModulePath,
-		packageLevelCode:      ctx.packageLevelCode,
-		inFunction:            true,
+		analyzer:                  a,
+		currentFunctionParams:     paramNames,
+		currentFunctionReturnType: retType,
+		usedModules:               ctx.usedModules,
+		CurrentModulePath:         ctx.CurrentModulePath,
+		CurrentSourceFile:         ctx.CurrentSourceFile,
+		packageLevelCode:          ctx.packageLevelCode,
+		topLevelFileName:          ctx.topLevelFileName,
+		inFunction:                true,
 	}
 	if fnSym != nil {
 		fnCtx.currentFuncName = fnSym.Name
+	}
+	if ctx.currentFunctionBody != nil {
+		fnCtx.currentFunctionBody = ctx.currentFunctionBody
+	} else {
+		fnCtx.currentFunctionBody = fnLit.Body
+	}
+	if fnCtx.currentFuncName != "" {
+		fnCtx.inLoop = functionBodyHasSelfTailCall(fnLit.Body, fnCtx.currentFuncName)
 	}
 
 	body, err := transpileStatement(fnLit.Body, fnCtx)
@@ -432,6 +1069,20 @@ func transpileMemoBinding(name string, fnLit *ast.FunctionLiteral, ctx *transpil
 	out.WriteString(fmt.Sprintf("return v.(%s)\n", retType))
 	out.WriteString("}\n")
 	out.WriteString(fmt.Sprintf("result := %s(%s)\n", implName, strings.Join(paramNames, ", ")))
+	if fnSym != nil && isSharableSymbol(fnSym.ReturnType()) {
+		// The cache is a long-lived second owner of whatever gets stored
+		// here, regardless of whether the impl's own return statement saw
+		// it as a fresh, uniquely-owned value (e.g. a struct literal
+		// returned directly, trusted as "owned" and left unmarked there).
+		// Without this, the very first call's result is stored unshared,
+		// and mutating the caller's copy corrupts the cached entry for
+		// every future call with the same key. Marking it once here is
+		// enough — cajaShared lives on the struct instance itself, so it
+		// stays set across every future cache hit that hands out this
+		// same pointer (see the `return v.(...)` cache-hit path above).
+		ctx.usedModules["cow_shared"] = true
+		out.WriteString("result = cajaShare(result)\n")
+	}
 	out.WriteString(fmt.Sprintf("%s.Store(key, result)\n", cacheVar))
 	out.WriteString("return result\n")
 	out.WriteString("}\n")
@@ -462,6 +1113,7 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		if val == "" {
 			return "", nil
 		}
+		val = maybeShareValue(s.Value, val, ctx)
 
 		if varType != "" && varType != "any" {
 			return fmt.Sprintf("var %s %s = %s", prefixIdentifier(ctx, s.Name.Value), varType, val), nil
@@ -487,6 +1139,7 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		if val == "" {
 			return "", nil
 		}
+		val = maybeShareValue(s.Value, val, ctx)
 
 		return fmt.Sprintf("%s := %s // const", prefixIdentifier(ctx, s.Name.Value), val), nil
 
@@ -500,6 +1153,7 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 					if err != nil {
 						return "", err
 					}
+					argStr = maybeShareValue(arg, argStr, ctx)
 					buf.WriteString(fmt.Sprintf("_tco%d := %s\n", i, argStr))
 				}
 				for i, param := range ctx.currentFunctionParams {
@@ -510,9 +1164,12 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			}
 		}
 
-		val, err := transpileExpression(s.ReturnValue, ctx, "")
+		val, err := transpileExpression(s.ReturnValue, ctx, ctx.currentFunctionReturnType)
 		if err != nil {
 			return "", err
+		}
+		if val != "" {
+			val = maybeShareValue(s.ReturnValue, val, ctx)
 		}
 		if !ctx.inFunction {
 			if val != "" {
@@ -526,6 +1183,7 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		if err != nil {
 			return "", err
 		}
+		val = maybeShareValue(s.Value, val, ctx)
 		return fmt.Sprintf("%s = %s", s.Name.Value, val), nil
 	case *ast.ExpressionStatement:
 		val, err := transpileExpression(s.Expression, ctx, "")
@@ -536,7 +1194,14 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 	case *ast.AwaitStatement:
 		return transpileAwaitStatement(s, ctx)
 	case *ast.IndexAssignmentStatement:
-		left, err := transpileExpression(s.Left, ctx, "")
+		val, err := transpileExpression(s.Value, ctx, "")
+		if err != nil {
+			return "", err
+		}
+		val = maybeShareValue(s.Value, val, ctx)
+
+		var buf bytes.Buffer
+		left, err := ensureUnshared(s.Left, ctx, &buf)
 		if err != nil {
 			return "", err
 		}
@@ -544,39 +1209,38 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		if err != nil {
 			return "", err
 		}
-		val, err := transpileExpression(s.Value, ctx, "")
-		if err != nil {
-			return "", err
-		}
 		leftSym, _ := a.GetSymbol(s.Left)
 		if _, isArr := leftSym.(*symbol.ArraySymbol); isArr {
-			return fmt.Sprintf("%s[int(%s)] = %s", left, index, val), nil
+			buf.WriteString(fmt.Sprintf("%s.Data[int(%s)] = %s", left, index, val))
+			return buf.String(), nil
 		}
 
-		if indexSym, _ := a.GetSymbol(s.Index); indexSym != nil {
-			if _, isStruct := indexSym.(*symbol.StructInstanceSymbol); isStruct {
-				index += ".Key()"
-			}
+		if indexSym, _ := a.GetSymbol(s.Index); isStructKeySymbol(indexSym) {
+			index += ".Key()"
 		}
 
-		return fmt.Sprintf("%s[%s] = %s", left, index, val), nil
+		buf.WriteString(fmt.Sprintf("%s.Data[%s] = %s", left, index, val))
+		return buf.String(), nil
 	case *ast.PropertyAssignmentStatement:
 		val, err := transpileExpression(s.Value, ctx, "")
 		if err != nil {
 			return "", err
 		}
+		val = maybeShareValue(s.Value, val, ctx)
 
 		objSym, _ := a.GetSymbol(s.Object)
 		if modSym, ok := objSym.(*symbol.ModuleSymbol); ok && modSym.FilePath != "" {
 			return fmt.Sprintf("%s_%s = %s", sanitizeIdentifier(modSym.FilePath), s.Property.Value, val), nil
 		}
 
-		left, err := transpileExpression(s.Object, ctx, "")
+		var buf bytes.Buffer
+		left, err := ensureUnshared(s.Object, ctx, &buf)
 		if err != nil {
 			return "", err
 		}
 		exportedName := strings.ToUpper(s.Property.Value[:1]) + s.Property.Value[1:]
-		return fmt.Sprintf("%s.%s = %s", left, exportedName, val), nil
+		buf.WriteString(fmt.Sprintf("%s.%s = %s", left, exportedName, val))
+		return buf.String(), nil
 	case *ast.BlockStatement:
 		var buf bytes.Buffer
 		buf.WriteString("{\n")
@@ -585,7 +1249,10 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			if err != nil {
 				return "", err
 			}
-			buf.WriteString("\t" + code + "\n")
+			buf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(bstmt)))
+			buf.WriteString("\t")
+			buf.WriteString(code)
+			buf.WriteString("\n")
 		}
 		buf.WriteString("}")
 		return buf.String(), nil
@@ -605,15 +1272,19 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 	case *ast.TypeAliasStatement:
 		if s.StructDefinition != nil {
 			var buf bytes.Buffer
-			structName := prefixIdentifier(ctx, s.Name.Value)
+			baseName := prefixIdentifier(ctx, s.Name.Value)
+			structName := baseName
+			receiverType := baseName
 			if len(s.TypeParameters) > 0 {
 				var tps []string
 				for _, tp := range s.TypeParameters {
 					tps = append(tps, fmt.Sprintf("%s any", tp))
 				}
-				structName = fmt.Sprintf("%s[%s]", structName, strings.Join(tps, ", "))
+				structName = fmt.Sprintf("%s[%s]", baseName, strings.Join(tps, ", "))
+				receiverType = fmt.Sprintf("%s[%s]", baseName, strings.Join(s.TypeParameters, ", "))
 			}
 			buf.WriteString(fmt.Sprintf("type %s struct {\n", structName))
+			var sharableFieldNames []string
 			sym, ok := a.GetSymbol(s)
 			if ok {
 				if structDef, isStruct := sym.(*symbol.StructDefSymbol); isStruct {
@@ -626,10 +1297,54 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 						// Capitalize field name to make it exported in Go
 						exportedName := strings.ToUpper(field.Name.Value[:1]) + field.Name.Value[1:]
 						buf.WriteString(fmt.Sprintf("\t%s %s\n", exportedName, goType))
+						if isSharableSymbol(fieldSym.Type) {
+							sharableFieldNames = append(sharableFieldNames, exportedName)
+						}
 					}
 				}
 			}
+			// cajaShared backs the copy-on-write scheme: once a struct value
+			// is aliased into a second binding (see maybeShareValue), it's
+			// marked shared permanently until a mutation clones it
+			// (cajaClone) — a conservative "shared bit", not a refcount,
+			// since Go gives no hook for detecting when an alias goes out of
+			// scope. Unexported, so it can never collide with a user field
+			// (every user field name is capitalized above) — but that also
+			// means caja_format_value must skip unexported fields, or this
+			// would leak into printed/exported struct output.
+			buf.WriteString("\tcajaShared bool\n")
 			buf.WriteString("}")
+
+			ctx.usedModules["cow_shared"] = true
+			var cascade strings.Builder
+			for _, fieldName := range sharableFieldNames {
+				// Aliasing this struct implicitly aliases everything
+				// reachable through it — s.Books is the same pointer either
+				// way the struct itself is reached, so it must be marked
+				// shared too, or a later `lib.books[i] = x` (which only
+				// checks lib.Books' own bit, not lib's) would mutate an
+				// array another binding still sees. cajaSetShared's own
+				// nil-guard makes this safe to call unconditionally even
+				// for a nullable/unset field.
+				cascade.WriteString(fmt.Sprintf("\ts.%s.cajaSetShared()\n", fieldName))
+			}
+			buf.WriteString(fmt.Sprintf(`
+func (s *%s) cajaSetShared() {
+	if s == nil {
+		return
+	}
+	s.cajaShared = true
+%s}
+func (s *%s) cajaClone() *%s {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.cajaShared = false
+	return &clone
+}
+`, receiverType, cascade.String(), receiverType, receiverType))
+
 			return buf.String(), nil
 		}
 		if s.TargetType != "" || s.Signature != nil {
@@ -708,6 +1423,23 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			return transpileBuiltinProperty(importedMod, e.Value, ctx)
 		}
 		_, filePath, ok := a.GetDefinition(e)
+		// Deliberately compared against a.GlobalEnv().FileName here, NOT the
+		// stable ctx.topLevelFileName used for struct/union symbol names
+		// above: entry.FilePath (see analyzer/scope.go's declare/
+		// declareImport) is set to "whichever file's analyzer processed
+		// this declaration" for EVERY binding, local params/lets included
+		// — there's no such thing as a "local struct type" the way there
+		// is a local variable, so the struct-symbol case can safely treat
+		// "not the top-level script" as "always prefixed". Here, comparing
+		// against ctx.topLevelFileName would wrongly module-prefix a
+		// perfectly ordinary function parameter or local `let` just
+		// because the function enclosing it happens to live inside an
+		// imported module's file — a.GlobalEnv().FileName instead reflects
+		// "the file whose code is CURRENTLY being transpiled" (ctx.analyzer
+		// is swapped per-module during that loop), which is what a local
+		// binding needs to be compared against to correctly stay
+		// unprefixed while its own enclosing module's code is what's being
+		// generated, and only get prefixed when referenced from elsewhere.
 		if ok && filePath != "" && filePath != a.GlobalEnv().FileName {
 			// Identifier was defined in another module
 			return sanitizeIdentifier(filePath) + "_" + e.Value, nil
@@ -741,25 +1473,50 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			goType = strings.TrimPrefix(ctx.mapSymbolToGoType(sym), "*")
 		}
 
-		buf.WriteString(fmt.Sprintf("&%s{\n", goType))
+		// Wrapped in an outer (...): `&Type{...}` immediately followed by a
+		// selector/index (e.g. this literal used as a bare `Point{x:1}.x`
+		// expression, or piped into something that appends `.Field`/`[i]`)
+		// would otherwise parse as `&(Type{...}.Field)` — Go's `&` binds
+		// looser than `.`/`[]` — which fails to compile since a struct
+		// literal's field/element isn't addressable. The parens make `&`
+		// bind to the whole literal first, matching what's actually meant.
+		buf.WriteString(fmt.Sprintf("(&%s{\n", goType))
 		for name, val := range e.Fields {
 			valStr, err := transpileExpression(val, ctx, "")
 			if err != nil {
 				return "", err
 			}
+			valStr = maybeShareValue(val, valStr, ctx)
 			exportedName := strings.ToUpper(name[:1]) + name[1:]
 			buf.WriteString(fmt.Sprintf("%s: %s,\n", exportedName, valStr))
 		}
-		buf.WriteString("}")
+		buf.WriteString("})")
 		return buf.String(), nil
 	case *ast.ArrayLiteral:
 		sym, _ := a.GetSymbol(e)
 		goType := ctx.mapSymbolToGoType(sym)
-		if goType == "" {
+		usedFallback := false
+		// An empty array literal's own symbol is ArraySymbol(Any) — a
+		// non-empty but vague "*cajaArray[any]" that would otherwise never
+		// let expectedType (e.g. a function's declared [Transition] return
+		// type) correct it, exactly the bug already fixed for MapLiteral's
+		// equivalent "*cajaMap[any, any]" case below.
+		if (goType == "" || goType == "*cajaArray[any]") && expectedType != "" {
 			goType = expectedType
+			usedFallback = true
 		}
 		if goType == "" {
-			goType = "[]any"
+			goType = "*cajaArray[any]"
+		}
+		ctx.usedModules["cow_array"] = true
+		wrapperType := strings.TrimPrefix(goType, "*")
+		elemType := "any"
+		if arrSym, ok := sym.(*symbol.ArraySymbol); ok && !usedFallback {
+			if et := ctx.mapSymbolToGoType(arrSym.ElementSymbol()); et != "" {
+				elemType = et
+			}
+		} else if args := splitGenericTypeArgs(wrapperType); len(args) == 1 {
+			elemType = args[0]
 		}
 		var elements []string
 		for _, el := range e.Elements {
@@ -767,18 +1524,42 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			if err != nil {
 				return "", err
 			}
+			elStr = maybeShareValue(el, elStr, ctx)
 			elements = append(elements, elStr)
 		}
-		return fmt.Sprintf("%s{%s}", goType, strings.Join(elements, ", ")), nil
+		// Parenthesized for the same reason StructLiteral's is — see its comment.
+		return fmt.Sprintf("(&%s{Data: []%s{%s}})", wrapperType, elemType, strings.Join(elements, ", ")), nil
 	case *ast.MapLiteral:
 		sym, _ := a.GetSymbol(e)
 		goType := ctx.mapSymbolToGoType(sym)
-		if goType == "" || goType == "map[any]any" {
+		usedFallback := false
+		if goType == "" || goType == "*cajaMap[any, any]" {
 			if expectedType != "" {
 				goType = expectedType
+				usedFallback = true
 			} else {
-				goType = "map[any]any"
+				goType = "*cajaMap[any, any]"
 			}
+		}
+		ctx.usedModules["cow_map"] = true
+		wrapperType := strings.TrimPrefix(goType, "*")
+		kType, vType := "any", "any"
+		// When goType came from expectedType (sym's own key/value types were
+		// empty or vaguely "any, any" — that's exactly why the fallback
+		// fired), extract kType/vType from the corrected wrapperType instead
+		// of re-deriving from that same unhelpful sym.
+		if mapSym, ok := sym.(*symbol.MapSymbol); ok && !usedFallback {
+			if kt := ctx.mapSymbolToGoType(mapSym.Key); kt != "" {
+				kType = kt
+				if strings.HasPrefix(kType, "*") {
+					kType = "string"
+				}
+			}
+			if vt := ctx.mapSymbolToGoType(mapSym.Value); vt != "" {
+				vType = vt
+			}
+		} else if args := splitGenericTypeArgs(wrapperType); len(args) == 2 {
+			kType, vType = args[0], args[1]
 		}
 		var pairs []string
 		for k, v := range e.Pairs {
@@ -786,19 +1567,19 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			if err != nil {
 				return "", err
 			}
-			if kSym, _ := a.GetSymbol(k); kSym != nil {
-				if _, isStruct := kSym.(*symbol.StructInstanceSymbol); isStruct {
-					kStr += ".Key()"
-				}
+			if kSym, _ := a.GetSymbol(k); isStructKeySymbol(kSym) {
+				kStr += ".Key()"
 			}
 
 			vStr, err := transpileExpression(v, ctx, "")
 			if err != nil {
 				return "", err
 			}
+			vStr = maybeShareValue(v, vStr, ctx)
 			pairs = append(pairs, fmt.Sprintf("%s: %s", kStr, vStr))
 		}
-		return fmt.Sprintf("%s{%s}", goType, strings.Join(pairs, ", ")), nil
+		// Parenthesized for the same reason StructLiteral's is — see its comment.
+		return fmt.Sprintf("(&%s{Data: map[%s]%s{%s}})", wrapperType, kType, vType, strings.Join(pairs, ", ")), nil
 	case *ast.IndexExpression:
 		left, err := transpileExpression(e.Left, ctx, "")
 		if err != nil {
@@ -810,16 +1591,14 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		}
 		leftSym, _ := a.GetSymbol(e.Left)
 		if _, isArr := leftSym.(*symbol.ArraySymbol); isArr {
-			return fmt.Sprintf("%s[int(%s)]", left, index), nil
+			return fmt.Sprintf("%s.Data[int(%s)]", left, index), nil
 		}
 
-		if indexSym, _ := a.GetSymbol(e.Index); indexSym != nil {
-			if _, isStruct := indexSym.(*symbol.StructInstanceSymbol); isStruct {
-				index += ".Key()"
-			}
+		if indexSym, _ := a.GetSymbol(e.Index); isStructKeySymbol(indexSym) {
+			index += ".Key()"
 		}
 
-		return fmt.Sprintf("%s[%s]", left, index), nil
+		return fmt.Sprintf("%s.Data[%s]", left, index), nil
 	case *ast.PrefixExpression:
 		right, err := transpileExpression(e.Right, ctx, "")
 		if err != nil {
@@ -860,9 +1639,11 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			return "", err
 		}
 		if e.Operator == "%" {
+			ctx.usedModules["math"] = true
 			return fmt.Sprintf("math.Mod(%s, %s)", left, right), nil
 		}
 		if e.Operator == "^" {
+			ctx.usedModules["math"] = true
 			return fmt.Sprintf("math.Pow(%s, %s)", left, right), nil
 		}
 		return fmt.Sprintf("(%s %s %s)", left, e.Operator, right), nil
@@ -970,6 +1751,7 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			if err != nil {
 				return "", err
 			}
+			argStr = maybeShareValue(arg, argStr, ctx)
 			args = append(args, argStr)
 		}
 		return fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", ")), nil
@@ -1055,16 +1837,27 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		}
 
 		fnCtx := &transpileContext{
-			analyzer:              a,
-			currentFuncName:       "",
-			currentFunctionParams: paramNames,
-			hasTailCall:           false,
-			usedModules:           ctx.usedModules,
-			CurrentModulePath:     ctx.CurrentModulePath,
+			analyzer:                  a,
+			currentFuncName:           "",
+			currentFunctionParams:     paramNames,
+			currentFunctionReturnType: retType,
+			hasTailCall:               false,
+			usedModules:               ctx.usedModules,
+			CurrentModulePath:         ctx.CurrentModulePath,
+			CurrentSourceFile:         ctx.CurrentSourceFile,
+			topLevelFileName:          ctx.topLevelFileName,
 			inFunction:            true,
 		}
 		if fnSym != nil {
 			fnCtx.currentFuncName = fnSym.Name
+		}
+		if ctx.currentFunctionBody != nil {
+			fnCtx.currentFunctionBody = ctx.currentFunctionBody
+		} else {
+			fnCtx.currentFunctionBody = e.Body
+		}
+		if fnCtx.currentFuncName != "" {
+			fnCtx.inLoop = functionBodyHasSelfTailCall(e.Body, fnCtx.currentFuncName)
 		}
 
 		body, err := transpileStatement(e.Body, fnCtx)
@@ -1122,6 +1915,8 @@ var streamPipeCounter int
 // N move on to the next stage before item N+1 finishes the previous one.
 func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileContext) (string, error) {
 	a := ctx.analyzer
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	// Flatten the nested chain (e.Left may itself be a *StreamPipeExpression)
 	// into source-to-sink order.
@@ -1173,7 +1968,8 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 	buf.WriteString(fmt.Sprintf("%s_ch0 := make(chan %s)\n", prefix, elemType))
 	buf.WriteString("go func() {\n")
 	buf.WriteString(fmt.Sprintf("defer close(%s_ch0)\n", prefix))
-	buf.WriteString(fmt.Sprintf("for _, v := range %s {\n", sourceStr))
+	buf.WriteString("defer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\n")
+	buf.WriteString(fmt.Sprintf("for _, v := range %s.Data {\n", sourceStr))
 	buf.WriteString("select {\n")
 	buf.WriteString(fmt.Sprintf("case %s_ch0 <- v:\n", prefix))
 	buf.WriteString(fmt.Sprintf("case <-%s_done:\n", prefix))
@@ -1181,6 +1977,7 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 	buf.WriteString("}\n}\n}()\n\n")
 
 	prevCh := prefix + "_ch0"
+	finalElemType := elemType
 	for i, stage := range stages {
 		var outElemSym symbol.Symbol
 		if sym, ok := a.GetStreamStageType(stage); ok {
@@ -1190,6 +1987,7 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 		if outElemType == "" {
 			outElemType = "any"
 		}
+		finalElemType = outElemType
 		outCh := fmt.Sprintf("%s_ch%d", prefix, i+1)
 
 		var stageBody bytes.Buffer
@@ -1211,6 +2009,7 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 		buf.WriteString(fmt.Sprintf("%s := make(chan %s)\n", outCh, outElemType))
 		buf.WriteString("go func() {\n")
 		buf.WriteString(fmt.Sprintf("defer close(%s)\n", outCh))
+		buf.WriteString("defer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\n")
 		buf.WriteString(fmt.Sprintf("for v := range %s {\n", prevCh))
 		if stage.Safe {
 			buf.WriteString("if v == nil {\ncontinue\n}\n")
@@ -1225,14 +2024,15 @@ func transpileStreamPipeExpression(e *ast.StreamPipeExpression, ctx *transpileCo
 		prevCh = outCh
 	}
 
-	buf.WriteString(fmt.Sprintf("%s_out := make(%s, 0)\n", prefix, resultGoType))
+	buf.WriteString(fmt.Sprintf("%s_out := &cajaArray[%s]{}\n", prefix, finalElemType))
 	buf.WriteString(fmt.Sprintf("for v := range %s {\n", prevCh))
-	buf.WriteString(fmt.Sprintf("%s_out = append(%s_out, v)\n", prefix, prefix))
+	buf.WriteString(fmt.Sprintf("%s_out.Data = append(%s_out.Data, v)\n", prefix, prefix))
 	buf.WriteString("}\n")
+	buf.WriteString("caja_check_async_panic()\n")
 	buf.WriteString(fmt.Sprintf("return %s_out\n", prefix))
 	buf.WriteString("}()")
 
-	return buf.String(), nil
+	return pinRangeToLine(buf.String(), ctx.CurrentSourceFile, e.Token.Line), nil
 }
 
 // writeJoinStageBody generates the per-item body of a fixed-size parallel
@@ -1273,7 +2073,7 @@ func writeJoinStageBody(buf *bytes.Buffer, stage *ast.StreamPipeExpression, ctx 
 		if err != nil {
 			return err
 		}
-		buf.WriteString(fmt.Sprintf("go func() {\ndefer %s.Done()\n%s = %s\n}()\n", wgName, joinVarNames[j], callExpr))
+		buf.WriteString(fmt.Sprintf("go func() {\ndefer %s.Done()\ndefer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\n%s = %s\n}()\n", wgName, joinVarNames[j], callExpr))
 	}
 	buf.WriteString(fmt.Sprintf("%s.Wait()\n", wgName))
 
@@ -1303,16 +2103,23 @@ func writeJoinStageBody(buf *bytes.Buffer, stage *ast.StreamPipeExpression, ctx 
 // the write to `val` that preceded it, so no extra locking is needed.
 func transpileAsyncExpression(node *ast.AsyncExpression, ctx *transpileContext) (string, error) {
 	ctx.usesAsync = true
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	rightExpr, err := transpileExpression(node.Right, ctx, "")
 	if err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf(
-		"func() *asyncTask {\nt := &asyncTask{done: make(chan struct{})}\ngo func() {\nt.val = %s\nclose(t.done)\n}()\nreturn t\n}()",
+	// close(t.done) must be deferred (not a plain trailing statement) so a
+	// panic in the task body still wakes up any unwrap/await waiting on it
+	// instead of leaving them blocked forever; the recover-defer is
+	// registered after it so the panic is recorded before that close fires.
+	code := fmt.Sprintf(
+		"func() *asyncTask {\nt := &asyncTask{done: make(chan struct{})}\ngo func() {\ndefer close(t.done)\ndefer func() {\nif r := recover(); r != nil {\ncaja_report_async_panic(r)\n}\n}()\nt.val = %s\n}()\nreturn t\n}()",
 		rightExpr,
-	), nil
+	)
+	return pinRangeToLine(code, ctx.CurrentSourceFile, node.Token.Line), nil
 }
 
 // transpileUnwrapExpression compiles `unwrap <expr>` to blocking on the
@@ -1323,6 +2130,8 @@ func transpileAsyncExpression(node *ast.AsyncExpression, ctx *transpileContext) 
 // the same task, since closing `done` is repeatable.
 func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext) (string, error) {
 	ctx.usesAsync = true
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	rightExpr, err := transpileExpressionInternal(node.Right, ctx, "")
 	if err != nil {
@@ -1336,10 +2145,15 @@ func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext
 		}
 	}
 
-	return fmt.Sprintf(
-		"func() %s {\n<-(%s).done\nreturn (%s).val.(%s)\n}()",
+	// caja_check_async_panic runs before the type assertion: if the async
+	// task's body panicked, .val is still its zero value, and asserting that
+	// into elemType would panic again with a confusing generic "interface
+	// conversion" error that masks the real one.
+	code := fmt.Sprintf(
+		"func() %s {\n<-(%s).done\ncaja_check_async_panic()\nreturn (%s).val.(%s)\n}()",
 		elemType, rightExpr, rightExpr, elemType,
-	), nil
+	)
+	return pinRangeToLine(code, ctx.CurrentSourceFile, node.Token.Line), nil
 }
 
 // transpileAwaitStatement compiles the WaitGroup-style join barrier
@@ -1350,6 +2164,8 @@ func transpileUnwrapExpression(node *ast.UnwrapExpression, ctx *transpileContext
 // sequential waits achieve the same result.
 func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (string, error) {
 	ctx.usesAsync = true
+	ctx.usedModules["async_panic_guard"] = true
+	ctx.usedModules["sync"] = true
 
 	var buf bytes.Buffer
 	for i, p := range node.Pipelines {
@@ -1362,6 +2178,10 @@ func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (s
 		}
 		buf.WriteString(fmt.Sprintf("<-(%s).done", pExpr))
 	}
+	// Checked once, after every pipeline in the barrier has signaled
+	// completion (not per-pipeline) — must wait for all of them before
+	// deciding whether to abort.
+	buf.WriteString("\ncaja_check_async_panic()")
 	return buf.String(), nil
 }
 
@@ -1408,6 +2228,7 @@ func sanitizeIdentifier(path string) string {
 	s := strings.ReplaceAll(path, "/", "_")
 	s = strings.ReplaceAll(s, ".", "_")
 	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, "@", "_") // scoped node_modules-style paths, e.g. "@caja/query"
 	return s
 }
 

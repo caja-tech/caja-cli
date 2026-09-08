@@ -403,7 +403,13 @@ func (a *Analyzer) analyzeMathTwoArgFunction(functionName string, n *ast.CallExp
 	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
 
-// analyzeLogFunction checks the arity and type for 2-argument log functions, returning a STRING.
+// analyzeLogFunction checks the arity and type for 2-argument log functions
+// (info/warn/error). These produce no value in the compiler (the only
+// backend that still runs — see GetStandardModule's "-> Nil" label for
+// these), so this must return NULL_OBJ: it previously returned STRING_OBJ,
+// which made `caja run`'s print-last-statement feature wrongly try to treat
+// a trailing `log.info(...)` as a value, generating Go that assigned a
+// void call's result — a compile error.
 func (a *Analyzer) analyzeLogFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 2 {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
@@ -417,17 +423,20 @@ func (a *Analyzer) analyzeLogFunction(functionName string, n *ast.CallExpression
 	// The second argument can be anything, so we just analyze it without type checking
 	_ = a.analyze(n.Arguments[1])
 
-	return symbol.NewBasicSymbol(environment.STRING_OBJ)
+	return symbol.NewBasicSymbol(environment.NULL_OBJ)
 }
 
-// analyzeLogExportFunction checks the arity for the log.export function, returning ANY.
+// analyzeLogExportFunction checks the arity for the log.export function.
+// Produces no value in the compiler (see analyzeLogFunction's comment —
+// same "-> Nil" label, same reasoning); previously returned AnySymbol(),
+// which isn't NULL_OBJ either and hit the identical print-result bug.
 func (a *Analyzer) analyzeLogExportFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 1 {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 argument for '%s', got %d", functionName, len(n.Arguments)))
 	} else {
 		_ = a.analyze(n.Arguments[0])
 	}
-	return symbol.AnySymbol()
+	return symbol.NewBasicSymbol(environment.NULL_OBJ)
 }
 
 // analyzeMapContainsKeyFunction checks the arity and type for map.containsKey, returning a BOOLEAN.

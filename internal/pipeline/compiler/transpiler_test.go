@@ -22,7 +22,7 @@ func TestTranspile(t *testing.T) {
 			expected: []string{
 				"type MajorCustomer Customer",
 				"var validate_MajorCustomer func(*Customer) *MajorCustomer = func(val *Customer) *MajorCustomer {\n\tpred := func(c *Customer) bool {\n\treturn (c.Age > 18.0)\n}\n\tif pred(val) {\n\t\tres := (*MajorCustomer)(val)\n\t\treturn res\n\t}\n\treturn nil\n}",
-				"var m *MajorCustomer = validate_MajorCustomer(&Customer{\nAge: 20.0,\n})",
+				"var m *MajorCustomer = validate_MajorCustomer((&Customer{\nAge: 20.0,\n}))",
 			},
 		},
 		{
@@ -38,8 +38,15 @@ func TestTranspile(t *testing.T) {
 				"type Animal interface{ isAnimal() }",
 				"func (*Cat) isAnimal() {}",
 				"func (*Dog) isAnimal() {}",
-				"var animal Animal = &Cat{\nName: \"Tom\",\n}",
-				"var cat *Cat = func() *Cat { if v, ok := (animal).(*Cat); ok { return v }; return nil }()",
+				// (&Cat{...}) is self-parenthesized (see the struct-literal
+				// codegen comment) to avoid Go parsing &Type{...}.Field as
+				// &(Type{...}.Field). The `is` narrowing result is wrapped in
+				// cajaShare: it aliases animal's own underlying struct (an
+				// IsExpression isn't in isOwned's fresh-temporary list), so
+				// mutating the narrowed value must not corrupt a second,
+				// independent narrowing of the same union value.
+				"var animal Animal = (&Cat{\nName: \"Tom\",\n})",
+				"var cat *Cat = cajaShare(func() *Cat { if v, ok := (animal).(*Cat); ok { return v }; return nil }())",
 			},
 		},
 		{
@@ -140,7 +147,7 @@ func TestTranspile(t *testing.T) {
 				let arr = [1, 2, 3]
 			`,
 			expected: []string{
-				"var arr []float64 = []float64{1.0, 2.0, 3.0}",
+				"var arr *cajaArray[float64] = (&cajaArray[float64]{Data: []float64{1.0, 2.0, 3.0}})",
 			},
 		},
 		{
@@ -154,7 +161,7 @@ func TestTranspile(t *testing.T) {
 				let x = arr[1]
 			`,
 			expected: []string{
-				"var x float64 = arr[int(1.0)]",
+				"var x float64 = arr.Data[int(1.0)]",
 			},
 		},
 		{
@@ -168,7 +175,7 @@ func TestTranspile(t *testing.T) {
 				arr[0] = 5
 			`,
 			expected: []string{
-				"arr[int(0.0)] = 5.0",
+				"arr.Data[int(0.0)] = 5.0",
 			},
 		},
 		{
@@ -177,7 +184,7 @@ func TestTranspile(t *testing.T) {
 				let matrix = [[1, 2], [3, 4]]
 			`,
 			expected: []string{
-				"var matrix [][]float64 = [][]float64{[]float64{1.0, 2.0}, []float64{3.0, 4.0}}",
+				"var matrix *cajaArray[*cajaArray[float64]] = (&cajaArray[*cajaArray[float64]]{Data: []*cajaArray[float64]{(&cajaArray[float64]{Data: []float64{1.0, 2.0}}), (&cajaArray[float64]{Data: []float64{3.0, 4.0}})}})",
 			},
 		},
 		{
@@ -187,7 +194,7 @@ func TestTranspile(t *testing.T) {
 				let x = matrix[1][0]
 			`,
 			expected: []string{
-				"var x float64 = matrix[int(1.0)][int(0.0)]",
+				"var x float64 = matrix.Data[int(1.0)].Data[int(0.0)]",
 			},
 		},
 		{
@@ -196,7 +203,7 @@ func TestTranspile(t *testing.T) {
 				let m = {"a": 1}
 			`,
 			expected: []string{
-				"var m map[string]float64 = map[string]float64{\"a\": 1.0}",
+				"var m *cajaMap[string, float64] = (&cajaMap[string, float64]{Data: map[string]float64{\"a\": 1.0}})",
 			},
 		},
 		{
@@ -207,9 +214,9 @@ func TestTranspile(t *testing.T) {
 				let x = m["a"]
 			`,
 			expected: []string{
-				"var m map[string]float64 = map[string]float64{}",
-				"m[\"a\"] = 1",
-				"var x float64 = m[\"a\"]",
+				"var m *cajaMap[string, float64] = (&cajaMap[string, float64]{Data: map[string]float64{}})",
+				"m.Data[\"a\"] = 1",
+				"var x float64 = m.Data[\"a\"]",
 			},
 		},
 		{
@@ -223,8 +230,8 @@ func TestTranspile(t *testing.T) {
 			`,
 			expected: []string{
 				"type Money float64",
-				"type Matrix [][]float64",
-				"type StringMap map[string]string",
+				"type Matrix *cajaArray[*cajaArray[float64]]",
+				"type StringMap *cajaMap[string, string]",
 				"type Predicate func(float64) bool",
 				"type Callback func(string, float64)",
 			},
@@ -254,13 +261,13 @@ func TestTranspile(t *testing.T) {
 				"type Dog struct {",
 				"Bark func() string",
 				"}",
-				"var root *Node = &Node{",
+				"var root *Node = (&Node{",
 				"Value: 10.0,",
 				"Left: nil,",
 				"Right: nil,",
 				"}",
 				"root.Value = 20",
-				"var myDog *Dog = &Dog{",
+				"var myDog *Dog = (&Dog{",
 				"Bark: func() string {",
 				"return \"woof\"",
 				"}",
@@ -355,13 +362,13 @@ func TestTranspile(t *testing.T) {
 				"var isEven func(float64) bool = func(x float64) bool {",
 				"return (math.Mod(x, 2.0) == 0.0)",
 				"}",
-				"var filter func([]float64, func(float64) bool) []float64 = func(arr []float64, f func(float64) bool) []float64 {",
+				"var filter func(*cajaArray[float64], func(float64) bool) *cajaArray[float64] = func(arr *cajaArray[float64], f func(float64) bool) *cajaArray[float64] {",
 				"return arr",
 				"}",
-				"var mapArr func([]float64, func(float64) float64) []float64 = func(arr []float64, f func(float64) float64) []float64 {",
+				"var mapArr func(*cajaArray[float64], func(float64) float64) *cajaArray[float64] = func(arr *cajaArray[float64], f func(float64) float64) *cajaArray[float64] {",
 				"return arr",
 				"}",
-				"var result []float64 = mapArr(filter([]float64{1.0, 2.0, 3.0}, isEven), func(x float64) float64 {",
+				"var result *cajaArray[float64] = mapArr(filter((&cajaArray[float64]{Data: []float64{1.0, 2.0, 3.0}}), isEven), func(x float64) float64 {",
 				"return (x * 2.0)",
 				"})",
 			},
@@ -380,13 +387,13 @@ func TestTranspile(t *testing.T) {
 				let result = sales |>> calcDiscount(5) |>> calcProfit
 			`,
 			expected: []string{
-				"var result []float64 = func() []float64 {",
+				"var result *cajaArray[float64] = func() *cajaArray[float64] {",
 				"_stream0_done := make(chan struct{})",
 				"defer close(_stream0_done)",
 				"_stream0_ch0 := make(chan *Sale)",
 				"go func() {",
 				"defer close(_stream0_ch0)",
-				"for _, v := range sales {",
+				"for _, v := range sales.Data {",
 				"select {",
 				"case _stream0_ch0 <- v:",
 				"case <-_stream0_done:",
@@ -396,9 +403,9 @@ func TestTranspile(t *testing.T) {
 				"_stream0_ch2 := make(chan float64)",
 				"out := calcProfit(v)",
 				"case _stream0_ch2 <- out:",
-				"_stream0_out := make([]float64, 0)",
+				"_stream0_out := &cajaArray[float64]{}",
 				"for v := range _stream0_ch2 {",
-				"_stream0_out = append(_stream0_out, v)",
+				"_stream0_out.Data = append(_stream0_out.Data, v)",
 				"return _stream0_out",
 			},
 		},
@@ -439,7 +446,7 @@ func TestTranspile(t *testing.T) {
 			`,
 			expected: []string{
 				"import \"sync\"",
-				"var pnl []float64 = func() []float64 {",
+				"var pnl *cajaArray[float64] = func() *cajaArray[float64] {",
 				"_stream0_ch0 := make(chan *Loan)",
 				// exactly one fused stage/channel — the join group does not
 				// get its own separate channel boundary
@@ -475,10 +482,10 @@ func TestTranspile(t *testing.T) {
 				let pi = math.PI
 			`,
 			expected: []string{
-				"var arr []float64 = []float64{1.0, 2.0, 3.0}",
-				"var arr2 []float64 = caja_array_push(arr, 4.0)",
-				"var p []float64 = caja_array_pop(arr2)",
-				"var l float64 = float64(len(p))",
+				"var arr *cajaArray[float64] = (&cajaArray[float64]{Data: []float64{1.0, 2.0, 3.0}})",
+				"var arr2 *cajaArray[float64] = caja_array_push(arr, 4.0)",
+				"var p *cajaArray[float64] = caja_array_pop(arr2)",
+				"var l float64 = float64(len(p.Data))",
 				"var m float64 = math.Abs((-5.0))",
 				"var s string = strings.ToUpper(\"caja\")",
 				"var d time.Time = caja_date_today()",
@@ -493,7 +500,7 @@ let a = [1, 2, 3]
 let b = array.push(move a, 4)
 `,
 			expected: []string{
-				"append(a, 4.0)", // Should use zero-copy in-place append
+				"caja_array_push_owned(a, 4.0)", // Should use zero-copy in-place append
 			},
 		},
 		{
@@ -504,7 +511,7 @@ let a = [1, 2, 3]
 let b = a |> array.push(4) |> array.push(5)
 `,
 			expected: []string{
-				"append(caja_array_push(a, 4.0), 5.0)",
+				"caja_array_push_owned(caja_array_push(a, 4.0), 5.0)",
 			},
 		},
 		{
@@ -515,7 +522,7 @@ let a = [1, 2, 3]
 let b = move a |> array.push(4)
 `,
 			expected: []string{
-				"append(a, 4.0)",
+				"caja_array_push_owned(a, 4.0)",
 			},
 		},
 		{
@@ -629,17 +636,184 @@ const r = unwrap p
 			}
 
 			// Transpile the AST
-			goCode, err := Transpile(program, a)
+			goCode, err := Transpile(program, a, TranspileOptions{})
 			if err != nil {
 				t.Fatalf("Transpile failed: %v", err)
 			}
 
+			// These assertions check codegen shape, not the //line directives
+			// Transpile now interleaves per-statement (see TestLineDirectives)
+			// — strip them so directives inserted mid-block (e.g. inside a
+			// nested function literal's body) don't break a substring match.
+			goCodeNoDirectives := stripLineDirectives(goCode)
+
 			// Verify the expected Go code is present
 			for _, exp := range tt.expected {
-				if !strings.Contains(goCode, exp) {
-					t.Errorf("Expected output to contain:\n%s\n\nGot:\n%s", exp, goCode)
+				if !strings.Contains(goCodeNoDirectives, exp) {
+					t.Errorf("Expected output to contain:\n%s\n\nGot:\n%s", exp, goCodeNoDirectives)
 				}
 			}
 		})
+	}
+}
+
+// TestMaybeShareValueElidesDeadRebind pins the codegen shape for the
+// dead-name elision in maybeShareValue: rebinding a parameter to a local
+// that mutates-and-returns it (the pattern forced by parameter immutability)
+// must not wrap the rebind in cajaShare when the parameter's name is never
+// read again — that rebind is the last live reference, not a new alias.
+func TestMaybeShareValueElidesDeadRebind(t *testing.T) {
+	input := `
+		type Portfolio struct { value Number }
+		let addInterest = fn(p: Portfolio) -> Portfolio {
+			let local = p
+			local.value = local.value + 10
+			return local
+		}
+	`
+	program, _, a, err := script.ParseWithDir(input, "", "test.caja")
+	if err != nil {
+		t.Fatalf("Failed to parse script: %v", err)
+	}
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+	goCode = stripLineDirectives(goCode)
+
+	if strings.Contains(goCode, "local *Portfolio = cajaShare(p)") {
+		t.Errorf("expected the dead rebind `let local = p` to skip cajaShare, got:\n%s", goCode)
+	}
+	if !strings.Contains(goCode, "local *Portfolio = p") {
+		t.Errorf("expected `let local = p` to transpile to a plain assignment, got:\n%s", goCode)
+	}
+}
+
+// TestIsExpressionOwnedWhenSourceIsOwned pins isOwned's *ast.IsExpression
+// case: a union `is` narrowing extracts the same underlying pointer its
+// source already holds, so it's only safe to skip cajaShare when that source
+// itself is owned (here, `move a` — the analyzer has already guaranteed no
+// other reference to a's value exists). Narrowing a NON-owned source (b,
+// used with no move) must still get cajaShare, since the narrowed pointer
+// could otherwise be aliased by whatever else already references b.
+func TestIsExpressionOwnedWhenSourceIsOwned(t *testing.T) {
+	input := `
+		type Cat struct { name String }
+		union Animal = Cat
+		let a: Animal = Cat{name: "Tom"}
+		let cat: Cat? = move a is Cat
+		let b: Animal = Cat{name: "Rex"}
+		let cat2: Cat? = b is Cat
+	`
+	program, _, a, err := script.ParseWithDir(input, "", "test.caja")
+	if err != nil {
+		t.Fatalf("Failed to parse script: %v", err)
+	}
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+	goCode = stripLineDirectives(goCode)
+
+	if !strings.Contains(goCode, "var cat *Cat = func() *Cat { if v, ok := (a).(*Cat); ok { return v }; return nil }()") {
+		t.Errorf("expected `move a is Cat` to skip cajaShare (a is provably the sole owner), got:\n%s", goCode)
+	}
+	if !strings.Contains(goCode, "var cat2 *Cat = cajaShare(func() *Cat { if v, ok := (b).(*Cat); ok { return v }; return nil }())") {
+		t.Errorf("expected `b is Cat` (no move) to still wrap in cajaShare, got:\n%s", goCode)
+	}
+}
+
+// stripLineDirectives removes every `//line file:N` directive Transpile
+// interleaves into the generated source (see lineDirective), so tests that
+// assert on codegen shape don't need to account for them appearing mid-block.
+func stripLineDirectives(code string) string {
+	lines := strings.Split(code, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.HasPrefix(line, "//line ") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// TestTranspileEmitsLineDirectives verifies each top-level statement gets a
+// `//line <file>:<N>` directive at its own source line, at column 0 (required
+// for the Go compiler to honor it — see lineDirective) — the mechanism that
+// lets a runtime panic or compile error in the generated binary be reported
+// against the original .caja file/line instead of a deleted temp Go file.
+func TestTranspileEmitsLineDirectives(t *testing.T) {
+	input := "let arr = [1, 2, 3]\nlet x = 1\narr[10]\n"
+	program, _, a, err := script.ParseWithDir(input, "", "panic_test.caja")
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+
+	for _, want := range []string{"//line panic_test.caja:1\n", "//line panic_test.caja:2\n"} {
+		if !strings.Contains(goCode, want) {
+			t.Errorf("expected generated code to contain %q, got:\n%s", want, goCode)
+		}
+	}
+	for _, line := range strings.Split(goCode, "\n") {
+		if strings.Contains(line, "//line ") && line != strings.TrimLeft(line, " \t") {
+			t.Errorf("found a //line directive with leading whitespace (Go compiler silently ignores these): %q", line)
+		}
+	}
+}
+
+// TestPinRangeToLineCoversStreamPipeAndAsync verifies that
+// transpileStreamPipeExpression and transpileAsyncExpression/
+// transpileUnwrapExpression — which build multi-line Go (goroutines,
+// channels, IIFEs) directly and bypass transpileStatement's per-statement
+// directive injection entirely — still get .caja source coverage via
+// pinRangeToLine: the SAME directive, for the expression's own line, must
+// appear more than once (once per internal line break in the generated
+// block), not just once at the top the way a normal statement gets it.
+func TestPinRangeToLineCoversStreamPipeAndAsync(t *testing.T) {
+	input := `
+		let calcDiscount = fn(s: Number, pct: Number) -> Number {
+			return s - (s * pct / 100)
+		}
+		let sales = [100, 200, 300]
+		let result = sales |>> calcDiscount(5)
+
+		let fetchRate = fn(x: Number) -> Number {
+			return x * 0.05
+		}
+		let pending = async fetchRate(10)
+		let rate = unwrap pending
+	`
+	program, _, a, err := script.ParseWithDir(input, "", "pipe_test.caja")
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+
+	// `sales |>> calcDiscount(5)` is on line 6.
+	pipeDirective := "//line pipe_test.caja:6\n"
+	if n := strings.Count(goCode, pipeDirective); n < 2 {
+		t.Errorf("expected %q to be repeated across the stream-pipe block (pinRangeToLine), found %d occurrence(s) in:\n%s", pipeDirective, n, goCode)
+	}
+
+	// `async fetchRate(10)` is on line 11.
+	asyncDirective := "//line pipe_test.caja:11\n"
+	if n := strings.Count(goCode, asyncDirective); n < 2 {
+		t.Errorf("expected %q to be repeated across the async block (pinRangeToLine), found %d occurrence(s) in:\n%s", asyncDirective, n, goCode)
+	}
+
+	// `unwrap pending` is on line 12.
+	unwrapDirective := "//line pipe_test.caja:12\n"
+	if n := strings.Count(goCode, unwrapDirective); n < 2 {
+		t.Errorf("expected %q to be repeated across the unwrap block (pinRangeToLine), found %d occurrence(s) in:\n%s", unwrapDirective, n, goCode)
 	}
 }
