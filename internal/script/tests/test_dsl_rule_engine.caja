@@ -1,0 +1,59 @@
+import "array"
+
+# The DSL: builder functions returning immutable structs. A Rule pairs a
+# label with a predicate closure; a RuleSet groups rules under a name.
+type Rule struct {
+	label String
+	predicate fn(Number) -> Boolean
+}
+
+type RuleSet struct {
+	name String
+	rules [Rule]
+}
+
+let rule = fn(label: String, predicate: fn(Number) -> Boolean) -> Rule {
+	return Rule { label: label, predicate: predicate }
+}
+
+let rule_set = fn(name: String, rules: [Rule]) -> RuleSet {
+	return RuleSet { name: name, rules: rules }
+}
+
+# The DSL config, built once using trailing-block sugar.
+let pricing = rule_set("Pricing") {
+	rule("Bulk Discount", (n) => n >= 100)
+	rule("Standard", (n) => n < 100)
+}
+
+# The evaluator: a plain function, decoupled from the DSL definitions above,
+# that walks a RuleSet config against arbitrary input data and returns a
+# result. It knows nothing about how "pricing" was built.
+let find_matching_rule = fn(rules: [Rule], amount: Number) -> String {
+	if (array.len(rules) == 0) {
+		return "no_match"
+	}
+	let first = array.head(rules)
+	if (first.predicate(amount)) {
+		return first.label
+	}
+	return find_matching_rule(array.tail(rules), amount)
+}
+
+let evaluate = fn(config: RuleSet, amount: Number) -> String {
+	return find_matching_rule(config.rules, amount)
+}
+
+# Same DSL config, evaluated against different data, proving the evaluator
+# is genuinely data-driven rather than baked in at construction time.
+let r1 = evaluate(pricing, 150)
+let r2 = evaluate(pricing, 50)
+
+let score = fn(cond: Boolean) -> Number {
+	if (cond) {
+		return 1
+	}
+	return 0
+}
+
+return score(r1 == "Bulk Discount") + score(r2 == "Standard")

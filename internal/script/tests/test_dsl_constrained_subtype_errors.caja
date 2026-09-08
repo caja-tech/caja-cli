@@ -1,0 +1,35 @@
+import "array"
+
+# Same DSL and constraint as test_dsl_constrained_subtype.caja, but this time
+# the constrained type is NOT nullable. A predicate subtype can only ever be
+# reached through its nullable form (`NonEmptyState?`, see the other test):
+# the compiler cannot itself prove the predicate holds, so it statically
+# refuses to bind a plain base-type value (a DSL-built State here, valid or
+# not) directly to the non-nullable refined name. This is what forces DSL
+# consumers through the nil-checked path instead of silently trusting an
+# unvalidated config.
+type Transition struct {
+	to String
+}
+
+type State struct {
+	name String
+	transitions [Transition]
+}
+
+let transition = fn(to: String) -> Transition {
+	return Transition { to: to }
+}
+
+let state = fn(name: String, transitions: [Transition]) -> State {
+	return State { name: name, transitions: transitions }
+}
+
+define NonEmptyState constraints State with: fn(s: State) -> Boolean {
+	return array.len(s.transitions) > 0
+}
+
+let invalid: NonEmptyState = state("Draft") {
+}
+
+return 0

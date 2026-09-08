@@ -1,0 +1,87 @@
+import "array"
+
+# The DSL: a nested workflow/state/transition tree, built entirely from
+# plain functions returning immutable structs. Each transition carries a
+# predicate closure instead of a pre-computed condition, so the same DSL
+# config can be re-evaluated against different input data later.
+type Transition struct {
+	to String
+	check fn(Number) -> Boolean
+}
+
+type State struct {
+	name String
+	transitions [Transition]
+}
+
+type Workflow struct {
+	name String
+	states [State]
+}
+
+let transition = fn(to: String, check: fn(Number) -> Boolean) -> Transition {
+	return Transition { to: to, check: check }
+}
+
+let state = fn(name: String, transitions: [Transition]) -> State {
+	return State { name: name, transitions: transitions }
+}
+
+let workflow = fn(name: String, states: [State]) -> Workflow {
+	return Workflow { name: name, states: states }
+}
+
+# The DSL config, built once using nested trailing blocks.
+let purchase_flow = workflow("Purchase Approval") {
+	state("Pending") {
+		transition("Approved", (amount) => amount < 1000)
+		transition("Manager_Review", (amount) => amount >= 1000)
+	}
+
+	state("Manager_Review") {
+		transition("Approved", (amount) => amount >= 1000)
+	}
+}
+
+# The evaluator: separate, generic functions that take a DSL config plus
+# data (a current state name and an amount) and return a result. Nothing
+# here knows how "purchase_flow" was assembled.
+let find_transition = fn(transitions: [Transition], amount: Number) -> String {
+	if (array.len(transitions) == 0) {
+		return "no_match"
+	}
+	let first = array.head(transitions)
+	if (first.check(amount)) {
+		return first.to
+	}
+	return find_transition(array.tail(transitions), amount)
+}
+
+let find_transitions_for_state = fn(states: [State], name: String) -> [Transition] {
+	if (array.len(states) == 0) {
+		return []
+	}
+	let first = array.head(states)
+	if (first.name == name) {
+		return first.transitions
+	}
+	return find_transitions_for_state(array.tail(states), name)
+}
+
+let evaluate = fn(flow: Workflow, current: String, amount: Number) -> String {
+	return find_transition(find_transitions_for_state(flow.states, current), amount)
+}
+
+# Same DSL config, evaluated three different ways against different data.
+let r1 = evaluate(purchase_flow, "Pending", 500)
+let r2 = evaluate(purchase_flow, "Pending", 1500)
+let r3 = evaluate(purchase_flow, "Manager_Review", 1500)
+
+let score = fn(cond: Boolean) -> Number {
+	if (cond) {
+		return 1
+	}
+	return 0
+}
+
+return score(r1 == "Approved") + score(r2 == "Manager_Review") + score(r3 == "Approved")

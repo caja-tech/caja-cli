@@ -48,6 +48,34 @@ func TestFindNodeAtPosition(t *testing.T) {
 			targetCol:    9, // Points to 'A' in "Alice"
 			expectedType: `"Alice"`,
 		},
+		{
+			name:         "Union Declaration Name",
+			input:        "union Animal = Cat | Dog",
+			targetLine:   0,
+			targetCol:    6, // Points to 'A' in Animal
+			expectedType: "Animal",
+		},
+		{
+			name:         "Union Variant Name",
+			input:        "union Animal = Cat | Dog",
+			targetLine:   0,
+			targetCol:    15, // Points to 'C' in Cat
+			expectedType: "Cat",
+		},
+		{
+			name:         "Union Second Variant Name",
+			input:        "union Animal = Cat | Dog",
+			targetLine:   0,
+			targetCol:    21, // Points to 'D' in Dog
+			expectedType: "Dog",
+		},
+		{
+			name:         "Is Expression Left Operand",
+			input:        "animal is Cat",
+			targetLine:   0,
+			targetCol:    0, // Points to 'a' in animal
+			expectedType: "animal",
+		},
 	}
 
 	for _, tt := range tests {

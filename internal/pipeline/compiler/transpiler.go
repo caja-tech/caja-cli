@@ -108,6 +108,13 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		}
 		return "*" + baseName
 	}
+	if unionSym, ok := sym.(*symbol.UnionSymbol); ok {
+		baseName := unionSym.Name
+		if unionSym.FilePath != "" && ctx != nil && unionSym.FilePath != ctx.analyzer.GlobalEnv().FileName {
+			baseName = sanitizeIdentifier(unionSym.FilePath) + "_" + baseName
+		}
+		return baseName
+	}
 	if structInst, ok := sym.(*symbol.StructInstanceSymbol); ok {
 		baseName := structInst.Def.Name
 		if structInst.Def.FilePath != "" && ctx != nil && structInst.Def.FilePath != ctx.analyzer.GlobalEnv().FileName {
@@ -173,7 +180,9 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 					continue
 				}
 
-				if _, isTypeAlias := stmt.(*ast.TypeAliasStatement); isTypeAlias {
+				_, isTypeAlias := stmt.(*ast.TypeAliasStatement)
+				_, isUnion := stmt.(*ast.UnionStatement)
+				if isTypeAlias || isUnion {
 					ctx.packageLevelCode.WriteString(code + "\n")
 					continue
 				}
@@ -201,7 +210,9 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer) (string, error) {
 			continue
 		}
 
-		if _, isTypeAlias := stmt.(*ast.TypeAliasStatement); isTypeAlias {
+		_, isTypeAlias := stmt.(*ast.TypeAliasStatement)
+		_, isUnion := stmt.(*ast.UnionStatement)
+		if isTypeAlias || isUnion {
 			ctx.packageLevelCode.WriteString(code + "\n")
 			continue
 		}
@@ -632,6 +643,33 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		}
 		return fmt.Sprintf("// type %s ...", prefixIdentifier(ctx, s.Name.Value)), nil
 
+	case *ast.UnionStatement:
+		var buf bytes.Buffer
+		unionName := prefixIdentifier(ctx, s.Name.Value)
+		buf.WriteString(fmt.Sprintf("type %s interface{ is%s() }\n", unionName, unionName))
+		sym, ok := a.GetSymbol(s)
+		if ok {
+			if unionSym, isUnion := sym.(*symbol.UnionSymbol); isUnion {
+				for _, variantIdent := range s.Variants {
+					variantDef, exists := unionSym.Variants[variantIdent.Value]
+					if !exists {
+						continue
+					}
+					// Use the same prefixing prefixIdentifier applies to the
+					// variant's own `type X struct {...}` declaration (not
+					// mapSymbolToGoType's cross-file-relative prefixing,
+					// which is wrong here: within a module's own transpile
+					// pass, a struct declared in that same module is never
+					// "foreign" relative to itself, so it would come back
+					// unprefixed and the method would land on a Go type
+					// name that's never actually declared).
+					variantGoType := "*" + prefixIdentifier(ctx, variantDef.Name)
+					buf.WriteString(fmt.Sprintf("func (%s) is%s() {}\n", variantGoType, unionName))
+				}
+			}
+		}
+		return buf.String(), nil
+
 	default:
 		// Fallback for unsupported statements
 		return fmt.Sprintf("// unsupported statement: %T", stmt), nil
@@ -828,6 +866,20 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			return fmt.Sprintf("math.Pow(%s, %s)", left, right), nil
 		}
 		return fmt.Sprintf("(%s %s %s)", left, e.Operator, right), nil
+	case *ast.IsExpression:
+		left, err := transpileExpression(e.Left, ctx, "")
+		if err != nil {
+			return "", err
+		}
+
+		variantGoType := "any"
+		if sym, ok := a.GetSymbol(e); ok {
+			if nullSym, isNullable := sym.(*symbol.NullableSymbol); isNullable {
+				variantGoType = ctx.mapSymbolToGoType(nullSym.Underlying)
+			}
+		}
+
+		return fmt.Sprintf("func() %s { if v, ok := (%s).(%s); ok { return v }; return nil }()", variantGoType, left, variantGoType), nil
 	case *ast.SafePipeExpression:
 		leftExpr, err := transpileExpressionInternal(e.Left, ctx, "")
 		if err != nil {

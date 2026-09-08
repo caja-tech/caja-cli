@@ -193,6 +193,76 @@ let f = fn() -> MyEmpty {
 `,
 			expectedErrors: []string{},
 		},
+		{
+			name: "Union type declaration and variant assignment",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Cat { name: "Tom" }
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Is expression narrows a union to a variant",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Cat { name: "Tom" }
+let cat: Cat? = animal is Cat
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Distinct names across type, define, union, let, const never collide",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog
+let a: Animal = Cat { name: "Tom" }
+const b = 10
+define Adult constraints Cat with: fn(c: Cat) -> Boolean { return true }
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Redeclaration check respects function boundaries: local variable may reuse a global name",
+			input: `
+let foo = 10
+let f = fn() -> Number {
+	let foo = 20
+	return foo
+}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Redeclaration check respects function boundaries: local generic function type params still resolve",
+			input: `
+const identity = fn<T>(x: T) -> T {
+	return x
+}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Redeclaration check still catches shadowing within the SAME function",
+			input: `
+let f = fn() -> Number {
+	let x = 1
+	if (x > 0) {
+		let x = 2
+		return x
+	} else {
+		return x
+	}
+}
+`,
+			expectedErrors: []string{
+				"semantic error: variable 'x' is already declared",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -461,6 +531,160 @@ let x = move data # Error
 				"semantic error: cannot move constant variable 'data'",
 			},
 		},
+		{
+			name: "Union: non-variant struct assignment rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+type Pig struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Pig { name: "Porky" }
+`,
+			expectedErrors: []string{
+				"cannot assign",
+			},
+		},
+		{
+			name: "Union: 'is' on a non-union type rejected",
+			input: `
+type Cat struct { name String }
+let c = Cat { name: "Tom" }
+let cat: Cat? = c is Cat
+`,
+			expectedErrors: []string{
+				"'is' can only be used on a union type",
+			},
+		},
+		{
+			name: "Union: 'is' with an unlisted variant rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+type Pig struct { name String }
+union Animal = Cat | Dog
+let animal: Animal = Cat { name: "Tom" }
+let p: Pig? = animal is Pig
+`,
+			expectedErrors: []string{
+				"is not a variant of union",
+			},
+		},
+		{
+			name: "Union: duplicate union name rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat
+union Animal = Dog
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
+		{
+			name: "Union: generic struct variant rejected",
+			input: `
+type Box<T> struct { value T }
+type Dog struct { name String }
+union Weird = Box | Dog
+`,
+			expectedErrors: []string{
+				"union variant 'Box' cannot be a generic struct type",
+			},
+		},
+		{
+			name: "Union: function-scoped declaration rejected",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+let f = fn() -> Number {
+	union Animal = Cat | Dog
+	return 0
+}
+`,
+			expectedErrors: []string{
+				"'union' can only be declared at the top level of a module",
+			},
+		},
+		{
+			name: "Type: function-scoped declaration rejected (standardized with union/define)",
+			input: `
+let f = fn() -> Number {
+	type Local struct { x Number }
+	return 0
+}
+`,
+			expectedErrors: []string{
+				"'type' can only be declared at the top level of a module",
+			},
+		},
+		{
+			name: "Define: function-scoped declaration rejected (standardized with union/type)",
+			input: `
+type Cat struct { age Number }
+let f = fn() -> Number {
+	define Adult constraints Cat with: fn(c: Cat) -> Boolean { return c.age > 18 }
+	return 0
+}
+`,
+			expectedErrors: []string{
+				"'define' can only be declared at the top level of a module",
+			},
+		},
+		{
+			name: "Redeclaration: type name reused by define",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+define Cat constraints Dog with: fn(d: Dog) -> Boolean { return true }
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
+		{
+			name: "Redeclaration: type name reused by union",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Cat = Dog
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
+		{
+			name: "Redeclaration: variable shadowing an existing type name",
+			input: `
+type Cat struct { name String }
+let Cat = 5
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
+		{
+			name: "Redeclaration: type name reused by an existing variable",
+			input: `
+let Cat = 5
+type Cat struct { name String }
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
+		{
+			name: "Redeclaration: union name reused by a variable",
+			input: `
+type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog
+let Animal = 5
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -645,6 +869,32 @@ let count = fn(n: Number) -> Number {
 `,
 			expectedErrors: []string{
 				"semantic error: function 'count' contains unconditional recursion and will infinitely loop",
+			},
+		},
+		{
+			name: "If without an else branch inside a recursive function does not panic",
+			input: `
+let fact = fn(n: Number, acc: Number) -> Number {
+	if (n == 0) {
+		return acc
+	}
+	return fact(n - 1, acc * n)
+}
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "If without an else branch, with unrelated statements, still detects unconditional recursion",
+			input: `
+let loop = fn(n: Number) -> Number {
+	if (n == 0) {
+		let unused = 1
+	}
+	return loop(n)
+}
+`,
+			expectedErrors: []string{
+				"semantic error: function 'loop' contains unconditional recursion and will infinitely loop",
 			},
 		},
 		{
@@ -1435,6 +1685,7 @@ if (true) {
 }
 `,
 			expectedErrors: []string{
+				"semantic error: 'type' can only be declared at the top level of a module",
 				"semantic error: 'private' modifier is only allowed at the top-level of a module",
 			},
 		},

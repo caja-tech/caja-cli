@@ -147,6 +147,17 @@ applyOp((x, y) => 1)`,
 			expectedNil:    false,
 			expectedString: "String",
 		},
+		{
+			name:           "Union variant name hover resolves to its struct type",
+			uri:            "file:///test_union_variant_hover.caja",
+			input: `type Cat struct { name String }
+type Dog struct { name String }
+union Animal = Cat | Dog`,
+			queryLine:      2,
+			queryChar:      15, // hovering over 'C' in 'Cat'
+			expectedNil:    false,
+			expectedString: "Cat",
+		},
 	}
 
 	for _, tt := range tests {
@@ -614,7 +625,7 @@ func TestCompletion(t *testing.T) {
 			text: "let myVar = 10\nmyVar",
 			line: 1,
 			col:  5,
-			expectedLabels: []string{"let", "fn", "async", "await", "unwrap", "myVar"},
+			expectedLabels: []string{"let", "fn", "async", "await", "unwrap", "union", "is", "myVar"},
 			missingLabels:  []string{"otherVar"},
 		},
 		{

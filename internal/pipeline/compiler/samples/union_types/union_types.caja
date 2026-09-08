@@ -1,0 +1,23 @@
+import "log"
+
+type Cat struct {
+	name String
+}
+
+type Dog struct {
+	name String
+}
+
+type Pig struct {
+	name String
+}
+
+union Animal = Cat | Dog | Pig
+
+let animal: Animal = Cat { name: "Tom" }
+
+let matched: Cat? = animal is Cat
+let unmatched: Dog? = animal is Dog
+
+log.info("is Cat (expect a name):", matched)
+log.info("is Dog (expect nil):", unmatched)
