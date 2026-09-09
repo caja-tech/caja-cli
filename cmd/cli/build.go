@@ -46,6 +46,9 @@ func resolveOutputBin(filePath, targetOS, targetArch, hostOS, hostArch string) (
 	if resolvedOS == "windows" && !strings.HasSuffix(outBin, ".exe") {
 		outBin += ".exe"
 	}
+	if resolvedOS == "js" && !strings.HasSuffix(outBin, ".wasm") {
+		outBin += ".wasm"
+	}
 	return outBin, resolvedOS, resolvedArch, crossCompiling, nil
 }
 
@@ -104,6 +107,13 @@ func NewBuildCmd() (*cobra.Command, error) {
 			targetArch, err := cmd.Flags().GetString("arch")
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'arch' flag: %w", err)
+			}
+			if targetOS == "" && targetArch == "" && compiler.UsesBrowserModule(goCode) {
+				// The browser module compiles to syscall/js, which only builds
+				// under GOOS=js/GOARCH=wasm — default to that target instead of
+				// letting `go build` fail with a raw "build constraints exclude
+				// all Go files" error on the host platform.
+				targetOS, targetArch = "js", "wasm"
 			}
 			outBin, resolvedOS, resolvedArch, crossCompiling, err := resolveOutputBin(filePath, targetOS, targetArch, runtime.GOOS, runtime.GOARCH)
 			if err != nil {

@@ -563,6 +563,25 @@ func maybeShareValue(sourceExpr ast.Expression, code string, ctx *transpileConte
 	return fmt.Sprintf("cajaShare(%s)", code)
 }
 
+// isNothingReturnType reports whether sym is the built-in "Nothing" type
+// analyzer.go injects as a global (analyzeProgram: `analyzer.types[0]["Nothing"]
+// = symbol.NewStructDefSymbol("Nothing", ...)`) so a function can declare
+// "-> Nothing" to mean "returns no value" — the analyzer already treats it
+// exactly like a void return for guaranteed-return checking (see its own
+// isNothing checks in analyzeFunctionLiteral). Nothing has no corresponding
+// Go type emitted anywhere in the generated program (it's a synthetic
+// analyzer-only placeholder, not a real `type ... struct{}` from user source),
+// so codegen must treat it as void too: NULL_OBJ (the sentinel builtin
+// functions like log.info use for the same purpose) and Nothing both mean
+// "no Go return type, no returned value" here.
+func isNothingReturnType(sym symbol.Symbol) bool {
+	if sym == nil || sym.Type() == environment.NULL_OBJ {
+		return true
+	}
+	structDef, ok := sym.(*symbol.StructDefSymbol)
+	return ok && structDef.Name == "Nothing"
+}
+
 // ctx.mapSymbolToGoType converts a semantic symbol to a static Go type string.
 func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 	if sym == nil {
@@ -626,7 +645,7 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		}
 
 		retType := ""
-		if fnSym.ReturnType() != nil && fnSym.ReturnType().Type() != environment.NULL_OBJ {
+		if !isNothingReturnType(fnSym.ReturnType()) {
 			retType = ctx.mapSymbolToGoType(fnSym.ReturnType())
 		}
 
@@ -686,6 +705,9 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		return "bool"
 	case environment.DATE_OBJ:
 		return "time.Time"
+	case environment.ELEMENT_OBJ:
+		ctx.usedModules["syscall/js"] = true
+		return "js.Value"
 	default:
 		return ""
 	}
@@ -773,7 +795,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 
 		if opts.PrintResult && i == len(program.Statements)-1 {
 			if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
-				if sym, ok := a.GetSymbol(exprStmt.Expression); ok && sym != nil && sym.Type() != environment.NULL_OBJ {
+				if sym, ok := a.GetSymbol(exprStmt.Expression); ok && !isNothingReturnType(sym) {
 					ctx.usedModules["print_result"] = true
 					enableValueFormatting(ctx)
 					bodyBuf.WriteString(lineDirective(ctx.CurrentSourceFile, statementLine(stmt)))
@@ -789,7 +811,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 			// the same way a trailing bare expression is printed, instead of
 			// re-emitting the original discarding form.
 			if retStmt, ok := stmt.(*ast.ReturnStatement); ok && retStmt.ReturnValue != nil {
-				if sym, ok := a.GetSymbol(retStmt.ReturnValue); ok && sym != nil && sym.Type() != environment.NULL_OBJ {
+				if sym, ok := a.GetSymbol(retStmt.ReturnValue); ok && !isNothingReturnType(sym) {
 					val, err := transpileExpression(retStmt.ReturnValue, ctx, "")
 					if err != nil {
 						return "", err
@@ -860,6 +882,9 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 	}
 	if ctx.usedModules["fnv"] {
 		finalBuf.WriteString("import \"hash/fnv\"\n")
+	}
+	if ctx.usedModules["syscall/js"] {
+		finalBuf.WriteString("import \"syscall/js\"\n")
 	}
 
 	needsTime := false
@@ -983,7 +1008,7 @@ func transpileMemoBinding(name string, fnLit *ast.FunctionLiteral, ctx *transpil
 	}
 
 	retType := ""
-	if fnSym != nil && fnSym.ReturnType() != nil && fnSym.ReturnType().Type() != environment.NULL_OBJ {
+	if fnSym != nil && !isNothingReturnType(fnSym.ReturnType()) {
 		retType = ctx.mapSymbolToGoType(fnSym.ReturnType())
 	}
 
@@ -1164,6 +1189,16 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			}
 		}
 
+		// A bare `Nothing {}` literal has no backing Go type anywhere in the
+		// generated program (it's the analyzer's synthetic void-marker
+		// struct, never a real `type Nothing struct{}` from user source — see
+		// isNothingReturnType), and being a fields-less literal it can't have
+		// side effects worth preserving, so skip transpiling it rather than
+		// emit a reference to an undefined "Nothing" Go type.
+		if structLit, ok := s.ReturnValue.(*ast.StructLiteral); ok && structLit.StructName == "Nothing" {
+			s = &ast.ReturnStatement{Token: s.Token}
+		}
+
 		val, err := transpileExpression(s.ReturnValue, ctx, ctx.currentFunctionReturnType)
 		if err != nil {
 			return "", err
@@ -1171,7 +1206,11 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		if val != "" {
 			val = maybeShareValue(s.ReturnValue, val, ctx)
 		}
-		if !ctx.inFunction {
+		// A void Go function (top level, or a "-> Nothing" Caja function —
+		// see isNothingReturnType) can't take a return value even when the
+		// Caja source explicitly wrote one (e.g. `return Nothing {}`), so the
+		// transpiled value is evaluated for side effects only and discarded.
+		if !ctx.inFunction || ctx.currentFunctionReturnType == "" {
 			if val != "" {
 				return fmt.Sprintf("_ = %s\n\treturn", val), nil
 			}
@@ -1832,7 +1871,7 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			paramNames = append(paramNames, param.Name)
 		}
 		retType := ""
-		if fnSym != nil && fnSym.ReturnType() != nil && fnSym.ReturnType().Type() != environment.NULL_OBJ {
+		if fnSym != nil && !isNothingReturnType(fnSym.ReturnType()) {
 			retType = ctx.mapSymbolToGoType(fnSym.ReturnType())
 		}
 

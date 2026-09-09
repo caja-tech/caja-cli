@@ -1593,6 +1593,43 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m)",
 			expectedErrors: []string{"arity error: expected 2 arguments for 'delete', got 1"},
 		},
+		{
+			name:  "browser.log() works with a string argument",
+			input: "import browser\nreturn browser.log(\"hello\")",
+		},
+		{
+			name:           "browser.log() rejects a non-string argument",
+			input:          "import browser\nreturn browser.log(42)",
+			expectedErrors: []string{"type error: first argument to 'log' must be String, got Number"},
+		},
+		{
+			name:           "browser.alert() rejects missing arguments",
+			input:          "import browser\nreturn browser.alert()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'alert', got 0"},
+		},
+		{
+			name:  "browser.getElementById() returns an Element",
+			input: "import browser\nlet el: browser.Element = browser.getElementById(\"app\")\nreturn el",
+		},
+		{
+			name:           "browser.getElementById() rejects a non-string argument",
+			input:          "import browser\nreturn browser.getElementById(42)",
+			expectedErrors: []string{"type error: first argument to 'getElementById' must be String, got Number"},
+		},
+		{
+			name:  "browser.setText() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"app\")\nreturn browser.setText(el, \"hi\")",
+		},
+		{
+			name:           "browser.setText() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.setText(\"not an element\", \"hi\")",
+			expectedErrors: []string{"type error: first argument to 'setText' must be Element, got String"},
+		},
+		{
+			name:           "browser.setHTML() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"app\")\nreturn browser.setHTML(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'setHTML' must be String, got Number"},
+		},
 	}
 
 	runTestScenarios(t, tests)

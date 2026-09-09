@@ -8,13 +8,22 @@ import (
 )
 
 var builtinModules = map[string]bool{
-	"array":  true,
-	"date":   true,
-	"string": true,
-	"math":   true,
-	"log":    true,
-	"map":    true,
-	"cast":   true,
+	"array":   true,
+	"date":    true,
+	"string":  true,
+	"math":    true,
+	"log":     true,
+	"map":     true,
+	"cast":    true,
+	"browser": true,
+}
+
+// UsesBrowserModule reports whether transpiled Go source came from a Caja
+// program that imports the browser module. The browser module compiles to
+// syscall/js calls, which only build under GOOS=js/GOARCH=wasm — callers use
+// this to auto-select that target instead of surfacing a raw Go build error.
+func UsesBrowserModule(goSource string) bool {
+	return strings.Contains(goSource, "\"syscall/js\"")
 }
 
 // isOwned reports whether n is a freshly-produced, definitely-unaliased
@@ -218,6 +227,21 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			}
 			
 			return fmt.Sprintf("%s", argStrs[0]), nil
+		}
+
+	case "browser":
+		ctx.usedModules["syscall/js"] = true
+		switch fn {
+		case "log":
+			return fmt.Sprintf("js.Global().Get(\"console\").Call(\"log\", %s)", argStrs[0]), nil
+		case "alert":
+			return fmt.Sprintf("js.Global().Call(\"alert\", %s)", argStrs[0]), nil
+		case "getElementById":
+			return fmt.Sprintf("js.Global().Get(\"document\").Call(\"getElementById\", %s)", argStrs[0]), nil
+		case "setText":
+			return fmt.Sprintf("%s.Set(\"textContent\", %s)", argStrs[0], argStrs[1]), nil
+		case "setHTML":
+			return fmt.Sprintf("%s.Set(\"innerHTML\", %s)", argStrs[0], argStrs[1]), nil
 		}
 	}
 

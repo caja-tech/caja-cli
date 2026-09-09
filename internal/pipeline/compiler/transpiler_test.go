@@ -493,6 +493,25 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Browser builtins",
+			input: `
+				import browser
+				let el = browser.getElementById("app")
+				browser.setText(el, "hi")
+				browser.setHTML(el, "<b>hi</b>")
+				browser.log("hello")
+				browser.alert("hi")
+			`,
+			expected: []string{
+				"var el js.Value = js.Global().Get(\"document\").Call(\"getElementById\", \"app\")",
+				"el.Set(\"textContent\", \"hi\")",
+				"el.Set(\"innerHTML\", \"<b>hi</b>\")",
+				"js.Global().Get(\"console\").Call(\"log\", \"hello\")",
+				"js.Global().Call(\"alert\", \"hi\")",
+				"import \"syscall/js\"",
+			},
+		},
+		{
 			name: "Move semantics in array push",
 			input: `
 import "array"

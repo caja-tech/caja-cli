@@ -264,6 +264,100 @@ func TestCompileCrossCompiles(t *testing.T) {
 	}
 }
 
+// TestUsesBrowserModule checks the substring-based detection
+// compiler.UsesBrowserModule uses to let cmd/cli auto-select GOOS=js/
+// GOARCH=wasm — it must key off the actual generated `"syscall/js"` import
+// line, not merely the presence of the word "browser" somewhere in the
+// source (e.g. in a comment or an unrelated string literal).
+func TestUsesBrowserModule(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "generated syscall/js import is detected",
+			source: "package main\n\nimport \"syscall/js\"\n\nfunc main() {\n\t_ = js.Global()\n}\n",
+			want:   true,
+		},
+		{
+			name:   "plain program without syscall/js is not flagged",
+			source: "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n",
+			want:   false,
+		},
+		{
+			name:   "mentioning 'browser' in a comment or string is not enough",
+			source: "package main\n\n// this talks about the browser module\nfunc main() {\n\t_ = \"browser\"\n}\n",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compiler.UsesBrowserModule(tt.source); got != tt.want {
+				t.Errorf("UsesBrowserModule(%q) = %v, want %v", tt.source, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCompileBrowserModuleForWasm is the end-to-end check that a program
+// using the browser module doesn't just transpile to text that *looks*
+// right (transpiler_test.go's "Browser builtins" case), but actually
+// compiles for real under GOOS=js/GOARCH=wasm — the one target the
+// generated `syscall/js` calls (js.Global, .Get, .Call, .Set) can build
+// under at all. This is what cmd/cli's browser-import auto-defaulting
+// (targetOS/targetArch -> "js"/"wasm") exists to make possible.
+func TestCompileBrowserModuleForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "browser.caja")
+	source := "import browser\n" +
+		"let el = browser.getElementById(\"app\")\n" +
+		"browser.setText(el, \"hi\")\n" +
+		"browser.setHTML(el, \"<b>hi</b>\")\n" +
+		"browser.log(\"hello\")\n" +
+		"browser.alert(\"hi\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !compiler.UsesBrowserModule(goCode) {
+		t.Fatalf("expected UsesBrowserModule to detect the generated syscall/js import in:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "browser.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling the browser module for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'} // WebAssembly binary magic number
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
 // runCajaSource is a small end-to-end helper shared by the copy-on-write
 // tests below: parses, transpiles with PrintResult (so the last expression
 // statement auto-prints), formats, and runs the source, returning stdout.
@@ -387,6 +481,33 @@ func TestRunLastStatementVoidBuiltinCallDoesNotCrash(t *testing.T) {
 		"import \"log\" as log\nlog.export(1)\n",
 	} {
 		runCajaSource(t, source)
+	}
+}
+
+// TestNothingReturnTypeCompiles is a regression test for a bug where a
+// function explicitly declared "-> Nothing" (Caja's void return type, a
+// synthetic zero-field struct the analyzer injects globally — see
+// isNothingReturnType in transpiler.go) failed to compile: mapSymbolToGoType
+// treated it like any other struct and emitted "*Nothing", but no `type
+// Nothing struct{}` is ever generated (Nothing is analyzer-only, not a real
+// user-declared struct), producing "undefined: Nothing"; separately, Go
+// still required a return value for that bogus non-void signature, producing
+// "missing return" for a function with no explicit return statement. Covers
+// all three ways a "-> Nothing" function's body can end: implicit fallthrough,
+// a bare `return`, and an explicit `return Nothing {}`.
+func TestNothingReturnTypeCompiles(t *testing.T) {
+	for name, source := range map[string]string{
+		"implicit return": "import \"log\" as log\n" +
+			"let f = fn(msg: String) -> Nothing {\n\tlog.info(msg, 1)\n}\n" +
+			"f(\"hi\")\n",
+		"bare return": "let f = fn() -> Nothing {\n\treturn\n}\n" +
+			"f()\n",
+		"explicit return Nothing {}": "let f = fn() -> Nothing {\n\treturn Nothing {}\n}\n" +
+			"f()\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runCajaSource(t, source)
+		})
 	}
 }
 

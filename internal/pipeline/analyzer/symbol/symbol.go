@@ -110,6 +110,17 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 		return map[string]Symbol{
 			"to": NewFunctionSymbol(moduleName, "to", []string{"value", "fallback"}, []string{"T", "R"}, 2, []Symbol{NewGenericSymbol("T"), NewGenericSymbol("R")}, NewGenericSymbol("R")),
 		}, nil, true
+
+	case "browser":
+		return map[string]Symbol{
+				"log":            NewBuiltinSymbol(moduleName, 1, "log(message: String) -> Nothing", "message: String"),
+				"alert":          NewBuiltinSymbol(moduleName, 1, "alert(message: String) -> Nothing", "message: String"),
+				"getElementById": NewBuiltinSymbol(moduleName, 1, "getElementById(id: String) -> Element", "id: String"),
+				"setText":        NewBuiltinSymbol(moduleName, 2, "setText(el: Element, text: String) -> Nothing", "el: Element", "text: String"),
+				"setHTML":        NewBuiltinSymbol(moduleName, 2, "setHTML(el: Element, html: String) -> Nothing", "el: Element", "html: String"),
+			}, map[string]Symbol{
+				"Element": NewBasicSymbol(environment.ELEMENT_OBJ),
+			}, true
 	}
 
 	return nil, nil, false

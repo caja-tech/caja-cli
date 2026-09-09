@@ -60,6 +60,12 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeMapContainsKeyFunction(n), true
 	case "map.delete":
 		return a.analyzeMapDeleteFunction(n), true
+	case "browser.log", "browser.alert":
+		return a.analyzeBrowserStringArgFunction(functionName, n), true
+	case "browser.getElementById":
+		return a.analyzeBrowserGetElementByIdFunction(n), true
+	case "browser.setText", "browser.setHTML":
+		return a.analyzeBrowserSetElementContentFunction(functionName, n), true
 	default:
 		return symbol.AnySymbol(), false
 
@@ -483,6 +489,62 @@ func (a *Analyzer) analyzeMapDeleteFunction(n *ast.CallExpression) symbol.Symbol
 	}
 
 	return mapSymbol
+}
+
+// analyzeBrowserStringArgFunction checks the arity and type for single-String-arg
+// browser functions (log/alert). These produce no value in the compiler, so this
+// must return NULL_OBJ — see analyzeLogFunction's comment for why.
+func (a *Analyzer) analyzeBrowserStringArgFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	argSymbol := a.analyze(n.Arguments[0])
+	if argSymbol.Type() != environment.STRING_OBJ && argSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be String, got %s", functionName, argSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.NULL_OBJ)
+}
+
+// analyzeBrowserGetElementByIdFunction checks the arity and type for the builtin
+// browser 'getElementById' function, returning an Element.
+func (a *Analyzer) analyzeBrowserGetElementByIdFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'getElementById', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	idSymbol := a.analyze(n.Arguments[0])
+	if idSymbol.Type() != environment.STRING_OBJ && idSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'getElementById' must be String, got %s", idSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.ELEMENT_OBJ)
+}
+
+// analyzeBrowserSetElementContentFunction checks the arity and type for browser
+// functions that write a String into an Element (setText/setHTML). These produce
+// no value in the compiler, so this must return NULL_OBJ — see
+// analyzeLogFunction's comment for why.
+func (a *Analyzer) analyzeBrowserSetElementContentFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	elSymbol := a.analyze(n.Arguments[0])
+	if elSymbol.Type() != environment.ELEMENT_OBJ && elSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be Element, got %s", functionName, elSymbol.Type()))
+	}
+
+	contentSymbol := a.analyze(n.Arguments[1])
+	if contentSymbol.Type() != environment.STRING_OBJ && contentSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to '%s' must be String, got %s", functionName, contentSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.NULL_OBJ)
 }
 
 // analyzeCastFunction checks the arity and type for the builtin cast functions.
