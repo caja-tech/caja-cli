@@ -1,0 +1,27 @@
+# {{.Name}}
+
+A Caja **static-page** project — `main.caja` runs once at build time and writes
+plain HTML/CSS into `dist/` via the `page` builtin module, the same way a
+static site generator's build step works.
+
+## Development
+
+```
+caja serve
+```
+
+Builds the project and serves `dist/` over HTTP for local development.
+
+## Building
+
+```
+caja build
+```
+
+Compiles `main.caja`, runs it once to (re)generate `dist/`, and prints where
+the output landed.
+
+## Deploying
+
+`dist/` is a plain directory of static files — point any static file host
+(Netlify, GitHub Pages, S3 + CloudFront, nginx, ...) at it.

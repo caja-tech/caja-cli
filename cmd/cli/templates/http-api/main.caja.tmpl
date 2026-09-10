@@ -1,0 +1,9 @@
+import "http" as http
+
+let router = http.newRouter()
+
+router.get("/", fn(req: http.Request) -> http.Response {
+    return http.ok("Hello from {{.Name}}!")
+})
+
+http.listen(router, 8080)

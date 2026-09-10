@@ -294,6 +294,57 @@ func TestCompileCrossCompiles(t *testing.T) {
 	}
 }
 
+// TestPageWriteProducesFileOnDisk is an end-to-end check that a static-page
+// project's `page.write` call really does produce a file on disk when the
+// compiled binary runs — compiling natively (no GOOS/GOARCH override, unlike
+// the browser-module tests below) and executing the resulting binary with
+// its working directory set to a temp dir, then reading back what it wrote.
+func TestPageWriteProducesFileOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "main.caja")
+	source := "import page\npage.write(\"out/index.html\", \"hello\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+	if !strings.Contains(goCode, "caja_page_write(") {
+		t.Fatalf("expected generated Go source to call caja_page_write, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "main")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{}); err != nil {
+		t.Fatalf("compilation failed: %v", err)
+	}
+
+	runDir := t.TempDir()
+	cmd := exec.Command(outBin)
+	cmd.Dir = runDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("running the compiled binary failed: %v, stderr:\n%s", err, stderr.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(runDir, "out", "index.html"))
+	if err != nil {
+		t.Fatalf("expected page.write to have created out/index.html: %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("out/index.html = %q, want %q", got, "hello")
+	}
+}
+
 // TestUsesBrowserModule checks the substring-based detection
 // compiler.UsesBrowserModule uses to let cmd/cli auto-select GOOS=js/
 // GOARCH=wasm — it must key off the actual generated `"syscall/js"` import

@@ -3,6 +3,7 @@ package main
 import (
 	"caja-cli/internal/file"
 	"caja-cli/internal/pipeline/compiler"
+	"caja-cli/internal/project"
 	"caja-cli/internal/script"
 	"fmt"
 	"go/format"
@@ -39,9 +40,13 @@ func NewListenCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to retrieve 'file' flag: %w", err)
 			}
 
+			filePath, _, err = resolveProjectContext(filePath)
+			if err != nil {
+				return err
+			}
 			if filePath == "" {
 				_ = cmd.Help()
-				return fmt.Errorf("the --file flag is required to run a script")
+				return fmt.Errorf("the --file flag is required to run a script (or run this from a directory containing %s)", project.ManifestFile)
 			}
 
 			ext := filepath.Ext(filePath)

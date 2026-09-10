@@ -56,6 +56,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	initCmd, err := NewInitCmd()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	root.AddCommand(run)
 	root.AddCommand(encode)
 	root.AddCommand(decode)
@@ -63,6 +69,7 @@ func main() {
 	root.AddCommand(build)
 	root.AddCommand(listen)
 	root.AddCommand(serve)
+	root.AddCommand(initCmd)
 
 	if err := root.Execute(); err != nil {
 		fmt.Println(err)

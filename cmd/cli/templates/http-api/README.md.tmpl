@@ -1,0 +1,23 @@
+# {{.Name}}
+
+A Caja **http-api** project — `main.caja` uses the `http` builtin module to
+declare routes and compiles to a native Go binary.
+
+## Running locally
+
+```
+caja listen
+```
+
+Runs `main.caja` as a live local server. Pass `--port` to override the port
+the CLI binds to (independent of the port literal passed to `http.listen`
+in the script).
+
+## Building
+
+```
+caja build
+```
+
+Compiles `main.caja` to a native binary for your platform, which you can run
+directly or deploy anywhere that runs Go binaries.

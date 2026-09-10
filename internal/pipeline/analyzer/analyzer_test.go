@@ -1891,6 +1891,25 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: first argument to 'localStorageGet' must be a non-nullable String, got String? — use cast.to(value, fallback) to unwrap it first"},
 		},
 		{
+			name:  "page.write() works with two String arguments",
+			input: "import page\nreturn page.write(\"dist/index.html\", \"<h1>hi</h1>\")",
+		},
+		{
+			name:           "page.write() rejects a non-String first argument",
+			input:          "import page\nreturn page.write(42, \"<h1>hi</h1>\")",
+			expectedErrors: []string{"type error: first argument to 'write' must be String, got Number"},
+		},
+		{
+			name:           "page.write() rejects a non-String second argument",
+			input:          "import page\nreturn page.write(\"dist/index.html\", 42)",
+			expectedErrors: []string{"type error: second argument to 'write' must be String, got Number"},
+		},
+		{
+			name:           "page.write() rejects missing arguments",
+			input:          "import page\nreturn page.write(\"dist/index.html\")",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'write', got 1"},
+		},
+		{
 			name:  "browser.localStorageSet() works with two String arguments",
 			input: "import browser\nreturn browser.localStorageSet(\"theme\", \"dark\")",
 		},

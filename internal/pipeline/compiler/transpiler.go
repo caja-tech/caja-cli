@@ -906,6 +906,9 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 	if ctx.usedModules["syscall/js"] {
 		finalBuf.WriteString("import \"syscall/js\"\n")
 	}
+	if ctx.usedModules["page_write"] {
+		finalBuf.WriteString("import \"path/filepath\"\n")
+	}
 
 	needsTime := false
 	for _, stmt := range program.Statements {
