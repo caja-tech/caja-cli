@@ -501,6 +501,8 @@ func TestTranspile(t *testing.T) {
 				browser.setHTML(el, "<b>hi</b>")
 				browser.log("hello")
 				browser.alert("hi")
+				browser.setValue(el, "typed value")
+				let v = browser.getValue(el)
 			`,
 			expected: []string{
 				"var el js.Value = js.Global().Get(\"document\").Call(\"getElementById\", \"app\")",
@@ -508,7 +510,359 @@ func TestTranspile(t *testing.T) {
 				"el.Set(\"innerHTML\", \"<b>hi</b>\")",
 				"js.Global().Get(\"console\").Call(\"log\", \"hello\")",
 				"js.Global().Call(\"alert\", \"hi\")",
+				"el.Set(\"value\", \"typed value\")",
+				`var v string = el.Get("value").String()`,
 				"import \"syscall/js\"",
+				// Every browser-module program blocks forever at the end of
+				// main, not just ones that register an event listener — see
+				// the comment above this emission in transpiler.go for why
+				// this isn't gated on "on" specifically, and why it's a
+				// time.Sleep loop rather than a bare select{} (the latter is
+				// fragile once anything else, like browser.fetch, also
+				// blocks on an ordinary channel waiting for a JS callback).
+				"for {",
+				"time.Sleep(time.Second)",
+			},
+		},
+		{
+			name: "Browser on registers a listener for the given event and blocks main forever",
+			input: `
+				import browser
+				let el = browser.getElementById("btn")
+				let handleClick = fn() -> Nothing {
+					browser.log("clicked")
+				}
+				browser.on("click", el, handleClick)
+			`,
+			expected: []string{
+				"var handleClick func() = func() {",
+				`el.Call("addEventListener", "click", js.FuncOf(func(this js.Value, args []js.Value) any {`,
+				"handleClick()",
+				"return nil",
+				// A registered js.FuncOf listener only keeps working while the
+				// wasm instance's Go runtime is still scheduling — main must
+				// never return, or the event can't reach the Go closure
+				// anymore (see the comment above this emission in
+				// transpiler.go for why this is a time.Sleep loop, not a bare
+				// select{}).
+				"for {",
+				"time.Sleep(time.Second)",
+			},
+		},
+		{
+			// The event name is just passed straight through to
+			// addEventListener with no Caja-side enumeration, so a
+			// non-"click" event needs no special-casing anywhere.
+			name: "Browser on works with an arbitrary event name",
+			input: `
+				import browser
+				let el = browser.getElementById("name")
+				let handleInput = fn() -> Nothing {
+					browser.log("input changed")
+				}
+				browser.on("input", el, handleInput)
+			`,
+			expected: []string{
+				`el.Call("addEventListener", "input", js.FuncOf(func(this js.Value, args []js.Value) any {`,
+			},
+		},
+		{
+			name: "Browser fetch call is a plain blocking Go call",
+			input: `
+				import browser
+				let body = browser.fetch("/data")
+				browser.log(body)
+			`,
+			expected: []string{
+				`var body string = caja_browser_fetch("/data")`,
+				`js.Global().Get("console").Call("log", body)`,
+			},
+		},
+		{
+			// async/unwrap need no fetch-specific codegen: async's existing
+			// goroutine-wrapping IIFE (transpileAsyncExpression) applies to
+			// caja_browser_fetch's call expression exactly like it would to
+			// any user function call.
+			name: "Browser fetch composes with async/unwrap using existing codegen",
+			input: `
+				import browser
+				let t = async browser.fetch("/data")
+				let body = unwrap t
+			`,
+			expected: []string{
+				"func() *asyncTask {",
+				`t.val = caja_browser_fetch("/data")`,
+				"<-(t).done",
+				"(t).val.(string)",
+			},
+		},
+		{
+			// fetchThen is the safe way to consume a fetch from inside a
+			// browser.on handler: purely callback-driven codegen, no
+			// channel/blocking construct at the call site at all.
+			name: "Browser fetchThen is purely callback-driven",
+			input: `
+				import browser
+				let handleBody = fn(body: String) -> Nothing {
+					browser.log(body)
+				}
+				browser.fetchThen("/data", handleBody)
+			`,
+			expected: []string{
+				"var handleBody func(string) = func(body string) {",
+				`caja_browser_fetch_then("/data", func(body string) { handleBody(body) })`,
+			},
+		},
+		{
+			// on's handler dispatch must go through caja_wrap_callback so
+			// a panic inside the handler gets clean caja_panic_location()
+			// formatting instead of crashing with a raw Go stack trace on a
+			// goroutine main()'s own recover never sees.
+			name: "Browser on wraps the handler call in caja_wrap_callback",
+			input: `
+				import browser
+				let el = browser.getElementById("btn")
+				let handleClick = fn() -> Nothing {
+					browser.log("clicked")
+				}
+				browser.on("click", el, handleClick)
+			`,
+			expected: []string{
+				`js.FuncOf(func(this js.Value, args []js.Value) any {`,
+				"caja_wrap_callback(func() { handleClick() })",
+			},
+		},
+		{
+			// querySelector's Element? maps to *js.Value (mapSymbolToGoType's
+			// NullableSymbol case), and querySelectorAll's Array<Element> maps
+			// to *cajaArray[js.Value] (the same array representation
+			// string.split etc. already use) — neither invents a new
+			// representation.
+			name: "Browser querySelector is nullable, querySelectorAll returns Array<Element>",
+			input: `
+				import browser
+				let el = browser.querySelector(".item")
+				let els = browser.querySelectorAll(".item")
+			`,
+			expected: []string{
+				`var el *js.Value = caja_browser_query_selector(".item")`,
+				`var els *cajaArray[js.Value] = caja_browser_query_selector_all(".item")`,
+			},
+		},
+		{
+			name: "Browser setAttribute, addClass, and removeClass are plain calls",
+			input: `
+				import browser
+				let el = browser.getElementById("box")
+				browser.setAttribute(el, "data-role", "widget")
+				browser.addClass(el, "highlight")
+				browser.removeClass(el, "a")
+			`,
+			expected: []string{
+				`el.Call("setAttribute", "data-role", "widget")`,
+				`el.Get("classList").Call("add", "highlight")`,
+				`el.Get("classList").Call("remove", "a")`,
+			},
+		},
+		{
+			// getAttribute's String? maps to *string, the same nullable
+			// representation querySelector's Element? uses — see
+			// caja_browser_get_attribute's own injected comment.
+			name: "Browser getAttribute is nullable",
+			input: `
+				import browser
+				let el = browser.getElementById("box")
+				let role = browser.getAttribute(el, "data-role")
+			`,
+			expected: []string{
+				`var role *string = caja_browser_get_attribute(el, "data-role")`,
+			},
+		},
+		{
+			// cast.to must dereference a Nullable input (a *T pointer, e.g.
+			// String? from browser.getAttribute) rather than forward it raw
+			// — passing that pointer straight into the identity/fmt.Sprintf
+			// paths below would either type-mismatch or, worse, compile fine
+			// as `any` and panic at runtime inside syscall/js.ValueOf (a real
+			// bug this pins down: confirmed via headless Chrome that a
+			// pre-fix build of this exact pattern panicked with "ValueOf:
+			// invalid value"). A nil input must fall through to the fallback
+			// exactly like every other "couldn't produce a value" case here
+			// (an unparseable string, etc.) already does.
+			name: "cast.to dereferences a Nullable input with a nil-safe fallback",
+			input: `
+				import browser
+				import cast
+				let el = browser.getElementById("box")
+				let role = browser.getAttribute(el, "data-role")
+				let display = cast.to(role, "not set")
+			`,
+			expected: []string{
+				"func() string {",
+				"p := role",
+				"if p == nil {",
+				`return "not set"`,
+				"v := *p",
+				"return v",
+			},
+		},
+		{
+			name: "Browser createElement, appendChild, removeElement, and setStyle are plain calls",
+			input: `
+				import browser
+				let list = browser.getElementById("list")
+				let item = browser.createElement("li")
+				browser.appendChild(list, item)
+				browser.setStyle(item, "color", "blue")
+				browser.removeElement(item)
+			`,
+			expected: []string{
+				`js.Global().Get("document").Call("createElement", "li")`,
+				`list.Call("appendChild", item)`,
+				`item.Get("style").Call("setProperty", "color", "blue")`,
+				`item.Call("remove")`,
+			},
+		},
+		{
+			name: "Browser removeAttribute, toggleClass, and hasClass are plain calls",
+			input: `
+				import browser
+				let el = browser.getElementById("box")
+				browser.removeAttribute(el, "data-open")
+				browser.toggleClass(el, "open")
+				let isOpen = browser.hasClass(el, "open")
+			`,
+			expected: []string{
+				`el.Call("removeAttribute", "data-open")`,
+				`el.Get("classList").Call("toggle", "open")`,
+				`var isOpen bool = el.Get("classList").Call("contains", "open").Bool()`,
+			},
+		},
+		{
+			name: "Browser focus and blur are plain calls",
+			input: `
+				import browser
+				let el = browser.getElementById("name")
+				browser.focus(el)
+				browser.blur(el)
+			`,
+			expected: []string{
+				`el.Call("focus")`,
+				`el.Call("blur")`,
+			},
+		},
+		{
+			name: "Browser getChecked and setChecked read/write the live checked property",
+			input: `
+				import browser
+				let box = browser.getElementById("remember")
+				let checked = browser.getChecked(box)
+				browser.setChecked(box, true)
+			`,
+			expected: []string{
+				`var checked bool = box.Get("checked").Bool()`,
+				`box.Set("checked", true)`,
+			},
+		},
+		{
+			name: "Browser insertBefore is a plain call",
+			input: `
+				import browser
+				let list = browser.getElementById("list")
+				let ref = browser.getElementById("a-item")
+				let newItem = browser.createElement("li")
+				browser.insertBefore(list, newItem, ref)
+			`,
+			expected: []string{
+				`list.Call("insertBefore", newItem, ref)`,
+			},
+		},
+		{
+			// setTimeout's handler is wrapped in caja_wrap_callback, the same
+			// machinery on's listener uses, and JS's own (callback, delay)
+			// argument order is swapped relative to Caja's (delayMs, handler).
+			name: "Browser setTimeout wraps the handler and returns a Number, clearTimeout is a plain call",
+			input: `
+				import browser
+				let id = browser.setTimeout(2000, fn() -> Nothing { browser.log("fired") })
+				browser.clearTimeout(id)
+			`,
+			expected: []string{
+				`js.Global().Call("setTimeout", js.FuncOf(func(this js.Value, args []js.Value) any {`,
+				`caja_wrap_callback(func() {`,
+				`}), 2000.0).Float()`,
+				`js.Global().Call("clearTimeout", id)`,
+			},
+		},
+		{
+			// localStorageGet's String? maps to *string, the same nullable
+			// representation getAttribute's String? uses.
+			name: "Browser localStorageGet is nullable, localStorageSet and localStorageRemove are plain calls",
+			input: `
+				import browser
+				let theme = browser.localStorageGet("theme")
+				browser.localStorageSet("theme", "dark")
+				browser.localStorageRemove("theme")
+			`,
+			expected: []string{
+				`var theme *string = caja_browser_local_storage_get("theme")`,
+				`js.Global().Get("localStorage").Call("setItem", "theme", "dark")`,
+				`js.Global().Get("localStorage").Call("removeItem", "theme")`,
+			},
+		},
+		{
+			name: "active declares a cajaActive cell and assignment uses Set",
+			input: `
+let active counter = 0
+counter = counter + 1
+`,
+			expected: []string{
+				`var counter *cajaActive[float64] = newCajaActive(0.0)`,
+				`counter.Set((counter.Get() + 1.0))`,
+			},
+		},
+		{
+			name: "a plain (non-active) let assignment is untouched by the active machinery",
+			input: `
+let active counter = 0
+let plain = 1
+plain = 2
+`,
+			expected: []string{
+				`var plain float64 = 1.0`,
+				`plain = 2.0`,
+			},
+		},
+		{
+			name: "reactive call registers a dependent and computes the initial value",
+			input: `
+import cast
+let active counter = 0
+let reactFn = fn(c: Number) -> String { return cast.to(c, "") }
+let active result = reactFn(react counter)
+`,
+			expected: []string{
+				`var result *cajaActive[string] = func() *cajaActive[string] {`,
+				`cell := newCajaActive(reactFn(counter.Get()))`,
+				`cell.recompute = func() { cell.cajaSetFromRecompute(reactFn(counter.Get())) }`,
+				`counter.addDependent(cell)`,
+				`return cell`,
+				`}()`,
+			},
+		},
+		{
+			name: "reactive call with multiple react params registers a dependent on each",
+			input: `
+let active a = 0
+let active b = 1
+let combine = fn(x: Number, y: Number) -> Number { return x + y }
+let active total = combine(react a, react b)
+`,
+			expected: []string{
+				`cell := newCajaActive(combine(a.Get(), b.Get()))`,
+				`cell.recompute = func() { cell.cajaSetFromRecompute(combine(a.Get(), b.Get())) }`,
+				`a.addDependent(cell)`,
+				`b.addDependent(cell)`,
 			},
 		},
 		{

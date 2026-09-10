@@ -6,7 +6,7 @@ type Node struct {
 
 type Metadata struct {
     description String
-    active Boolean
+    isActive Boolean
 }
 
 type Library struct {
@@ -21,7 +21,7 @@ let n2 = Node{value: 10, left: n1, right: nil}
 
 let metadata = Metadata{
     description: "Main Library",
-    active: true
+    isActive: true
 }
 
 let lib = Library{

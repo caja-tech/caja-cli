@@ -612,6 +612,15 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		// underlying element type.
 		return "*asyncTask"
 	}
+	if activeSym, ok := sym.(*symbol.ActiveSymbol); ok {
+		// ActiveSymbol.Type() also forwards to its underlying symbol (see
+		// its own doc comment for why that's safe here), so this check must
+		// also happen before the generic sym.Type() switch below. Unlike
+		// asyncTask, cajaActive is itself generic over the underlying Go
+		// type, so every active value's Go type still varies by element.
+		ctx.usedModules["active_cell"] = true
+		return "*cajaActive[" + ctx.mapSymbolToGoType(activeSym.Underlying) + "]"
+	}
 	if arrSym, ok := sym.(*symbol.ArraySymbol); ok {
 		elType := ctx.mapSymbolToGoType(arrSym.ElementSymbol())
 		if elType == "" {
@@ -894,7 +903,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 			break
 		}
 	}
-	if needsTime || strings.Contains(bodyCode, "time.") || ctx.usedModules["time"] {
+	if needsTime || strings.Contains(bodyCode, "time.") || ctx.usedModules["time"] || ctx.usedModules["syscall/js"] {
 		finalBuf.WriteString("import \"time\"\n")
 	}
 
@@ -917,6 +926,43 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 		// goroutine would be), but catches the common case where it finishes
 		// before the rest of the script does.
 		finalBuf.WriteString("\tcaja_check_async_panic()\n")
+	}
+	if ctx.usedModules["syscall/js"] {
+		// Every browser-module program blocks forever here, not just ones
+		// that happen to call browser.on today — see below for why —
+		// but NOT via a bare `select {}`. Confirmed by hitting this for
+		// real: `select {}` alone is fine (main is the only ever-blocked
+		// goroutine, and Go's deadlock detector doesn't flag a lone
+		// goroutine parked in an empty select), but the moment ANY other
+		// goroutine also blocks on an ordinary channel — e.g.
+		// browser.fetch's caja_browser_fetch, which bridges a JS Promise
+		// onto a channel receive, called from inside a browser.on
+		// handler — Go's checkdead() sees two blocked goroutines with no
+		// Go-visible way to wake either one (a pending JS Promise callback
+		// isn't tracked by the scheduler at all) and kills the whole wasm
+		// instance with "fatal error: all goroutines are asleep - deadlock!",
+		// tearing down every registered listener with it. A time.Sleep loop
+		// avoids this because it registers a real, scheduler-tracked timer
+		// (backed by JS's own setTimeout under GOOS=js) — checkdead()
+		// explicitly treats a pending timer as proof the program isn't
+		// stuck, regardless of how many other goroutines are separately
+		// blocked waiting on a JS callback. The sleep interval only needs to
+		// be short enough to be a negligible wakeup cost; it doesn't gate
+		// anything.
+		//
+		// Every browser-module program stays alive for the page's whole
+		// lifetime rather than exiting after its first pass, mirroring how a
+		// real page's own script never "returns" either — its JS environment
+		// just sits there waiting for whatever happens next. Gating this on
+		// "used browser at all" instead of "used on/fetch specifically"
+		// also matters on its own: tying it to one builtin is fragile, since
+		// every future event/async-registering builtin would have to
+		// remember to opt back in, and a forgotten one fails silently (it
+		// registers fine, then never fires once main exits). Blocking here
+		// does not freeze the browser tab: Go's wasm scheduler cooperatively
+		// yields back to the browser's own event loop between ticks rather
+		// than spinning natively.
+		finalBuf.WriteString("\tfor {\n\t\ttime.Sleep(time.Second)\n\t}\n")
 	}
 	finalBuf.WriteString("}\n")
 
@@ -1130,6 +1176,34 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			varType = ctx.mapSymbolToGoType(sym)
 		}
 
+		// sym is nil (ok == false) when a.GetSymbol found nothing, but a nil
+		// interface always fails a concrete-type assertion cleanly, so
+		// isActive is already false in that case with no need to also
+		// check ok here.
+		if activeSym, isActive := sym.(*symbol.ActiveSymbol); isActive {
+			if callExpr, deps, isReactive := reactiveCallInfo(s.Value); isReactive {
+				val, err := transpileReactiveCallExpression(callExpr, deps, activeSym, ctx)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("var %s %s = %s", prefixIdentifier(ctx, s.Name.Value), varType, val), nil
+			}
+
+			// Plain "source" active variable: the initializer is transpiled
+			// against the *underlying* type (not varType, which is the
+			// wrapped *cajaActive[T]) and wrapped in newCajaActive.
+			underlyingType := ctx.mapSymbolToGoType(activeSym.Underlying)
+			val, err := transpileExpression(s.Value, ctx, underlyingType)
+			if err != nil {
+				return "", err
+			}
+			if val == "" {
+				return "", nil
+			}
+			val = maybeShareValue(s.Value, val, ctx)
+			return fmt.Sprintf("var %s %s = newCajaActive(%s)", prefixIdentifier(ctx, s.Name.Value), varType, val), nil
+		}
+
 		val, err := transpileExpression(s.Value, ctx, varType, sym)
 		if err != nil {
 			return "", err
@@ -1223,7 +1297,13 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			return "", err
 		}
 		val = maybeShareValue(s.Value, val, ctx)
-		return fmt.Sprintf("%s = %s", s.Name.Value, val), nil
+		targetName := resolveIdentifierGoName(s.Name, ctx)
+		if targetSym, ok := a.GetSymbol(s.Name); ok {
+			if _, isActive := targetSym.(*symbol.ActiveSymbol); isActive {
+				return fmt.Sprintf("%s.Set(%s)", targetName, val), nil
+			}
+		}
+		return fmt.Sprintf("%s = %s", targetName, val), nil
 	case *ast.ExpressionStatement:
 		val, err := transpileExpression(s.Expression, ctx, "")
 		if err != nil {
@@ -1450,6 +1530,110 @@ func transpileExpression(expr ast.Expression, ctx *transpileContext, expectedTyp
 	return val, nil
 }
 
+// reactiveCallInfo reports whether expr is a call expression with at least
+// one `react`-marked argument, and if so returns the call and the
+// identifiers of each react-marked dependency (in argument order) — used
+// by transpileStatement's *ast.LetStatement case to route to
+// transpileReactiveCallExpression instead of ordinary call codegen.
+func reactiveCallInfo(expr ast.Expression) (*ast.CallExpression, []*ast.Identifier, bool) {
+	callExpr, ok := expr.(*ast.CallExpression)
+	if !ok {
+		return nil, nil, false
+	}
+	var deps []*ast.Identifier
+	for _, arg := range callExpr.Arguments {
+		if prefix, ok := arg.(*ast.PrefixExpression); ok && prefix.Operator == "react" {
+			if ident, ok := prefix.Right.(*ast.Identifier); ok {
+				deps = append(deps, ident)
+			}
+		}
+	}
+	if len(deps) == 0 {
+		return nil, nil, false
+	}
+	return callExpr, deps, true
+}
+
+// transpileReactiveCallExpression compiles a call with one or more
+// react-marked arguments into an IIFE that computes the initial value,
+// registers the result cell as a dependent of each dependency (via
+// addDependent), and returns the cell. A dependency's own eventual Set call
+// triggers cajaPropagate, which recomputes this cell (via cajaRecompute,
+// calling the recompute closure defined here) in topological order relative
+// to every other transitively-affected cell — not immediately/inline the
+// way a plain per-edge subscriber callback would, which is what let a
+// shared downstream consumer of two changed dependencies (a "diamond")
+// observe a torn intermediate state and recompute twice. See cajaPropagate
+// and cajaActive.Set's doc comments (builtins.go) for the full design and
+// the verified reason goroutine-based propagation was rejected instead.
+//
+// A react-marked argument that is itself a derived active value (chained
+// reactivity, e.g. `d = h(react b)` where `b = f(react a)`) is fully
+// supported, not rejected: callExpr is transpiled through the ordinary
+// call-codegen path, which already auto-unwraps any active identifier
+// (including a derived one) via .Get() — chaining requires no special
+// handling here at all, only cajaPropagate's topological ordering to be
+// correct once fan-in is involved.
+func transpileReactiveCallExpression(callExpr *ast.CallExpression, deps []*ast.Identifier, resultSym *symbol.ActiveSymbol, ctx *transpileContext) (string, error) {
+	ctx.usedModules["active_cell"] = true
+	resultGoType := ctx.mapSymbolToGoType(resultSym.Underlying)
+
+	callStr, err := transpileExpression(callExpr, ctx, "")
+	if err != nil {
+		return "", err
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf("func() *cajaActive[%s] {\n", resultGoType))
+	buf.WriteString(fmt.Sprintf("cell := newCajaActive(%s)\n", callStr))
+	buf.WriteString(fmt.Sprintf("cell.recompute = func() { cell.cajaSetFromRecompute(%s) }\n", callStr))
+	for _, dep := range deps {
+		buf.WriteString(fmt.Sprintf("%s.addDependent(cell)\n", resolveIdentifierGoName(dep, ctx)))
+	}
+	buf.WriteString("return cell\n}()")
+	return buf.String(), nil
+}
+
+// resolveIdentifierGoName resolves an Identifier to its bare (possibly
+// cross-module-prefixed) Go variable name, with no active-unwrap applied —
+// the raw name a declaration/assignment target or a `react` operand needs.
+// Ordinary reads go through transpileExpressionInternal's *ast.Identifier
+// case instead, which calls this and then conditionally appends .Get().
+func resolveIdentifierGoName(e *ast.Identifier, ctx *transpileContext) string {
+	a := ctx.analyzer
+	_, filePath, ok := a.GetDefinition(e)
+	// Deliberately compared against a.GlobalEnv().FileName here, NOT the
+	// stable ctx.topLevelFileName used for struct/union symbol names
+	// elsewhere: entry.FilePath (see analyzer/scope.go's declare/
+	// declareImport) is set to "whichever file's analyzer processed this
+	// declaration" for EVERY binding, local params/lets included — there's
+	// no such thing as a "local struct type" the way there is a local
+	// variable, so the struct-symbol case can safely treat "not the
+	// top-level script" as "always prefixed". Here, comparing against
+	// ctx.topLevelFileName would wrongly module-prefix a perfectly
+	// ordinary function parameter or local `let` just because the function
+	// enclosing it happens to live inside an imported module's file —
+	// a.GlobalEnv().FileName instead reflects "the file whose code is
+	// CURRENTLY being transpiled" (ctx.analyzer is swapped per-module
+	// during that loop), which is what a local binding needs to be
+	// compared against to correctly stay unprefixed while its own
+	// enclosing module's code is what's being generated, and only get
+	// prefixed when referenced from elsewhere.
+	if ok && filePath != "" && filePath != a.GlobalEnv().FileName {
+		// Identifier was defined in another module
+		return sanitizeIdentifier(filePath) + "_" + e.Value
+	}
+	// If it's a global variable defined in the current module being transpiled (not main)
+	if ctx.CurrentModulePath != "" {
+		_, isGlobal := a.GlobalScope()[e.Value]
+		_, filePath, ok := a.GetDefinition(e)
+		if isGlobal && ok && filePath == ctx.CurrentModulePath {
+			return sanitizeIdentifier(ctx.CurrentModulePath) + "_" + e.Value
+		}
+	}
+	return e.Value
+}
+
 func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, expectedType string) (string, error) {
 	if expr == nil {
 		return "", nil
@@ -1461,39 +1645,23 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		if importedMod != "" && builtinModules[importedMod] {
 			return transpileBuiltinProperty(importedMod, e.Value, ctx)
 		}
-		_, filePath, ok := a.GetDefinition(e)
-		// Deliberately compared against a.GlobalEnv().FileName here, NOT the
-		// stable ctx.topLevelFileName used for struct/union symbol names
-		// above: entry.FilePath (see analyzer/scope.go's declare/
-		// declareImport) is set to "whichever file's analyzer processed
-		// this declaration" for EVERY binding, local params/lets included
-		// — there's no such thing as a "local struct type" the way there
-		// is a local variable, so the struct-symbol case can safely treat
-		// "not the top-level script" as "always prefixed". Here, comparing
-		// against ctx.topLevelFileName would wrongly module-prefix a
-		// perfectly ordinary function parameter or local `let` just
-		// because the function enclosing it happens to live inside an
-		// imported module's file — a.GlobalEnv().FileName instead reflects
-		// "the file whose code is CURRENTLY being transpiled" (ctx.analyzer
-		// is swapped per-module during that loop), which is what a local
-		// binding needs to be compared against to correctly stay
-		// unprefixed while its own enclosing module's code is what's being
-		// generated, and only get prefixed when referenced from elsewhere.
-		if ok && filePath != "" && filePath != a.GlobalEnv().FileName {
-			// Identifier was defined in another module
-			return sanitizeIdentifier(filePath) + "_" + e.Value, nil
-		}
-		// If it's a global variable defined in the current module being transpiled (not main)
-		if ctx.CurrentModulePath != "" {
-			_, isGlobal := a.GlobalScope()[e.Value]
-			_, filePath, ok := a.GetDefinition(e)
-			if isGlobal {
-				if ok && filePath == ctx.CurrentModulePath {
-					return sanitizeIdentifier(ctx.CurrentModulePath) + "_" + e.Value, nil
-				}
+		name := resolveIdentifierGoName(e, ctx)
+		// An ordinary read of an `active` identifier transparently unwraps
+		// to its underlying value here — the one, centralized place every
+		// identifier read flows through — so arithmetic, function
+		// arguments, string interpolation, etc. all just work with no
+		// per-call-site handling (see ActiveSymbol's doc comment). A
+		// `react`-marked argument reads through this exact path too (its
+		// PrefixExpression codegen just forwards here, like move does) —
+		// the *dependency list* used to wire addDependent calls is extracted
+		// separately, directly off the AST (see reactiveCallInfo), never
+		// from this transpiled text.
+		if sym, ok := a.GetSymbol(e); ok {
+			if _, isActive := sym.(*symbol.ActiveSymbol); isActive {
+				return name + ".Get()", nil
 			}
 		}
-		return e.Value, nil
+		return name, nil
 	case *ast.NumberLiteral:
 		return formatNumberLiteral(e.Value), nil
 	case *ast.StringLiteral:
@@ -1643,8 +1811,16 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		if err != nil {
 			return "", err
 		}
-		if e.Operator == "move" {
-			return right, nil // Go doesn't have move, just return the underlying identifier
+		if e.Operator == "move" || e.Operator == "react" {
+			// Go doesn't have move; just return the underlying identifier.
+			// react's operand already goes through the ordinary Identifier
+			// codegen above, which auto-appends .Get() for an active
+			// identifier — exactly what's needed here, since this text
+			// becomes an ordinary call argument (e.g. reactFn(counter.Get())).
+			// The *dependency list* used to wire addDependent calls is
+			// extracted separately, directly off the AST (see
+			// reactiveCallInfo), not from this codegen path.
+			return right, nil
 		}
 		if e.Operator == "!" {
 			return fmt.Sprintf("(!%s)", right), nil

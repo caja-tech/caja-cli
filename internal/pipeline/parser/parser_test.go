@@ -1859,7 +1859,7 @@ func TestStreamPipeBoundaryMixing(t *testing.T) {
 	}{
 		{
 			name:      "regular pipe feeding into a stream pipe is allowed",
-			input:     "sales |> filter(active) |>> calcDiscount(5)",
+			input:     "sales |> filter(isEligible) |>> calcDiscount(5)",
 			wantError: false,
 		},
 		{

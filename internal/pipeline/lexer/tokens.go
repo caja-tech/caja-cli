@@ -72,6 +72,8 @@ const (
 	WITH    TokenType = "WITH"
 	NIL     TokenType = "NIL"
 	MOVE    TokenType = "MOVE"
+	ACTIVE  TokenType = "ACTIVE"
+	REACT   TokenType = "REACT"
 	MEMO    TokenType = "MEMO"
 	ASYNC   TokenType = "ASYNC"
 	AWAIT   TokenType = "AWAIT"
@@ -113,6 +115,8 @@ var keywords = map[string]TokenType{
 	"with":   WITH,
 	"nil":     NIL,
 	"move":    MOVE,
+	"active":  ACTIVE,
+	"react":   REACT,
 	"memo":    MEMO,
 	"async":   ASYNC,
 	"await":   AWAIT,
@@ -134,7 +138,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE, MEMO, ASYNC, AWAIT, UNWRAP, UNION, IS:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE, ACTIVE, REACT, MEMO, ASYNC, AWAIT, UNWRAP, UNION, IS:
 		return true
 	}
 	return false

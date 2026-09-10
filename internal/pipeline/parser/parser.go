@@ -66,6 +66,7 @@ func New(t *lexer.Lexer) *Parser {
 	p.prefixParseFuncs[lexer.BANG] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MINUS] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MOVE] = p.parsePrefixExpression
+	p.prefixParseFuncs[lexer.REACT] = p.parsePrefixExpression
 	p.prefixParseFuncs[lexer.MEMO] = p.parseMemoExpression
 	p.prefixParseFuncs[lexer.ASYNC] = p.parseAsyncExpression
 	p.prefixParseFuncs[lexer.UNWRAP] = p.parseUnwrapExpression
@@ -692,6 +693,11 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 // expects an assignment operator, and then parses the initialization expression.
 func (p *Parser) parseLetStatement() *ast.LetStatement {
 	statement := &ast.LetStatement{Token: p.currToken}
+
+	if p.peekToken.Type == lexer.ACTIVE {
+		p.nextToken() // consume 'active'
+		statement.IsActive = true
+	}
 
 	if lexer.IsKeyword(p.peekToken.Type) {
 		p.reportError(p.peekToken, fmt.Sprintf("syntax error: cannot use keyword '%s' as a variable name", p.peekToken.Literal))

@@ -126,4 +126,16 @@ func TestBuildCmd_BrowserModuleDefaultsToWasm(t *testing.T) {
 		}
 		t.Errorf("expected %s to start with wasm magic bytes %x, got %x", wantBin, wantMagic, got)
 	}
+
+	// The auto-defaulted js/wasm build must also emit the browser test
+	// harness (wasm_exec.js + HTML loader) a wasm binary needs to actually
+	// run anywhere, since there's no other reason to produce a GOOS=js
+	// binary from this CLI today (see compiler.WriteBrowserHarness).
+	if _, err := os.Stat(filepath.Join(dir, "wasm_exec.js")); err != nil {
+		t.Errorf("expected wasm_exec.js to be written alongside the binary: %v", err)
+	}
+	wantHTML := filepath.Join(dir, "browser-js-wasm.html")
+	if _, err := os.Stat(wantHTML); err != nil {
+		t.Errorf("expected harness html at %s: %v", wantHTML, err)
+	}
 }
