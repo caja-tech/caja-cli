@@ -31,11 +31,12 @@ Two cross-cutting support packages sit underneath/beside that chain:
 - **[internal/encoder](internal/encoder/CLAUDE.md)** — bundles a script plus its local imports into a single portable compressed token, for the `encode`/`decode` CLI commands.
 - **[internal/toolchain](internal/toolchain/CLAUDE.md)** — downloads/caches a self-contained Go toolchain so `caja build` doesn't require a system Go install.
 - **[internal/file](internal/file/CLAUDE.md)** — the `.caja` extension / `main.caja` naming constants, shared across the CLI, encoder, and modules.
+- **[internal/project](internal/project/CLAUDE.md)** — reads/writes `cajaproj.yml`, the manifest a `caja init`-scaffolded project (static-page, http-api, web-app) declares its type in, letting `build`/`run`/`serve`/`listen` auto-discover the entry file and branch behavior by type.
 - **[internal/text](internal/text/CLAUDE.md)** — trivial substring helper; test-only, not load-bearing production code.
 
 ## The composition root and the client
 
-- **[cmd/cli](cmd/cli/CLAUDE.md)** — the Cobra-based `caja` binary: `run`, `build`, `encode`, `decode`, `lsp` subcommands, wiring together everything above.
+- **[cmd/cli](cmd/cli/CLAUDE.md)** — the Cobra-based `caja` binary: `init`, `run`, `build`, `serve`, `listen`, `encode`, `decode`, `lsp` subcommands, wiring together everything above.
 - **[editors](editors/CLAUDE.md)** — the VS Code extension (TypeScript, not Go). Talks to `internal/lsp` indirectly by spawning `caja lsp` as a subprocess over stdio.
 
 ## Orienting yourself

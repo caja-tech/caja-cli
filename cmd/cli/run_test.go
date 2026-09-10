@@ -21,7 +21,7 @@ func TestRunCmd_MissingFile(t *testing.T) {
 		t.Fatal("Expected error due to missing file flag")
 	}
 
-	if err.Error() != "the --file flag is required to run a script" {
+	if err.Error() != "the --file flag is required to run a script (or run this from a directory containing cajaproj.yml)" {
 		t.Errorf("Unexpected error message: %v", err)
 	}
 

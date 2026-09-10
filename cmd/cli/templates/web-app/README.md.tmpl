@@ -1,0 +1,30 @@
+# {{.Name}}
+
+A Caja **web-app** project — `main.caja` imports the `browser` module and
+compiles to a WebAssembly binary that runs entirely client-side.
+
+## Development
+
+```
+caja serve
+```
+
+Builds the project to wasm and serves it (with its HTML/JS harness) over
+HTTP for local development.
+
+## Building
+
+```
+caja build
+```
+
+Compiles `main.caja` to `{{.Name}}.wasm`, and writes `wasm_exec.js`,
+`{{.Name}}.html`, and `index.html` alongside it.
+
+## Deploying
+
+The build output directory is a self-contained static bundle
+(`{{.Name}}.wasm`, `wasm_exec.js`, `index.html`) — point any static file host
+(Netlify, GitHub Pages, S3 + CloudFront, nginx, ...) at it and visitors
+navigating to your domain will receive `index.html`, which loads and runs
+the wasm binary in their browser.

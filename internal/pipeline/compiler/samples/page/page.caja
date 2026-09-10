@@ -1,0 +1,7 @@
+import page
+
+let html = "<!doctype html><html><head><title>Caja Page Demo</title><link rel='stylesheet' href='style.css'></head><body><h1>Hello from Caja</h1></body></html>"
+let css = "body { font-family: sans-serif; }"
+
+page.write("dist/index.html", html)
+page.write("dist/style.css", css)

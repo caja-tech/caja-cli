@@ -2,10 +2,17 @@ package main
 
 import (
 	"bytes"
+	"caja-cli/internal/project"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestResolveOutputBin_HostBuildUnchanged confirms building for the host
@@ -137,5 +144,163 @@ func TestBuildCmd_BrowserModuleDefaultsToWasm(t *testing.T) {
 	wantHTML := filepath.Join(dir, "browser-js-wasm.html")
 	if _, err := os.Stat(wantHTML); err != nil {
 		t.Errorf("expected harness html at %s: %v", wantHTML, err)
+	}
+}
+
+// TestBuildCmd_StaticPageAutoDiscovery checks the no-"--file" project-aware
+// path: with a cajaproj.yml declaring type: static-page sitting in the cwd,
+// `caja build` should find main.caja on its own, compile it natively, run
+// the resulting binary once, and leave the generated dist/ output behind.
+func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	source := "import page\npage.write(\"dist/index.html\", \"hello from static-page\")\n"
+	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write main.caja: %v", err)
+	}
+	manifest := &project.Manifest{Name: "demo", Type: project.TypeStaticPage, CajaVersion: "dev"}
+	if err := project.Save(dir, manifest); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	chdir(t, dir)
+
+	cmd, _ := NewBuildCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected build to succeed via manifest auto-discovery, got: %v\noutput:\n%s", err, bufOut.String())
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "dist", "index.html"))
+	if err != nil {
+		t.Fatalf("expected dist/index.html to be written: %v", err)
+	}
+	if string(got) != "hello from static-page" {
+		t.Errorf("dist/index.html = %q, want %q", got, "hello from static-page")
+	}
+}
+
+// TestBuildCmd_WebAppAutoDiscoveryWritesIndexHTML checks that a manifest-
+// declared web-app project's build also writes index.html alongside the
+// usual <name>.html harness, so the output directory is servable at a bare
+// domain root by any static host with zero extra configuration.
+func TestBuildCmd_WebAppAutoDiscoveryWritesIndexHTML(t *testing.T) {
+	dir := t.TempDir()
+	source := "import browser\nbrowser.log(\"hello\")\n"
+	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write main.caja: %v", err)
+	}
+	manifest := &project.Manifest{Name: "demo", Type: project.TypeWebApp, CajaVersion: "dev"}
+	if err := project.Save(dir, manifest); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	chdir(t, dir)
+
+	cmd, _ := NewBuildCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected build to succeed via manifest auto-discovery, got: %v\noutput:\n%s", err, bufOut.String())
+	}
+
+	// crossCompiling becomes true once targetOS/targetArch are auto-filled
+	// to "js"/"wasm" for the declared web-app type (see resolveOutputBin),
+	// so the harness is named main-js-wasm.html, not main.html.
+	wantHTML := filepath.Join(dir, "main-js-wasm.html")
+	if _, err := os.Stat(wantHTML); err != nil {
+		t.Errorf("expected harness html at %s: %v", wantHTML, err)
+	}
+	wantIndex := filepath.Join(dir, "index.html")
+	indexData, err := os.ReadFile(wantIndex)
+	if err != nil {
+		t.Fatalf("expected index.html to be written alongside the harness: %v", err)
+	}
+	harnessData, err := os.ReadFile(wantHTML)
+	if err != nil {
+		t.Fatalf("failed to read harness html: %v", err)
+	}
+	if string(indexData) != string(harnessData) {
+		t.Errorf("expected index.html to mirror the harness html content")
+	}
+}
+
+// TestBuildCmd_HTTPAPIBuildsRunnableBinary is the end-to-end check for a
+// manifest-declared http-api project: build.go deliberately has no
+// http-api-specific branch (unlike static-page and web-app), relying on the
+// http builtin module compiling like any other native program — so this
+// confirms that's actually true by starting the built binary directly (not
+// via `go run`, unlike the compiler package's own http-module tests) and
+// hitting it over real HTTP, using the same CAJA_HTTP_PORT override
+// `caja listen` relies on (see caja_http_listen in builtins.go) to bind a
+// pre-reserved free port instead of the script's hardcoded 8080.
+func TestBuildCmd_HTTPAPIBuildsRunnableBinary(t *testing.T) {
+	dir := t.TempDir()
+	source := "import \"http\" as http\nlet router = http.newRouter()\nrouter.get(\"/\", fn(req: http.Request) -> http.Response { return http.ok(\"hi from http-api\") })\nhttp.listen(router, 8080)\n"
+	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write main.caja: %v", err)
+	}
+	manifest := &project.Manifest{Name: "demo", Type: project.TypeHTTPAPI, CajaVersion: "dev"}
+	if err := project.Save(dir, manifest); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	chdir(t, dir)
+
+	cmd, _ := NewBuildCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected http-api build to succeed via manifest auto-discovery, got: %v\noutput:\n%s", err, bufOut.String())
+	}
+
+	outBin := filepath.Join(dir, "main")
+	if _, err := os.Stat(outBin); err != nil {
+		t.Fatalf("expected a native binary at %s: %v", outBin, err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve a free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	runCmd := exec.Command(outBin)
+	runCmd.Env = append(os.Environ(), fmt.Sprintf("CAJA_HTTP_PORT=%d", port))
+	var stderr bytes.Buffer
+	runCmd.Stderr = &stderr
+	if err := runCmd.Start(); err != nil {
+		t.Fatalf("failed to start the built binary: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = runCmd.Process.Kill()
+		_ = runCmd.Wait()
+	})
+
+	addr := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	deadline := time.Now().Add(5 * time.Second)
+	var resp *http.Response
+	for {
+		resp, err = http.Get(addr)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("built binary never accepted connections on %s within timeout; stderr:\n%s", addr, stderr.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK || string(body) != "hi from http-api" {
+		t.Errorf("GET %s: expected 200 %q, got %d %q", addr, "hi from http-api", resp.StatusCode, body)
 	}
 }

@@ -113,6 +113,15 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 
 	case "http":
 		return getHTTPStandardModule(moduleName)
+	case "page":
+		return map[string]Symbol{
+			// write is the whole of the page module for now: writes content
+			// to path (creating parent directories as needed), used by
+			// static-page projects to produce their dist/ output when the
+			// compiled binary runs once at `caja build` time.
+			"write": NewBuiltinSymbol(moduleName, 2, "write(path: String, content: String) -> Nothing", "path: String", "content: String"),
+		}, nil, true
+
 	case "browser":
 		return map[string]Symbol{
 				"log":            NewBuiltinSymbol(moduleName, 1, "log(message: String) -> Nothing", "message: String"),

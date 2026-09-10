@@ -1,0 +1,7 @@
+import page
+
+let html = "<!doctype html><html><head><title>{{.Name}}</title><link rel='stylesheet' href='style.css'></head><body><h1>{{.Name}}</h1><p>Welcome to your new Caja static-page project. Edit main.caja and run 'caja build' to regenerate dist/.</p></body></html>"
+let css = "body { font-family: sans-serif; margin: 2rem; color: #222; } h1 { color: #0b5fff; }"
+
+page.write("dist/index.html", html)
+page.write("dist/style.css", css)
