@@ -1,0 +1,54 @@
+import "http" as http
+import "map" as map
+import "cast" as cast
+
+let requireApiKey = fn(next: http.Handler) -> http.Handler {
+    return fn(req: http.Request) -> http.Response {
+        if (!map.containsKey(req.headers, "Authorization")) {
+            return http.text(401, "unauthorized")
+        }
+        return next(req)
+    }
+}
+
+let router = http.newRouter()
+
+router.get("/hello", fn(req: http.Request) -> http.Response {
+    return http.ok("Hello, world!")
+})
+
+router.get("/users/:id", fn(req: http.Request) -> http.Response {
+    return http.json(200, { "id": req.pathParams["id"] })
+})
+
+router.get("/admin", requireApiKey(fn(req: http.Request) -> http.Response {
+    return http.ok("welcome, admin")
+}))
+
+router.post("/echo", fn(req: http.Request) -> http.Response {
+    let parsed = http.parseJSON(req.body)
+    let name = cast.to(parsed["name"], "unknown")
+    return http.json(200, { "name": name })
+})
+
+router.get("/missing", fn(req: http.Request) -> http.Response {
+    return http.notFound("nothing here")
+})
+
+router.get("/bad", fn(req: http.Request) -> http.Response {
+    return http.badRequest("bad input")
+})
+
+router.get("/boom", fn(req: http.Request) -> http.Response {
+    return http.serverError("kaboom")
+})
+
+router.get("/custom", fn(req: http.Request) -> http.Response {
+    return http.Response{status: 201, headers: {"X-Custom": "yes"}, body: "custom"}
+})
+
+router.get("/whoami", fn(req: http.Request) -> http.Response {
+    return http.ok(req.ip)
+})
+
+http.listen(router, 8089)

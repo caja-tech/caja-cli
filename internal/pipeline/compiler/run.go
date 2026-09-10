@@ -32,8 +32,8 @@ func Run(goSource string, extraEnv []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	goroot := filepath.Dir(filepath.Dir(goBin))
-	env := append(os.Environ(), "GOROOT="+goroot)
-	env = append(env, extraEnv...)
+	// See Compile's cajaGoEnv for why CGO_ENABLED=0 is always set here too.
+	env := append(cajaGoEnv(goroot), extraEnv...)
 
 	cmdMod := exec.Command(goBin, "mod", "init", "caja_build")
 	cmdMod.Dir = tmpDir

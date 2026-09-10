@@ -111,6 +111,8 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 			"to": NewFunctionSymbol(moduleName, "to", []string{"value", "fallback"}, []string{"T", "R"}, 2, []Symbol{NewGenericSymbol("T"), NewGenericSymbol("R")}, NewGenericSymbol("R")),
 		}, nil, true
 
+	case "http":
+		return getHTTPStandardModule(moduleName)
 	case "browser":
 		return map[string]Symbol{
 				"log":            NewBuiltinSymbol(moduleName, 1, "log(message: String) -> Nothing", "message: String"),
@@ -206,11 +208,9 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 				// "centralize the event name as a string."
 				"on": NewBuiltinSymbol(moduleName, 3, "on(event: String, el: Element, handler: fn() -> Nothing) -> Nothing", "event: String", "el: Element", "handler: fn() -> Nothing"),
 				// GET-only, returns the body as String — no Response type
-				// here yet to carry status/headers separately (the parallel
-				// http-server branch already has its own http.Response; the
-				// two are meant to be unified later rather than guessed at
-				// now). Works with async/unwrap for free at the top level of
-				// a program: it's an ordinary builtin whose *generated Go
+				// here yet to carry status/headers separately. Works with
+				// async/unwrap for free at the top level of a program: it's
+				// an ordinary builtin whose *generated Go
 				// code* blocks on a channel bridging the JS fetch Promise, so
 				// `async browser.fetch(u)` runs it concurrently via the same
 				// machinery every other async expression already uses.
@@ -261,4 +261,111 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 	}
 
 	return nil, nil, false
+}
+
+// getHTTPStandardModule builds the "http" builtin module's exported symbols.
+// Router is modeled as an opaque struct whose only Caja-visible members are
+// function-typed fields (get/post/put/delete/patch/use) rather than
+// "http.get(router, path, handler)" module-level calls: a call on a
+// struct-field-of-function-type already transpiles correctly today via the
+// generic PropertyExpression/CallExpression codegen path (it capitalizes
+// "get" -> "Get" and emits "router.Get(...)"), so this needs no new
+// dispatch logic in the compiler at all — see compiler/builtins.go's http
+// case for the codegen half of this contract.
+func getHTTPStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol, bool) {
+	numSym := NewBasicSymbol(environment.NUMBER_OBJ)
+	strSym := NewBasicSymbol(environment.STRING_OBJ)
+	strMapSym := NewMapSymbol(strSym, strSym)
+	strArrMapSym := NewMapSymbol(strSym, NewArraySymbol(strSym))
+	// A function returning nothing must resolve here as NULL_OBJ specifically
+	// (not a nil ReturnType, and not the surface "Nothing" struct type Caja
+	// uses for user-declared `-> Nothing` functions, which has a distinct
+	// Type() of "Nothing" rather than "NULL") — matching log.info/map.delete's
+	// convention. analyzeCallExpression's generic FunctionSymbol path falls
+	// back to AnySymbol() when ReturnType() is nil, and Transpile only
+	// suppresses printing/assigning a statement's result when its resolved
+	// symbol's Type() is exactly NULL_OBJ; either mismatch would make
+	// `caja run` try to print or assign a void call's result and fail to
+	// compile the generated Go.
+	nothingSym := NewBasicSymbol(environment.NULL_OBJ)
+
+	requestSym := NewStructDefSymbol("Request", nil, map[string]StructFieldSymbol{
+		"method":     {Type: strSym},
+		"path":       {Type: strSym},
+		"pathParams": {Type: strMapSym},
+		"query":      {Type: strMapSym},
+		"headers":    {Type: strMapSym},
+		"body":       {Type: strSym},
+		"ip":         {Type: strSym},
+		"queryAll":   {Type: strArrMapSym},
+		"headersAll": {Type: strArrMapSym},
+	}, "")
+
+	responseSym := NewStructDefSymbol("Response", nil, map[string]StructFieldSymbol{
+		"status":  {Type: numSym},
+		"headers": {Type: strMapSym},
+		"body":    {Type: strSym},
+	}, "")
+
+	handlerSym := NewFunctionSymbol(moduleName, "Handler", []string{"req"}, nil, 1, []Symbol{requestSym}, responseSym)
+	middlewareSym := NewFunctionSymbol(moduleName, "Middleware", []string{"next"}, nil, 1, []Symbol{handlerSym}, handlerSym)
+	keyFuncSym := NewFunctionSymbol(moduleName, "keyFunc", []string{"req"}, nil, 1, []Symbol{requestSym}, strSym)
+
+	routeRegister := func(name string) *FunctionSymbol {
+		return NewFunctionSymbol(moduleName, name, []string{"path", "handler"}, nil, 2, []Symbol{strSym, handlerSym}, nothingSym)
+	}
+
+	routerSym := NewStructDefSymbol("Router", nil, map[string]StructFieldSymbol{
+		"get":    {Type: routeRegister("get")},
+		"post":   {Type: routeRegister("post")},
+		"put":    {Type: routeRegister("put")},
+		"delete": {Type: routeRegister("delete")},
+		"patch":  {Type: routeRegister("patch")},
+		"static": {Type: NewFunctionSymbol(moduleName, "static", []string{"prefix", "dir"}, nil, 2, []Symbol{strSym, strSym}, nothingSym)},
+		"use":    {Type: NewFunctionSymbol(moduleName, "use", []string{"middleware"}, nil, 1, []Symbol{middlewareSym}, nothingSym)},
+	}, "")
+
+	// Client mirrors Router's own opaque-struct-with-function-fields design
+	// (see the doc comment above this function) — get/post/put/delete/patch
+	// are plain function-typed fields, so client.get(...) needs the exact
+	// same zero-new-dispatch-code codegen path router.get(...) already gets.
+	nullableResponseSym := &NullableSymbol{Underlying: responseSym}
+	clientVerb := func(name string, hasBody bool) *FunctionSymbol {
+		if hasBody {
+			return NewFunctionSymbol(moduleName, name, []string{"endpoint", "body"}, nil, 2, []Symbol{strSym, strSym}, nullableResponseSym)
+		}
+		return NewFunctionSymbol(moduleName, name, []string{"endpoint"}, nil, 1, []Symbol{strSym}, nullableResponseSym)
+	}
+
+	clientSym := NewStructDefSymbol("Client", nil, map[string]StructFieldSymbol{
+		"get":    {Type: clientVerb("get", false)},
+		"post":   {Type: clientVerb("post", true)},
+		"put":    {Type: clientVerb("put", true)},
+		"delete": {Type: clientVerb("delete", false)},
+		"patch":  {Type: clientVerb("patch", true)},
+	}, "")
+
+	return map[string]Symbol{
+			"newRouter":              NewFunctionSymbol(moduleName, "newRouter", nil, nil, 0, nil, routerSym),
+			"listen":                 NewFunctionSymbol(moduleName, "listen", []string{"router", "port"}, nil, 2, []Symbol{routerSym, numSym}, nothingSym),
+			"ok":                     NewFunctionSymbol(moduleName, "ok", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
+			"text":                   NewFunctionSymbol(moduleName, "text", []string{"status", "body"}, nil, 2, []Symbol{numSym, strSym}, responseSym),
+			"json":                   NewFunctionSymbol(moduleName, "json", []string{"status", "value"}, []string{"T"}, 2, []Symbol{numSym, NewGenericSymbol("T")}, responseSym),
+			"parseJSON":              NewFunctionSymbol(moduleName, "parseJSON", []string{"body"}, nil, 1, []Symbol{strSym}, NewMapSymbol(strSym, AnySymbol())),
+			"toJSON":                 NewFunctionSymbol(moduleName, "toJSON", []string{"value"}, []string{"T"}, 1, []Symbol{NewGenericSymbol("T")}, strSym),
+			"notFound":               NewFunctionSymbol(moduleName, "notFound", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
+			"badRequest":             NewFunctionSymbol(moduleName, "badRequest", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
+			"serverError":            NewFunctionSymbol(moduleName, "serverError", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
+			"rateLimiter":            NewFunctionSymbol(moduleName, "rateLimiter", []string{"requestsPerSecond", "burst", "keyFunc"}, nil, 3, []Symbol{numSym, numSym, keyFuncSym}, middlewareSym),
+			"concurrencyLimiter":     NewFunctionSymbol(moduleName, "concurrencyLimiter", []string{"maxConcurrent", "keyFunc"}, nil, 2, []Symbol{numSym, keyFuncSym}, middlewareSym),
+			"distributedRateLimiter": NewFunctionSymbol(moduleName, "distributedRateLimiter", []string{"maxRequests", "windowSeconds", "keyFunc"}, nil, 3, []Symbol{numSym, numSym, keyFuncSym}, middlewareSym),
+			"newClient":              NewFunctionSymbol(moduleName, "newClient", []string{"baseUrl", "defaultHeaders"}, nil, 2, []Symbol{strSym, strMapSym}, clientSym),
+		}, map[string]Symbol{
+			"Request":    requestSym,
+			"Response":   responseSym,
+			"Router":     routerSym,
+			"Handler":    handlerSym,
+			"Middleware": middlewareSym,
+			"Client":     clientSym,
+		}, true
 }

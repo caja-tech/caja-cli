@@ -44,6 +44,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	listen, err := NewListenCmd()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	serve, err := NewServeCmd()
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
@@ -55,6 +61,7 @@ func main() {
 	root.AddCommand(decode)
 	root.AddCommand(lsp)
 	root.AddCommand(build)
+	root.AddCommand(listen)
 	root.AddCommand(serve)
 
 	if err := root.Execute(); err != nil {

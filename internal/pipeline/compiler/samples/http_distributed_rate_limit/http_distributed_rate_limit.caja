@@ -1,0 +1,11 @@
+import "http" as http
+
+let router = http.newRouter()
+
+router.get("/limited", http.distributedRateLimiter(3, 60, fn(req: http.Request) -> String {
+    return "global"
+})(fn(req: http.Request) -> http.Response {
+    return http.ok("ok")
+}))
+
+http.listen(router, 8100)

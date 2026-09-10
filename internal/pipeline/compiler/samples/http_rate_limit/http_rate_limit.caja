@@ -1,0 +1,17 @@
+import "http" as http
+
+let router = http.newRouter()
+
+router.get("/limited", http.rateLimiter(2, 2, fn(req: http.Request) -> String {
+    return req.ip
+})(fn(req: http.Request) -> http.Response {
+    return http.ok("ok")
+}))
+
+router.get("/limited-custom-headers", http.rateLimiter(2, 2, fn(req: http.Request) -> String {
+    return req.ip
+})(fn(req: http.Request) -> http.Response {
+    return http.Response{status: 201, headers: {"X-Custom": "yes"}, body: "custom"}
+}))
+
+http.listen(router, 8090)

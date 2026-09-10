@@ -1,0 +1,25 @@
+import "http" as http
+
+let router = http.newRouter()
+
+let busyWork = fn(n: Number) -> Number {
+    if (n <= 0) {
+        return 0
+    }
+    return busyWork(n - 1)
+}
+
+router.get("/slow", http.concurrencyLimiter(2, fn(req: http.Request) -> String {
+    return "global"
+})(fn(req: http.Request) -> http.Response {
+    busyWork(200000000)
+    return http.ok("done")
+}))
+
+router.get("/custom-headers", http.concurrencyLimiter(2, fn(req: http.Request) -> String {
+    return "custom"
+})(fn(req: http.Request) -> http.Response {
+    return http.Response{status: 201, headers: {"X-Custom": "yes"}, body: "custom"}
+}))
+
+http.listen(router, 8099)
