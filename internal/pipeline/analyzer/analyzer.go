@@ -626,6 +626,24 @@ func (a *Analyzer) checkNameAvailable(tok lexer.Token, name string) bool {
 	return true
 }
 
+// isReactiveCallExpression reports whether expr is a call with at least one
+// `react`-marked argument — mirrors the compiler's reactiveCallInfo (which
+// additionally needs the matched dependency identifiers for codegen; the
+// analyzer only needs the yes/no answer, to require the enclosing `let` be
+// declared `active`).
+func isReactiveCallExpression(expr ast.Expression) bool {
+	callExpr, ok := expr.(*ast.CallExpression)
+	if !ok {
+		return false
+	}
+	for _, arg := range callExpr.Arguments {
+		if prefix, ok := arg.(*ast.PrefixExpression); ok && prefix.Operator == "react" {
+			return true
+		}
+	}
+	return false
+}
+
 // analyzeLetStatement checks for variable redeclarations and registers the
 // newly declared variable in the current scope with its analyzed type.
 func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
@@ -725,6 +743,17 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 
 	if fnSym, ok := valType.(*symbol.FunctionSymbol); ok && fnSym.Name == "" {
 		fnSym.Name = n.Name.Value
+	}
+
+	if isReactiveCallExpression(n.Value) && !n.IsActive {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: a variable bound to a reactive call result must be declared 'active' (e.g. 'let active %s = ...')", n.Name.Value))
+	}
+
+	if n.IsActive {
+		// active is fully carried by the symbol type, not extra ScopeEntry
+		// bookkeeping — this is also what makes it compose for free with
+		// IsPrivate below, which never inspects the symbol's type.
+		valType = &symbol.ActiveSymbol{Underlying: valType}
 	}
 
 	a.declare(n.Name.Value, valType, false, n.Name.Token)
@@ -971,6 +1000,12 @@ func (a *Analyzer) analyzeAssignStatement(n *ast.AssignStatement) symbol.Symbol 
 	} else if entry.IsConstant {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: cannot assign to constant variable '%s'", n.Name.Value))
 	} else {
+		// Recorded so the compiler can tell an active target apart from a
+		// plain one (transpileStatement's *ast.AssignStatement case) — this
+		// bypasses a.analyze(n.Name), which would otherwise also run
+		// analyzeIdentifier's purity/moved-variable checks against a write
+		// target, not a read.
+		a.nodeSymbols[n.Name] = entry.Sym
 		a.enforcePurity(n.Name, n.Token)
 		expectedType := entry.Sym
 		if !expectedType.Equals(sym) && expectedType.Type() != environment.ANY_OBJ && sym.Type() != environment.ANY_OBJ {
@@ -1270,6 +1305,21 @@ func (a *Analyzer) analyzeIdentifier(n *ast.Identifier) symbol.Symbol {
 	return symbol.AnySymbol()
 }
 
+// reportMoveReactConflict reports the shared "move and react cannot be
+// combined on the same argument" error if n.Right is itself a
+// PrefixExpression using the *other* of move/react — called from both the
+// "move" and "react" cases of analyzePrefixExpression below, since the
+// conflict and its message are the same regardless of which one is
+// outermost (`move react x` and `react move x` are both rejected).
+func (a *Analyzer) reportMoveReactConflict(n *ast.PrefixExpression) bool {
+	innerPrefix, ok := n.Right.(*ast.PrefixExpression)
+	if !ok || innerPrefix.Operator == n.Operator || (innerPrefix.Operator != "move" && innerPrefix.Operator != "react") {
+		return false
+	}
+	a.reportError(n.Token, "semantic error: 'move' and 'react' cannot be combined on the same argument — react requires re-reading the active variable on future updates, but move consumes it once")
+	return true
+}
+
 // analyzePrefixExpression ensures the right side of a prefix operator
 // matches the operator's expected type.
 func (a *Analyzer) analyzePrefixExpression(n *ast.PrefixExpression) symbol.Symbol {
@@ -1286,6 +1336,9 @@ func (a *Analyzer) analyzePrefixExpression(n *ast.PrefixExpression) symbol.Symbo
 		}
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 	case "move":
+		if a.reportMoveReactConflict(n) {
+			return rightSymbol
+		}
 		if ident, ok := n.Right.(*ast.Identifier); ok {
 			entry, exists := a.findVarSymbolInScope(ident.Value)
 			if exists && entry.IsConstant {
@@ -1295,6 +1348,33 @@ func (a *Analyzer) analyzePrefixExpression(n *ast.PrefixExpression) symbol.Symbo
 			}
 		}
 		return rightSymbol
+	case "react":
+		if a.reportMoveReactConflict(n) {
+			return symbol.AnySymbol()
+		}
+		ident, ok := n.Right.(*ast.Identifier)
+		if !ok {
+			a.reportError(n.Token, "semantic error: 'react' requires a plain active variable, not an expression")
+			return symbol.AnySymbol()
+		}
+		activeSym, isActive := rightSymbol.(*symbol.ActiveSymbol)
+		if !isActive {
+			// Skip the redundant error when rightSymbol is already ANY_OBJ
+			// (e.g. an undeclared variable — analyzeIdentifier already
+			// reported that on its own).
+			if rightSymbol.Type() != environment.ANY_OBJ {
+				a.reportError(n.Token, fmt.Sprintf("semantic error: 'react' requires an active variable, got '%s' of type %s", ident.Value, rightSymbol.String()))
+			}
+			return rightSymbol
+		}
+		// Returns the *underlying* type, not the ActiveSymbol wrapper: the
+		// callee's declared parameter type is plain (e.g. Number), and
+		// analyzeCallExpression's argument check uses Equals, which does a
+		// concrete type assertion rather than comparing Type() — the same
+		// forwarding trap ActiveSymbol.Type() is otherwise safe from (see
+		// its doc comment) still applies to Equals, so this must unwrap
+		// explicitly rather than relying on Type() forwarding alone.
+		return activeSym.Underlying
 	default:
 		a.reportError(n.Token, fmt.Sprintf("semantic error: unknown prefix operator '%s'", n.Operator))
 		return symbol.AnySymbol()

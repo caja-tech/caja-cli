@@ -13,6 +13,7 @@ const (
 	STRING_OBJ       ObjectType = "String"
 	BOOLEAN_OBJ      ObjectType = "Boolean"
 	DATE_OBJ         ObjectType = "Date"
+	ELEMENT_OBJ      ObjectType = "Element"
 	FUNCTION_OBJ     ObjectType = "Function"
 	BUILTIN_OBJ      ObjectType = "Builtin"
 	ARRAY_OBJ        ObjectType = "Array"

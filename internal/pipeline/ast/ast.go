@@ -222,6 +222,7 @@ type LetStatement struct {
 	Name      *Identifier
 	Value     Expression
 	IsPrivate bool
+	IsActive  bool
 	ValueType string
 }
 
@@ -232,7 +233,11 @@ func (ls *LetStatement) String() string {
 	if ls.IsPrivate {
 		out += "private "
 	}
-	out += ls.TokenLiteral() + " " + ls.Name.String()
+	out += ls.TokenLiteral() + " "
+	if ls.IsActive {
+		out += "active "
+	}
+	out += ls.Name.String()
 
 	if ls.ValueType != "" {
 		out += ": " + ls.ValueType

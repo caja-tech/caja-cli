@@ -50,18 +50,39 @@ func TestSamplesCompilation(t *testing.T) {
 			}
 
 			outBin := filepath.Join(baseDir, dirName)
-			
+			opts := compiler.CompileOptions{}
+			// A browser-module sample only builds under GOOS=js/GOARCH=wasm
+			// (it compiles to syscall/js calls) — same auto-detection
+			// cmd/cli/build.go uses, so this generic loop doesn't need a
+			// hardcoded list of which sample directories are "the browser
+			// one(s)".
+			if compiler.UsesBrowserModule(goCode) {
+				opts = compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}
+				outBin += ".wasm"
+			}
+
 			// Test compilation
-			err = compiler.Compile(goCode, outBin, compiler.CompileOptions{})
+			err = compiler.Compile(goCode, outBin, opts)
 			if err != nil {
 				t.Fatalf("compilation failed: %v", err)
 			}
-			
+
 			// Verify binary exists
-			if _, err := os.Stat(outBin); os.IsNotExist(err) {
-				t.Fatalf("expected binary %s to be generated, but it was not", outBin)
+			data, err := os.ReadFile(outBin)
+			if err != nil {
+				t.Fatalf("expected binary %s to be generated, but it was not: %v", outBin, err)
 			}
-			
+			if opts.GOOS == "js" {
+				wantMagic := []byte{0x00, 'a', 's', 'm'} // WebAssembly binary magic number
+				if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+					got := data
+					if len(got) > 4 {
+						got = got[:4]
+					}
+					t.Errorf("expected %s to start with wasm magic bytes %x, got %x", outBin, wantMagic, got)
+				}
+			}
+
 			// Clean up binary
 			os.Remove(outBin)
 		})
@@ -264,6 +285,638 @@ func TestCompileCrossCompiles(t *testing.T) {
 	}
 }
 
+// TestUsesBrowserModule checks the substring-based detection
+// compiler.UsesBrowserModule uses to let cmd/cli auto-select GOOS=js/
+// GOARCH=wasm — it must key off the actual generated `"syscall/js"` import
+// line, not merely the presence of the word "browser" somewhere in the
+// source (e.g. in a comment or an unrelated string literal).
+func TestUsesBrowserModule(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "generated syscall/js import is detected",
+			source: "package main\n\nimport \"syscall/js\"\n\nfunc main() {\n\t_ = js.Global()\n}\n",
+			want:   true,
+		},
+		{
+			name:   "plain program without syscall/js is not flagged",
+			source: "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n",
+			want:   false,
+		},
+		{
+			name:   "mentioning 'browser' in a comment or string is not enough",
+			source: "package main\n\n// this talks about the browser module\nfunc main() {\n\t_ = \"browser\"\n}\n",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compiler.UsesBrowserModule(tt.source); got != tt.want {
+				t.Errorf("UsesBrowserModule(%q) = %v, want %v", tt.source, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCompileBrowserModuleForWasm is the end-to-end check that a program
+// using the browser module doesn't just transpile to text that *looks*
+// right (transpiler_test.go's "Browser builtins" case), but actually
+// compiles for real under GOOS=js/GOARCH=wasm — the one target the
+// generated `syscall/js` calls (js.Global, .Get, .Call, .Set) can build
+// under at all. This is what cmd/cli's browser-import auto-defaulting
+// (targetOS/targetArch -> "js"/"wasm") exists to make possible.
+func TestCompileBrowserModuleForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "browser.caja")
+	source := "import browser\n" +
+		"let el = browser.getElementById(\"app\")\n" +
+		"browser.setText(el, \"hi\")\n" +
+		"browser.setHTML(el, \"<b>hi</b>\")\n" +
+		"browser.log(\"hello\")\n" +
+		"browser.alert(\"hi\")\n" +
+		"browser.setValue(el, \"typed value\")\n" +
+		"let v = browser.getValue(el)\n" +
+		"browser.log(v)\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !compiler.UsesBrowserModule(goCode) {
+		t.Fatalf("expected UsesBrowserModule to detect the generated syscall/js import in:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "browser.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling the browser module for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'} // WebAssembly binary magic number
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+// TestCompileBrowserOnForWasm is the same kind of real-compile check as
+// TestCompileBrowserModuleForWasm, but for browser.on specifically: it
+// exercises the one piece of codegen distinct from the other browser
+// builtins — js.FuncOf wrapping a Caja closure passed by value, and the
+// time.Sleep keep-alive loop emitted at the end of main() (see transpiler.go
+// for why it's a sleep loop and not a bare select{}) to keep the wasm
+// instance's Go runtime scheduling so the registered listener can still fire
+// after main would otherwise have returned. Manually verified once (outside
+// this test suite, via headless Chrome) that a real DOM click actually
+// reaches the Go closure and updates the page; this test only re-confirms
+// the generated program still compiles for js/wasm.
+func TestCompileBrowserOnForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "on.caja")
+	source := "import browser\n" +
+		"let el = browser.getElementById(\"btn\")\n" +
+		"let handleClick = fn() -> Nothing {\n" +
+		"\tbrowser.log(\"clicked\")\n" +
+		"}\n" +
+		"browser.on(\"click\", el, handleClick)\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, "time.Sleep") {
+		t.Errorf("expected \"on\" usage to emit a time.Sleep keep-alive loop at the end of main so the listener keeps working, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "on.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser.on for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+// TestCompileBrowserFetchForWasm is the same kind of real-compile check as
+// TestCompileBrowserModuleForWasm/TestCompileBrowserOnClickForWasm, for
+// browser.fetch: it exercises the injected caja_browser_fetch helper (the
+// Promise-to-channel bridge — see injectBuiltinDependencies) both called
+// directly and wrapped in async/unwrap, confirming both compile for js/wasm.
+// Manually verified once (outside this suite, via headless Chrome) that a
+// real fetch — synchronous, concurrent via async/await/unwrap, and a network
+// failure — actually works end to end; this test only re-confirms the
+// generated program still compiles.
+func TestCompileBrowserFetchForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "fetch.caja")
+	source := "import browser\n" +
+		"let body = browser.fetch(\"/data\")\n" +
+		"browser.log(body)\n" +
+		"let t = async browser.fetch(\"/data2\")\n" +
+		"let body2 = unwrap t\n" +
+		"browser.log(body2)\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, "func caja_browser_fetch(url string) string {") {
+		t.Errorf("expected the caja_browser_fetch helper to be injected, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "fetch.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser.fetch for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+// TestCompileBrowserFetchThenForWasm is the same kind of real-compile check
+// as the other browser wasm tests, for browser.fetchThen specifically — the
+// safe, callback-driven alternative to plain fetch for use inside a
+// browser.on handler (see the deadlock this replaces: a synchronous
+// browser.fetch call, even wrapped in async+unwrap, permanently freezes the
+// whole page when called from inside a handler, because syscall/js.handleEvent
+// — Go's dispatcher for every js.FuncOf callback — is not async-aware the way
+// wasm_exec.js's top-level run() is, so a goroutine blocking while nested
+// under it can never resume). Manually verified once (outside this suite,
+// via a headless-Chrome CDP session) that clicking a real button whose
+// handler calls fetchThen actually completes and updates the DOM, repeatedly,
+// with the page staying fully responsive throughout — this test only
+// re-confirms the generated program still compiles for js/wasm.
+func TestCompileBrowserFetchThenForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "fetchthen.caja")
+	source := "import browser\n" +
+		"let el = browser.getElementById(\"btn\")\n" +
+		"let handleBody = fn(body: String) -> Nothing {\n" +
+		"\tbrowser.log(body)\n" +
+		"}\n" +
+		"let handleClick = fn() -> Nothing {\n" +
+		"\tbrowser.fetchThen(\"/data\", handleBody)\n" +
+		"}\n" +
+		"browser.on(\"click\", el, handleClick)\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, "func caja_browser_fetch_then(url string, onSuccess func(string)) {") {
+		t.Errorf("expected the caja_browser_fetch_then helper to be injected, got:\n%s", goCode)
+	}
+	if !strings.Contains(goCode, "func caja_wrap_callback(fn func()) {") {
+		t.Errorf("expected the caja_wrap_callback helper to be injected, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "fetchthen.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser.fetchThen for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+// TestCompileBrowserQuerySelectorForWasm is the same kind of real-compile
+// check as the other browser wasm tests, for browser.querySelector (nullable
+// Element?, the first builtin to return one — see its comment in
+// symbol.GetStandardModule) and browser.querySelectorAll (Array<Element>).
+// Also exercises the correct way to consume an Element? result: Caja has no
+// if-narrowing, so `if (el != nil) { ... }` alone does NOT change el's
+// static type inside the block — passing el directly to a non-nullable
+// Element parameter there is a compile error (see
+// checkBrowserArgNotNullable in builtin.go); cast.to(el, fallback) is what
+// actually unwraps it, using a same-type fallback that's provably
+// unreachable once already inside the null check. Also covers array.len
+// over the returned Array<Element> — unmodified existing machinery, not
+// anything new. Manually verified once (outside this suite, via a
+// headless-Chrome CDP session) that a real querySelector finds the right
+// element, a miss narrows correctly to nil, and querySelectorAll returns the
+// right count; this test only re-confirms the generated program still
+// compiles for js/wasm.
+func TestCompileBrowserQuerySelectorForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "queryselector.caja")
+	source := "import browser\n" +
+		"import array\n" +
+		"import cast\n" +
+		"let first = browser.querySelector(\".item\")\n" +
+		"if (first != nil) {\n" +
+		"\tbrowser.setText(cast.to(first, browser.getElementById(\"app\")), \"found\")\n" +
+		"}\n" +
+		"let items = browser.querySelectorAll(\".item\")\n" +
+		"let count = array.len(items)\n" +
+		"browser.log(\"done\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, "func caja_browser_query_selector(selector string) *js.Value {") {
+		t.Errorf("expected the caja_browser_query_selector helper to be injected, got:\n%s", goCode)
+	}
+	if !strings.Contains(goCode, "func caja_browser_query_selector_all(selector string) *cajaArray[js.Value] {") {
+		t.Errorf("expected the caja_browser_query_selector_all helper to be injected, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "queryselector.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser.querySelector/querySelectorAll for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+// TestCompileBrowserAttributesAndClassesForWasm is the same kind of
+// real-compile check as the other browser wasm tests, for setAttribute,
+// getAttribute (Nullable String, like querySelector's Element?), addClass,
+// and removeClass — plus the cast.to fix that makes getAttribute's result
+// actually usable: cast.to(nullableValue, fallback) now correctly
+// dereferences with a nil-safe fallback instead of forwarding the raw
+// pointer (a real bug, confirmed via headless Chrome pre-fix: calling
+// browser.setText with a raw Nullable String panicked with "ValueOf: invalid
+// value"; cast.to is the fix's target since it's the only general unwrap
+// mechanism Caja has — there's no if-narrowing and no other safe way to pull
+// a plain value out of a Nullable). Manually verified once (outside this
+// suite, via headless Chrome) that setAttribute/getAttribute/addClass/
+// removeClass and the cast.to-based consumption pattern all work correctly
+// against a real DOM element; this test only re-confirms the generated
+// program still compiles for js/wasm.
+func TestCompileBrowserAttributesAndClassesForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "attrs.caja")
+	source := "import browser\n" +
+		"import cast\n" +
+		"let el = browser.getElementById(\"box\")\n" +
+		"browser.setAttribute(el, \"data-role\", \"widget\")\n" +
+		"let role = browser.getAttribute(el, \"data-role\")\n" +
+		"browser.setText(el, cast.to(role, \"not set\"))\n" +
+		"browser.addClass(el, \"highlight\")\n" +
+		"browser.removeClass(el, \"a\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, "func caja_browser_get_attribute(el js.Value, name string) *string {") {
+		t.Errorf("expected the caja_browser_get_attribute helper to be injected, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "attrs.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser attribute/class builtins for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+func TestCompileBrowserLocalStorageForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "localstorage.caja")
+	source := "import browser\n" +
+		"import cast\n" +
+		"browser.localStorageSet(\"theme\", \"dark\")\n" +
+		"let theme = browser.localStorageGet(\"theme\")\n" +
+		"browser.log(cast.to(theme, \"light\"))\n" +
+		"browser.localStorageRemove(\"theme\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, "func caja_browser_local_storage_get(key string) *string {") {
+		t.Errorf("expected the caja_browser_local_storage_get helper to be injected, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "localstorage.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser localStorage builtins for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+func TestCompileBrowserElementCreationAndStyleForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "create.caja")
+	source := "import browser\n" +
+		"let list = browser.getElementById(\"list\")\n" +
+		"let item = browser.createElement(\"li\")\n" +
+		"browser.setText(item, \"new item\")\n" +
+		"browser.setStyle(item, \"color\", \"blue\")\n" +
+		"browser.appendChild(list, item)\n" +
+		"browser.removeElement(item)\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, `Call("createElement", "li")`) {
+		t.Errorf("expected createElement's codegen to call document.createElement, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "create.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser element-creation/style builtins for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+func TestCompileBrowserInteractionPrimitivesForWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "interact.caja")
+	source := "import browser\n" +
+		"let list = browser.getElementById(\"list\")\n" +
+		"let ref = browser.getElementById(\"a-item\")\n" +
+		"let newItem = browser.createElement(\"li\")\n" +
+		"browser.insertBefore(list, newItem, ref)\n" +
+		"browser.toggleClass(newItem, \"open\")\n" +
+		"let isOpen = browser.hasClass(newItem, \"open\")\n" +
+		"browser.removeAttribute(newItem, \"data-open\")\n" +
+		"let name = browser.getElementById(\"name\")\n" +
+		"browser.focus(name)\n" +
+		"browser.blur(name)\n" +
+		"let box = browser.getElementById(\"remember\")\n" +
+		"browser.setChecked(box, true)\n" +
+		"let checked = browser.getChecked(box)\n" +
+		"let revert = fn() -> Nothing { browser.log(\"reverted\") }\n" +
+		"let timerId = browser.setTimeout(2000, revert)\n" +
+		"browser.clearTimeout(timerId)\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	} else {
+		t.Fatalf("generated Go source failed to format (likely invalid): %v\n%s", err, goCode)
+	}
+
+	if !strings.Contains(goCode, `Call("setTimeout"`) {
+		t.Errorf("expected setTimeout's codegen to call js's setTimeout, got:\n%s", goCode)
+	}
+
+	outBin := filepath.Join(dir, "interact.wasm")
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
+		t.Fatalf("compiling browser interaction-primitive builtins for js/wasm failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outBin)
+	if err != nil {
+		t.Fatalf("failed to read compiled wasm binary: %v", err)
+	}
+	wantMagic := []byte{0x00, 'a', 's', 'm'}
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected a wasm binary starting with magic bytes %x, got %x", wantMagic, got)
+	}
+}
+
+// TestWriteBrowserHarness confirms the wasm_exec.js + HTML loader pair
+// WriteBrowserHarness produces next to a compiled browser-module binary are
+// both present, correctly named relative to the binary, and reference each
+// other correctly — the harness a browser actually needs to run the wasm
+// binary TestCompileBrowserModuleForWasm proves compiles.
+func TestWriteBrowserHarness(t *testing.T) {
+	dir := t.TempDir()
+	outBin := filepath.Join(dir, "demo-js-wasm.wasm")
+	if err := os.WriteFile(outBin, []byte("fake wasm bytes"), 0644); err != nil {
+		t.Fatalf("failed to write fake wasm binary: %v", err)
+	}
+
+	htmlPath, err := compiler.WriteBrowserHarness(outBin)
+	if err != nil {
+		t.Fatalf("WriteBrowserHarness failed: %v", err)
+	}
+
+	wantHTMLPath := filepath.Join(dir, "demo-js-wasm.html")
+	if htmlPath != wantHTMLPath {
+		t.Errorf("expected html path %s, got %s", wantHTMLPath, htmlPath)
+	}
+
+	html, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("failed to read generated html: %v", err)
+	}
+	if !strings.Contains(string(html), `src="wasm_exec.js"`) {
+		t.Errorf("expected html to reference wasm_exec.js, got:\n%s", html)
+	}
+	if !strings.Contains(string(html), `fetch("demo-js-wasm.wasm")`) {
+		t.Errorf("expected html to fetch the wasm binary by its own basename, got:\n%s", html)
+	}
+
+	wasmExecPath := filepath.Join(dir, "wasm_exec.js")
+	info, err := os.Stat(wasmExecPath)
+	if err != nil {
+		t.Fatalf("expected wasm_exec.js to be copied alongside the binary: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Errorf("expected wasm_exec.js to be non-empty")
+	}
+}
+
 // runCajaSource is a small end-to-end helper shared by the copy-on-write
 // tests below: parses, transpiles with PrintResult (so the last expression
 // statement auto-prints), formats, and runs the source, returning stdout.
@@ -387,6 +1040,33 @@ func TestRunLastStatementVoidBuiltinCallDoesNotCrash(t *testing.T) {
 		"import \"log\" as log\nlog.export(1)\n",
 	} {
 		runCajaSource(t, source)
+	}
+}
+
+// TestNothingReturnTypeCompiles is a regression test for a bug where a
+// function explicitly declared "-> Nothing" (Caja's void return type, a
+// synthetic zero-field struct the analyzer injects globally — see
+// isNothingReturnType in transpiler.go) failed to compile: mapSymbolToGoType
+// treated it like any other struct and emitted "*Nothing", but no `type
+// Nothing struct{}` is ever generated (Nothing is analyzer-only, not a real
+// user-declared struct), producing "undefined: Nothing"; separately, Go
+// still required a return value for that bogus non-void signature, producing
+// "missing return" for a function with no explicit return statement. Covers
+// all three ways a "-> Nothing" function's body can end: implicit fallthrough,
+// a bare `return`, and an explicit `return Nothing {}`.
+func TestNothingReturnTypeCompiles(t *testing.T) {
+	for name, source := range map[string]string{
+		"implicit return": "import \"log\" as log\n" +
+			"let f = fn(msg: String) -> Nothing {\n\tlog.info(msg, 1)\n}\n" +
+			"f(\"hi\")\n",
+		"bare return": "let f = fn() -> Nothing {\n\treturn\n}\n" +
+			"f()\n",
+		"explicit return Nothing {}": "let f = fn() -> Nothing {\n\treturn Nothing {}\n}\n" +
+			"f()\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			runCajaSource(t, source)
+		})
 	}
 }
 
@@ -734,5 +1414,150 @@ func TestCOWDeadRebindStaysProtectedAcrossClosureCapture(t *testing.T) {
 	out := runCajaSource(t, source)
 	if !strings.Contains(out, "1") || strings.Contains(out, "999") {
 		t.Errorf("expected 1 (getX's captured p observes the pre-mutation value), got: %s", out)
+	}
+}
+
+// TestActiveVariableMutatesInPlace is Milestone 1 of the active/react
+// feature verified end-to-end: reassigning an active variable actually
+// changes the value a later read observes — this is a core language
+// feature, not a browser-module one, so a native run (no wasm, no headless
+// Chrome) is the right verification, matching the plan's confirmed
+// synchronous, event-loop-free propagation model.
+func TestActiveVariableMutatesInPlace(t *testing.T) {
+	source := "let active counter = 0\n" +
+		"counter = counter + 1\n" +
+		"counter = counter + 1\n" +
+		"return counter\n"
+	out := runCajaSource(t, source)
+	if !strings.Contains(out, "2") {
+		t.Errorf("expected 2, got: %s", out)
+	}
+}
+
+// TestActivePrivateModifierComposeInEitherOrder confirms 'private let active
+// n = ...' works exactly like 'let active n = ...' from within the same
+// module (privacy only affects cross-module visibility, verified separately
+// in the analyzer package) — the two modifiers need zero interaction code,
+// per the corrected design in the plan.
+func TestActivePrivateModifierComposeInEitherOrder(t *testing.T) {
+	source := "private let active n = \"name\"\n" +
+		"n = \"renamed\"\n" +
+		"return n\n"
+	out := runCajaSource(t, source)
+	if !strings.Contains(out, "renamed") {
+		t.Errorf("expected renamed, got: %s", out)
+	}
+}
+
+// TestReactiveCallUpdatesAutomatically is Milestone 2 of the active/react
+// feature verified end-to-end: the motivating example from the plan —
+// reactFn(react counter)'s bound result changes when counter is reassigned,
+// with no explicit re-call written anywhere.
+func TestReactiveCallUpdatesAutomatically(t *testing.T) {
+	source := "import cast\nimport log\n" +
+		"let active counter = 0\n" +
+		"let reactFn = fn(c: Number) -> String { return \"count is \" + cast.to(c, \"\") }\n" +
+		"let active result = reactFn(react counter)\n" +
+		"log.info(result, \"\")\n" +
+		"counter = counter + 1\n" +
+		"log.info(result, \"\")\n"
+	out := runCajaSource(t, source)
+	if !strings.Contains(out, "count is 0") {
+		t.Errorf("expected the initial reactive value 'count is 0' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "count is 1") {
+		t.Errorf("expected the updated reactive value 'count is 1' after counter changed, got: %s", out)
+	}
+}
+
+// TestReactiveCallComposesWithMemoizedCallee guarantees a memoized function
+// works correctly as a reactive callee, and that the memo cache is actually
+// exercised by the reactive re-invocation (not just by direct calls): when
+// counter cycles back to a value already seen, recompute must hit the memo
+// cache rather than recomputing.
+func TestReactiveCallComposesWithMemoizedCallee(t *testing.T) {
+	source := "import cast\nimport log\n" +
+		"let reactFn = memo fn(c: Number) -> String {\n" +
+		"\tlog.info(\"recomputing\", \"\")\n" +
+		"\treturn \"count is \" + cast.to(c, \"\")\n" +
+		"}\n" +
+		"let active counter = 0\n" +
+		"let active result = reactFn(react counter)\n" +
+		"log.info(result, \"\")\n" +
+		"counter = counter + 1\n" +
+		"log.info(result, \"\")\n" +
+		"counter = counter - 1\n" +
+		"log.info(result, \"\")\n"
+	out := runCajaSource(t, source)
+	recomputeCount := strings.Count(out, "recomputing")
+	if recomputeCount != 2 {
+		t.Errorf("expected exactly 2 recomputations (c=0, then c=1 — the third call with c=0 again should hit the memo cache), got %d. Output:\n%s", recomputeCount, out)
+	}
+	if !strings.Contains(out, "count is 0") || !strings.Contains(out, "count is 1") {
+		t.Errorf("expected both 'count is 0' and 'count is 1' in output, got:\n%s", out)
+	}
+}
+
+// TestReactiveDiamondRecomputesSharedConsumerExactlyOnce is the regression
+// guard for a real bug found and reproduced manually before this test was
+// written: with b = f(react a), c = g(react a), and d = h(react b, react
+// c), changing 'a' used to cascade each edge (a->b, a->c) immediately and
+// independently, so d recomputed twice — once right after b updated (while
+// c was still stale, observing a torn "2,0" pairing instead of the correct
+// "2,3") and once after c updated. cajaPropagate's topological batch fixes
+// this: d must recompute exactly once per change to 'a', only after both b
+// and c have already settled, and must never observe a torn pairing.
+func TestReactiveDiamondRecomputesSharedConsumerExactlyOnce(t *testing.T) {
+	source := "import cast\nimport log\n" +
+		"let active a = 0\n" +
+		"let double = fn(x: Number) -> Number { return x * 2 }\n" +
+		"let triple = fn(x: Number) -> Number { return x * 3 }\n" +
+		"let active b = double(react a)\n" +
+		"let active c = triple(react a)\n" +
+		"let sumBC = fn(x: Number, y: Number) -> String {\n" +
+		"\tlog.info(\"sumBC called with\", cast.to(x, \"\") + \",\" + cast.to(y, \"\"))\n" +
+		"\treturn cast.to(x, \"\") + \"+\" + cast.to(y, \"\")\n" +
+		"}\n" +
+		"let active d = sumBC(react b, react c)\n" +
+		"a = a + 1\n" +
+		"log.info(\"final:\", cast.to(d, \"\"))\n"
+	out := runCajaSource(t, source)
+
+	if strings.Contains(out, "2,0") {
+		t.Errorf("observed the torn 'b updated, c still stale' glitch (sumBC called with 2,0) — cajaPropagate should never let this happen:\n%s", out)
+	}
+	callCount := strings.Count(out, "sumBC called with")
+	if callCount != 2 {
+		t.Errorf("expected exactly 2 sumBC calls (initial value, then after a=1), got %d:\n%s", callCount, out)
+	}
+	if !strings.Contains(out, "sumBC called with 2,3") {
+		t.Errorf("expected the post-change recomputation to see the correct settled pairing '2,3', got:\n%s", out)
+	}
+	if !strings.Contains(out, "final: 2+3") {
+		t.Errorf("expected the final value to be '2+3', got:\n%s", out)
+	}
+}
+
+// TestReactiveChainPropagatesThroughDerivedActive guards the already-working
+// case (verified manually before cajaPropagate existed): a derived active
+// variable used as its own react source (b = f(react a), c = g(react b))
+// must keep propagating correctly under the new topological scheduler, not
+// just under the old immediate-cascade design it replaces.
+func TestReactiveChainPropagatesThroughDerivedActive(t *testing.T) {
+	source := "import cast\nimport log\n" +
+		"let active a = 0\n" +
+		"let f = fn(x: Number) -> Number { return x * 2 }\n" +
+		"let active b = f(react a)\n" +
+		"let g = fn(y: Number) -> Number { return y + 100 }\n" +
+		"let active c = g(react b)\n" +
+		"log.info(cast.to(c, \"\"), \"\")\n" +
+		"a = a + 1\n" +
+		"log.info(cast.to(c, \"\"), \"\")\n"
+	out := runCajaSource(t, source)
+	if !strings.Contains(out, "100") {
+		t.Errorf("expected the initial chained value 100, got:\n%s", out)
+	}
+	if !strings.Contains(out, "102") {
+		t.Errorf("expected the updated chained value 102 after a=1, got:\n%s", out)
 	}
 }

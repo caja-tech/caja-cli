@@ -62,6 +62,10 @@ func NewRunCmd() (*cobra.Command, error) {
 			}
 			goCode = string(formattedCode)
 
+			if compiler.UsesBrowserModule(goCode) {
+				return fmt.Errorf("the browser module requires 'caja build' (it targets GOOS=js/GOARCH=wasm, which 'go run' can't execute); it can't be used with 'caja run'")
+			}
+
 			exportPath, err := cmd.Flags().GetString("export")
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'export' flag: %w", err)
