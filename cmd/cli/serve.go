@@ -2,6 +2,7 @@ package main
 
 import (
 	"caja-cli/internal/pipeline/compiler"
+	"caja-cli/internal/project"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -54,6 +55,41 @@ func buildBrowserPageServer(filePath string, port int) (server *http.Server, url
 	return server, url, nil
 }
 
+// buildStaticPageServer builds filePath as a static-page project: a native
+// compile (no GOOS/GOARCH override, unlike buildBrowserPageServer), then
+// runs the resulting generator binary once so its page.write calls populate
+// the project's dist/ directory, then returns a plain *http.Server rooted
+// there — bypassing the UsesBrowserModule gate entirely, since a static-page
+// project's main.caja is never expected to import browser.
+func buildStaticPageServer(filePath string, port int) (server *http.Server, url string, err error) {
+	goCode, err := transpileCajaFile(filePath)
+	if err != nil {
+		return nil, "", err
+	}
+
+	outBin, _, _, _, err := resolveOutputBin(filePath, "", "", runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{}); err != nil {
+		return nil, "", err
+	}
+
+	projectDir := filepath.Dir(filePath)
+	if err := runBuiltBinaryOnce(outBin, projectDir); err != nil {
+		return nil, "", err
+	}
+
+	distDir := filepath.Join(projectDir, project.StaticPageOutputDir)
+	server = &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: http.FileServer(http.Dir(distDir)),
+	}
+	url = fmt.Sprintf("http://localhost:%d/", port)
+	return server, url, nil
+}
+
 // NewServeCmd creates and returns the 'serve' command: builds a .caja
 // browser script and serves the resulting page over HTTP on the given port,
 // replacing the manual "serve this directory yourself" step `caja build`
@@ -69,9 +105,14 @@ func NewServeCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'file' flag: %w", err)
 			}
+
+			filePath, manifest, err := resolveProjectContext(filePath)
+			if err != nil {
+				return err
+			}
 			if filePath == "" {
 				_ = cmd.Help()
-				return fmt.Errorf("the --file flag is required to serve a script")
+				return fmt.Errorf("the --file flag is required to serve a script (or run this from a directory containing %s)", project.ManifestFile)
 			}
 
 			port, err := cmd.Flags().GetInt("port")
@@ -79,7 +120,16 @@ func NewServeCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to retrieve 'port' flag: %w", err)
 			}
 
-			server, url, err := buildBrowserPageServer(filePath, port)
+			var server *http.Server
+			var url string
+			switch {
+			case manifest != nil && manifest.Type == project.TypeStaticPage:
+				server, url, err = buildStaticPageServer(filePath, port)
+			case manifest != nil && manifest.Type == project.TypeHTTPAPI:
+				err = fmt.Errorf("%q is an http-api project — 'caja serve' doesn't apply to it; use 'caja listen' instead", filePath)
+			default:
+				server, url, err = buildBrowserPageServer(filePath, port)
+			}
 			if err != nil {
 				return err
 			}

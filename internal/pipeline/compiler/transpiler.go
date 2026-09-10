@@ -890,6 +890,17 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 	if ctx.usedModules["strconv"] {
 		finalBuf.WriteString("import \"strconv\"\n")
 	}
+	if ctx.usedModules["http"] {
+		finalBuf.WriteString("import \"net/http\"\n")
+		finalBuf.WriteString("import \"net\"\n")
+		finalBuf.WriteString("import \"io\"\n")
+		finalBuf.WriteString("import \"context\"\n")
+		finalBuf.WriteString("import \"os/signal\"\n")
+		finalBuf.WriteString("import \"syscall\"\n")
+	}
+	if ctx.usedModules["http_distributed_rate_limiter"] {
+		finalBuf.WriteString("import \"bufio\"\n")
+	}
 	if strings.Contains(bodyCode, "sync.") || ctx.usedModules["sync"] {
 		finalBuf.WriteString("import \"sync\"\n")
 	}
@@ -899,6 +910,9 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 	if ctx.usedModules["syscall/js"] {
 		finalBuf.WriteString("import \"syscall/js\"\n")
 	}
+	if ctx.usedModules["page_write"] {
+		finalBuf.WriteString("import \"path/filepath\"\n")
+	}
 
 	needsTime := false
 	for _, stmt := range program.Statements {
@@ -907,7 +921,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 			break
 		}
 	}
-	if needsTime || strings.Contains(bodyCode, "time.") || ctx.usedModules["time"] || ctx.usedModules["syscall/js"] {
+	if needsTime || strings.Contains(bodyCode, "time.") || ctx.usedModules["time"] || ctx.usedModules["http"] || ctx.usedModules["syscall/js"] {
 		finalBuf.WriteString("import \"time\"\n")
 	}
 
@@ -1803,6 +1817,25 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		leftSym, _ := a.GetSymbol(e.Left)
 		if _, isArr := leftSym.(*symbol.ArraySymbol); isArr {
 			return fmt.Sprintf("%s.Data[int(%s)]", left, index), nil
+		}
+
+		if _, isMap := leftSym.(*symbol.MapSymbol); !isMap {
+			// analyzeIndexExpression only lets an ArraySymbol, a MapSymbol, or
+			// ANY_OBJ reach here -- so a leftSym that's neither of the first two
+			// is ANY_OBJ, meaning its concrete shape (map vs array, or neither)
+			// is only known at runtime. This happens once a value has passed
+			// through one level of a Map<_, Any>/parsed-JSON-style container:
+			// the container itself is a concrete MapSymbol, but each value
+			// pulled out of it widens to Any, losing the "it's actually a map"
+			// static information a second level of indexing would need. Emit a
+			// runtime type-switch instead of assuming .Data exists on whatever
+			// Go type this expression happens to have -- it won't, for a bare
+			// `any`, and this is exactly how a nested JSON object/array read
+			// via http.parseJSON is reached (parsed["a"]["b"]).
+			ctx.usedModules["dynamic_index"] = true
+			ctx.usedModules["cow_map"] = true
+			ctx.usedModules["cow_array"] = true
+			return fmt.Sprintf("caja_dynamic_index(%s, %s)", left, index), nil
 		}
 
 		if indexSym, _ := a.GetSymbol(e.Index); isStructKeySymbol(indexSym) {

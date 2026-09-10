@@ -1,0 +1,11 @@
+import browser
+
+browser.log("{{.Name}} booted")
+
+let app = browser.getElementById("app")
+browser.setHTML(app, "<h1>{{.Name}}</h1><p>Edit main.caja, then run 'caja build' to compile to wasm or 'caja serve' to run it locally.</p><button id='btn'>Click me</button>")
+
+let btn = browser.getElementById("btn")
+browser.on("click", btn, fn() -> Nothing {
+    browser.alert("Hello from {{.Name}}!")
+})

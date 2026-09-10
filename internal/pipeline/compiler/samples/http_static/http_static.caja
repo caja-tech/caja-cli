@@ -1,0 +1,11 @@
+import "http" as http
+
+let router = http.newRouter()
+
+router.static("/static/", "public")
+
+router.get("/api/ping", fn(req: http.Request) -> http.Response {
+    return http.ok("pong")
+})
+
+http.listen(router, 8098)

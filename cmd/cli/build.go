@@ -3,6 +3,7 @@ package main
 import (
 	"caja-cli/internal/file"
 	"caja-cli/internal/pipeline/compiler"
+	"caja-cli/internal/project"
 	"caja-cli/internal/script"
 	"fmt"
 	"go/format"
@@ -98,9 +99,13 @@ func NewBuildCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to retrieve 'file' flag: %w", err)
 			}
 
+			filePath, manifest, err := resolveProjectContext(filePath)
+			if err != nil {
+				return err
+			}
 			if filePath == "" {
 				_ = cmd.Help()
-				return fmt.Errorf("the --file flag is required to compile a script")
+				return fmt.Errorf("the --file flag is required to compile a script (or run this from a directory containing %s)", project.ManifestFile)
 			}
 
 			goCode, err := transpileCajaFile(filePath)
@@ -116,11 +121,15 @@ func NewBuildCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'arch' flag: %w", err)
 			}
-			if targetOS == "" && targetArch == "" && compiler.UsesBrowserModule(goCode) {
+			isWebApp := manifest != nil && manifest.Type == project.TypeWebApp
+			if targetOS == "" && targetArch == "" && (compiler.UsesBrowserModule(goCode) || isWebApp) {
 				// The browser module compiles to syscall/js, which only builds
 				// under GOOS=js/GOARCH=wasm — default to that target instead of
 				// letting `go build` fail with a raw "build constraints exclude
-				// all Go files" error on the host platform.
+				// all Go files" error on the host platform. A declared web-app
+				// project targets wasm even before UsesBrowserModule would catch
+				// it (e.g. if its main.caja doesn't happen to import browser
+				// yet), making the project's declared type authoritative.
 				targetOS, targetArch = "js", "wasm"
 			}
 			outBin, resolvedOS, resolvedArch, crossCompiling, err := resolveOutputBin(filePath, targetOS, targetArch, runtime.GOOS, runtime.GOARCH)
@@ -155,9 +164,42 @@ func NewBuildCmd() (*cobra.Command, error) {
 					return fmt.Errorf("failed to write browser test harness: %w", err)
 				}
 				fmt.Printf("Wrote browser test harness at %s (serve %s over HTTP and open %s in a browser)\n", htmlPath, filepath.Dir(htmlPath), filepath.Base(htmlPath))
+
+				if isWebApp && filepath.Base(htmlPath) != "index.html" {
+					// A web-app project's build output should be servable at a
+					// bare domain root by any static host with zero extra
+					// configuration — most static hosts default to serving
+					// index.html for "/". WriteBrowserHarness always names the
+					// harness after the binary (e.g. main.html), so mirror it
+					// under index.html too rather than renaming/duplicating the
+					// general-purpose harness helper's naming convention.
+					indexPath := filepath.Join(filepath.Dir(htmlPath), "index.html")
+					htmlBytes, readErr := os.ReadFile(htmlPath)
+					if readErr != nil {
+						return fmt.Errorf("failed to read browser test harness for index.html: %w", readErr)
+					}
+					if err := os.WriteFile(indexPath, htmlBytes, 0644); err != nil {
+						return fmt.Errorf("failed to write index.html: %w", err)
+					}
+					fmt.Printf("Wrote %s (point any static host at %s to serve this in production)\n", indexPath, filepath.Dir(indexPath))
+				}
+			}
+
+			if manifest != nil && manifest.Type == project.TypeStaticPage {
+				if err := runBuiltBinaryOnce(outBin, filepath.Dir(filePath)); err != nil {
+					return err
+				}
+				fmt.Printf("Wrote static output to %s\n", filepath.Join(filepath.Dir(filePath), project.StaticPageOutputDir))
 			}
 
 			fmt.Printf("Successfully built %s\n", outBin)
+
+			if manifest != nil && manifest.Type == project.TypeHTTPAPI {
+				// No build-time artifact to point at (unlike static-page's
+				// dist/ or web-app's harness) — the binary itself is the
+				// deployable output, so the useful next step is how to run it.
+				fmt.Printf("Run it directly (%s), or use 'caja listen' for local development with port overrides.\n", outBin)
+			}
 			return nil
 		},
 	}

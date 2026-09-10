@@ -18,6 +18,24 @@ type CompileOptions struct {
 	GOARCH string
 }
 
+// cajaGoEnv builds the environment a `go` subcommand invoked by Compile/Run
+// should use: the host's own environment plus the resolved GOROOT and
+// CGO_ENABLED=0.
+//
+// CGO_ENABLED=0: none of Caja's builtins need cgo (net/http's pure-Go
+// resolver is fine for a server that only listens — it never resolves
+// hostnames), and disabling it sidesteps a real toolchain-vs-host-linker
+// incompatibility: a cgo-linked binary built with this pinned Go version
+// against a newer macOS/Xcode `ld` can fail at process start with
+// "dyld: missing LC_UUID load command" — a crash a Caja user would hit
+// the moment they ran a compiled net/http-using binary, not something
+// caught at build time. This also keeps native and cross-compiled builds
+// consistent, since cross-compiling already forces CGO_ENABLED=0 whenever
+// no matching C cross-compiler is configured.
+func cajaGoEnv(goroot string) []string {
+	return append(os.Environ(), "GOROOT="+goroot, "CGO_ENABLED=0")
+}
+
 // Compile accepts the transpiled Go code and produces the executable binary.
 func Compile(goSource string, outputBin string, opts CompileOptions) error {
 	// 1. Obtain toolchain
@@ -56,7 +74,7 @@ func Compile(goSource string, outputBin string, opts CompileOptions) error {
 	cmdBuild.Dir = tmpDir
 	cmdBuild.Stdout = os.Stdout
 	cmdBuild.Stderr = os.Stderr
-	cmdBuild.Env = append(os.Environ(), "GOROOT="+goroot)
+	cmdBuild.Env = cajaGoEnv(goroot)
 	if opts.GOOS != "" {
 		cmdBuild.Env = append(cmdBuild.Env, "GOOS="+opts.GOOS)
 	}
