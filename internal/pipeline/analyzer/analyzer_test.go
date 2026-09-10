@@ -1419,6 +1419,96 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: first argument to 'new' must be Number, got String"},
 		},
 		{
+			name:  "time.now() works with correct types",
+			input: "import time\nreturn time.now()",
+		},
+		{
+			name:           "time.now() rejects unexpected arguments",
+			input:          "import time\nreturn time.now(1)",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'now', got 1"},
+		},
+		{
+			name:  "time.sleep() works with correct types",
+			input: "import time\nreturn time.sleep(time.seconds(1))",
+		},
+		{
+			name:           "time.sleep() rejects missing arguments",
+			input:          "import time\nreturn time.sleep()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'sleep', got 0"},
+		},
+		{
+			name:           "time.sleep() rejects mismatched types",
+			input:          "import time\nreturn time.sleep(5)",
+			expectedErrors: []string{"type error: first argument to 'sleep' must be Duration, got Number"},
+		},
+		{
+			name:  "time.since() works with correct types",
+			input: "import time\nreturn time.since(time.now())",
+		},
+		{
+			name:           "time.since() rejects mismatched types",
+			input:          "import time\nreturn time.since(5)",
+			expectedErrors: []string{"type error: first argument to 'since' must be Instant, got Number"},
+		},
+		{
+			name:  "time.format() works with correct types",
+			input: "import time\nreturn time.format(time.now(), \"2006-01-02 15:04:05\")",
+		},
+		{
+			name:           "time.format() rejects mismatched first argument",
+			input:          "import time\nreturn time.format(5, \"x\")",
+			expectedErrors: []string{"type error: first argument to 'format' must be Instant, got Number"},
+		},
+		{
+			name:           "time.format() rejects mismatched second argument",
+			input:          "import time\nreturn time.format(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'format' must be String, got Number"},
+		},
+		{
+			name:  "time.add() works with correct types",
+			input: "import time\nreturn time.add(time.now(), time.seconds(1))",
+		},
+		{
+			name:           "time.add() rejects mismatched second argument",
+			input:          "import time\nreturn time.add(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'add' must be Duration, got Number"},
+		},
+		{
+			name:  "time.sub() works with correct types",
+			input: "import time\nreturn time.sub(time.now(), time.now())",
+		},
+		{
+			name:           "time.sub() rejects mismatched second argument",
+			input:          "import time\nreturn time.sub(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'sub' must be Instant, got Number"},
+		},
+		{
+			name:  "time.milliseconds() works with correct types",
+			input: "import time\nreturn time.milliseconds(500)",
+		},
+		{
+			name:           "time.milliseconds() rejects mismatched types",
+			input:          "import time\nreturn time.milliseconds(\"x\")",
+			expectedErrors: []string{"type error: first argument to 'milliseconds' must be Number, got String"},
+		},
+		{
+			name:  "time.seconds() works with correct types",
+			input: "import time\nreturn time.seconds(5)",
+		},
+		{
+			name:           "time.seconds() rejects mismatched types",
+			input:          "import time\nreturn time.seconds(\"x\")",
+			expectedErrors: []string{"type error: first argument to 'seconds' must be Number, got String"},
+		},
+		{
+			name:  "time.Instant type annotation resolves",
+			input: "import time\nlet t: time.Instant = time.now()\nreturn t",
+		},
+		{
+			name:  "time.Duration type annotation resolves",
+			input: "import time\nlet d: time.Duration = time.seconds(1)\nreturn d",
+		},
+		{
 			name:  "abs() works with correct types",
 			input: "import math\nreturn math.abs(-10.5)",
 		},

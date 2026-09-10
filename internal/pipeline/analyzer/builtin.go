@@ -46,6 +46,20 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeDateDiffDaysFunction(n), true
 	case "date.new":
 		return a.analyzeDateNewFunction(n), true
+	case "time.now":
+		return a.analyzeTimeNowFunction(n), true
+	case "time.sleep":
+		return a.analyzeTimeSleepFunction(n), true
+	case "time.since":
+		return a.analyzeTimeSinceFunction(n), true
+	case "time.format":
+		return a.analyzeTimeFormatFunction(n), true
+	case "time.add":
+		return a.analyzeTimeAddFunction(n), true
+	case "time.sub":
+		return a.analyzeTimeSubFunction(n), true
+	case "time.milliseconds", "time.seconds":
+		return a.analyzeTimeDurationConstructorFunction(functionName, n), true
 	case "math.abs", "math.sqrt", "math.floor", "math.ceil", "math.round":
 		return a.analyzeMathOneArgFunction(functionName, n), true
 	case "math.rand":
@@ -405,6 +419,126 @@ func (a *Analyzer) analyzeDateNewFunction(n *ast.CallExpression) symbol.Symbol {
 	}
 
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
+}
+
+// analyzeTimeNowFunction checks the arity for the builtin time 'now' function, returning an INSTANT.
+func (a *Analyzer) analyzeTimeNowFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 0 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 0 arguments for 'now', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	return symbol.NewBasicSymbol(environment.INSTANT_OBJ)
+}
+
+// analyzeTimeSleepFunction checks the arity and type for the builtin time 'sleep' function, returning NULL
+// (Nothing's runtime representation for builtins — see the other -> Nothing builtins, e.g. analyzeLogFunction).
+func (a *Analyzer) analyzeTimeSleepFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'sleep', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	durationSymbol := a.analyze(n.Arguments[0])
+
+	if durationSymbol.Type() != environment.DURATION_OBJ && durationSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'sleep' must be Duration, got %s", durationSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.NULL_OBJ)
+}
+
+// analyzeTimeSinceFunction checks the arity and type for the builtin time 'since' function, returning a DURATION.
+func (a *Analyzer) analyzeTimeSinceFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'since', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	instantSymbol := a.analyze(n.Arguments[0])
+
+	if instantSymbol.Type() != environment.INSTANT_OBJ && instantSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'since' must be Instant, got %s", instantSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.DURATION_OBJ)
+}
+
+// analyzeTimeFormatFunction checks the arity and type for the builtin time 'format' function, returning a STRING.
+func (a *Analyzer) analyzeTimeFormatFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'format', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	instantSymbol := a.analyze(n.Arguments[0])
+	layoutSymbol := a.analyze(n.Arguments[1])
+
+	if instantSymbol.Type() != environment.INSTANT_OBJ && instantSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'format' must be Instant, got %s", instantSymbol.Type()))
+	}
+	if layoutSymbol.Type() != environment.STRING_OBJ && layoutSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'format' must be String, got %s", layoutSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.STRING_OBJ)
+}
+
+// analyzeTimeAddFunction checks the arity and type for the builtin time 'add' function, returning an INSTANT.
+func (a *Analyzer) analyzeTimeAddFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'add', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	instantSymbol := a.analyze(n.Arguments[0])
+	durationSymbol := a.analyze(n.Arguments[1])
+
+	if instantSymbol.Type() != environment.INSTANT_OBJ && instantSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'add' must be Instant, got %s", instantSymbol.Type()))
+	}
+	if durationSymbol.Type() != environment.DURATION_OBJ && durationSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'add' must be Duration, got %s", durationSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.INSTANT_OBJ)
+}
+
+// analyzeTimeSubFunction checks the arity and type for the builtin time 'sub' function, returning a DURATION.
+func (a *Analyzer) analyzeTimeSubFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'sub', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	instant1Symbol := a.analyze(n.Arguments[0])
+	instant2Symbol := a.analyze(n.Arguments[1])
+
+	if instant1Symbol.Type() != environment.INSTANT_OBJ && instant1Symbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'sub' must be Instant, got %s", instant1Symbol.Type()))
+	}
+	if instant2Symbol.Type() != environment.INSTANT_OBJ && instant2Symbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'sub' must be Instant, got %s", instant2Symbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.DURATION_OBJ)
+}
+
+// analyzeTimeDurationConstructorFunction checks the arity and type for the builtin time 'milliseconds'/'seconds'
+// functions, returning a DURATION.
+func (a *Analyzer) analyzeTimeDurationConstructorFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	numSymbol := a.analyze(n.Arguments[0])
+
+	if numSymbol.Type() != environment.NUMBER_OBJ && numSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be Number, got %s", functionName, numSymbol.Type()))
+	}
+
+	return symbol.NewBasicSymbol(environment.DURATION_OBJ)
 }
 
 // analyzeMathZeroArgFunction checks the arity and type for 0-argument math functions, returning a NUMBER.

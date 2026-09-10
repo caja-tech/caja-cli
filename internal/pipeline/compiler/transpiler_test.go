@@ -493,6 +493,27 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Time builtins",
+			input: `
+				import "time" as time
+				let n = time.now()
+				time.sleep(time.seconds(2))
+				let d = time.since(n)
+				let s = time.format(n, "2006-01-02 15:04:05")
+				let n2 = time.add(n, time.milliseconds(500))
+				let d2 = time.sub(n2, n)
+			`,
+			expected: []string{
+				"var n time.Time = time.Now()",
+				"time.Sleep(time.Duration(2.0 * float64(time.Second)))",
+				"var d time.Duration = time.Since(n)",
+				`var s string = n.Format("2006-01-02 15:04:05")`,
+				"var n2 time.Time = n.Add(time.Duration(500.0 * float64(time.Millisecond)))",
+				"var d2 time.Duration = n2.Sub(n)",
+				"import \"time\"",
+			},
+		},
+		{
 			name: "Browser builtins",
 			input: `
 				import browser

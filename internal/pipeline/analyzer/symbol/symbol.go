@@ -111,6 +111,21 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 			"to": NewFunctionSymbol(moduleName, "to", []string{"value", "fallback"}, []string{"T", "R"}, 2, []Symbol{NewGenericSymbol("T"), NewGenericSymbol("R")}, NewGenericSymbol("R")),
 		}, nil, true
 
+	case "time":
+		return map[string]Symbol{
+			"now":          NewBuiltinSymbol(moduleName, 0, "now() -> Instant"),
+			"sleep":        NewBuiltinSymbol(moduleName, 1, "sleep(d: Duration) -> Nothing", "d: Duration"),
+			"since":        NewBuiltinSymbol(moduleName, 1, "since(t: Instant) -> Duration", "t: Instant"),
+			"format":       NewBuiltinSymbol(moduleName, 2, "format(t: Instant, layout: String) -> String", "t: Instant", "layout: String"),
+			"add":          NewBuiltinSymbol(moduleName, 2, "add(t: Instant, d: Duration) -> Instant", "t: Instant", "d: Duration"),
+			"sub":          NewBuiltinSymbol(moduleName, 2, "sub(a: Instant, b: Instant) -> Duration", "a: Instant", "b: Instant"),
+			"milliseconds": NewBuiltinSymbol(moduleName, 1, "milliseconds(n: Number) -> Duration", "n: Number"),
+			"seconds":      NewBuiltinSymbol(moduleName, 1, "seconds(n: Number) -> Duration", "n: Number"),
+		}, map[string]Symbol{
+			"Instant":  NewBasicSymbol(environment.INSTANT_OBJ),
+			"Duration": NewBasicSymbol(environment.DURATION_OBJ),
+		}, true
+
 	case "browser":
 		return map[string]Symbol{
 				"log":            NewBuiltinSymbol(moduleName, 1, "log(message: String) -> Nothing", "message: String"),

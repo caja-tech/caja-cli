@@ -1,0 +1,10 @@
+import "time" as time
+
+let start: time.Instant = time.now()
+time.sleep(time.milliseconds(10))
+let elapsed: time.Duration = time.since(start)
+let formatted = time.format(start, "2006-01-02 15:04:05")
+let later = time.add(start, time.seconds(5))
+let gap = time.sub(later, start)
+
+return formatted

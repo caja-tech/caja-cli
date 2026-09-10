@@ -11,6 +11,7 @@ import (
 var builtinModules = map[string]bool{
 	"array":   true,
 	"date":    true,
+	"time":    true,
 	"string":  true,
 	"math":    true,
 	"log":     true,
@@ -154,6 +155,26 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			return fmt.Sprintf("float64(%s.Day())", argStrs[0]), nil
 		case "weekday":
 			return fmt.Sprintf("float64(%s.Weekday())", argStrs[0]), nil
+		}
+
+	case "time":
+		switch fn {
+		case "now":
+			return "time.Now()", nil
+		case "sleep":
+			return fmt.Sprintf("time.Sleep(%s)", argStrs[0]), nil
+		case "since":
+			return fmt.Sprintf("time.Since(%s)", argStrs[0]), nil
+		case "format":
+			return fmt.Sprintf("%s.Format(%s)", argStrs[0], argStrs[1]), nil
+		case "add":
+			return fmt.Sprintf("%s.Add(%s)", argStrs[0], argStrs[1]), nil
+		case "sub":
+			return fmt.Sprintf("%s.Sub(%s)", argStrs[0], argStrs[1]), nil
+		case "milliseconds":
+			return fmt.Sprintf("time.Duration(%s * float64(time.Millisecond))", argStrs[0]), nil
+		case "seconds":
+			return fmt.Sprintf("time.Duration(%s * float64(time.Second))", argStrs[0]), nil
 		}
 
 	case "map":
@@ -865,7 +886,7 @@ func caja_format_value(v any) string {
 		return caja_format_value(rv.Elem().Interface())
 	case reflect.Struct:
 		if t, ok := v.(time.Time); ok {
-			return t.Format("2006-01-02")
+			return t.Format("2006-01-02 15:04:05")
 		}
 		rt := rv.Type()
 		var parts []string
