@@ -1,0 +1,24 @@
+import "http" as http
+import "cast" as cast
+
+let router = http.newRouter()
+
+router.get("/relay-get", fn(req: http.Request) -> http.Response {
+    let client = http.newClient("http://127.0.0.1:8102", {"X-Api-Key": "secret123"})
+    let resp = client.get("/upstream")
+    return http.text(200, cast.to(resp?.body, "no response"))
+})
+
+router.post("/relay-post", fn(req: http.Request) -> http.Response {
+    let client = http.newClient("http://127.0.0.1:8102", {"X-Api-Key": "secret123"})
+    let resp = client.post("/upstream", http.toJSON({"hello": "world"}))
+    return http.text(200, cast.to(resp?.body, "no response"))
+})
+
+router.get("/relay-fail", fn(req: http.Request) -> http.Response {
+    let badClient = http.newClient("http://127.0.0.1:8103", {})
+    let resp = badClient.get("/nope")
+    return http.text(200, cast.to(resp?.body, "fallback"))
+})
+
+http.listen(router, 8101)

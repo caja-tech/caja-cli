@@ -2219,25 +2219,29 @@ func TestHTTPDistributedRateLimitSampleFailsOpenWhenRedisAddrUnset(t *testing.T)
 // slip past every other http test here, since samples/http_rate_limit and
 // samples/http_distributed_rate_limit each only ever call one of the two
 // limiters and never assert on what's absent from the generated source.
-func TestHTTPRateLimiterGatesAreIndependent(t *testing.T) {
-	transpileSample := func(t *testing.T, sampleDir string) string {
-		t.Helper()
-		filePath := filepath.Join("samples", sampleDir, sampleDir+".caja")
-		sourceCode, err := os.ReadFile(filePath)
-		if err != nil {
-			t.Fatalf("failed to read %s: %v", filePath, err)
-		}
-		program, _, a, err := script.ParseWithDir(string(sourceCode), filepath.Join("samples", sampleDir), filePath)
-		if err != nil {
-			t.Fatalf("failed to parse script: %v", err)
-		}
-		goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
-		if err != nil {
-			t.Fatalf("transpilation failed: %v", err)
-		}
-		return goCode
+// transpileSample reads and transpiles (but does not compile/run)
+// samples/<sampleDir>/<sampleDir>.caja, for tests that only need to inspect
+// the generated Go source itself -- e.g. confirming a feature's gated Go
+// glue is present/absent without paying for a full `go build`.
+func transpileSample(t *testing.T, sampleDir string) string {
+	t.Helper()
+	filePath := filepath.Join("samples", sampleDir, sampleDir+".caja")
+	sourceCode, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", filePath, err)
 	}
+	program, _, a, err := script.ParseWithDir(string(sourceCode), filepath.Join("samples", sampleDir), filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	return goCode
+}
 
+func TestHTTPRateLimiterGatesAreIndependent(t *testing.T) {
 	t.Run("in-memory rateLimiter alone emits no distributed/Redis glue", func(t *testing.T) {
 		goCode := transpileSample(t, "http_rate_limit")
 
@@ -2281,6 +2285,36 @@ func TestHTTPRateLimiterGatesAreIndependent(t *testing.T) {
 		// struct definition itself is absent instead.
 		if strings.Contains(goCode, "type cajaRateLimiter struct") {
 			t.Errorf("expected the in-memory token-bucket cajaRateLimiter struct to be absent from a program using only http.distributedRateLimiter, but it was present:\n%s", goCode)
+		}
+	})
+}
+
+// TestHTTPClientGateIsIndependent confirms Client's Go glue (gated on
+// "http_client") is only emitted for a program that actually calls
+// http.newClient -- unlike the two in-memory-vs-distributed rate limiter
+// gates, there's no symmetric "vice versa" here: Router's own glue is
+// unconditional whenever any http.* call is made at all (see the giant
+// `if ctx.usedModules["http"]` block in injectBuiltinDependencies), so
+// samples/http_client (which uses both Router and Client together, as a
+// relay server) is expected to contain both, not exclude Router's.
+func TestHTTPClientGateIsIndependent(t *testing.T) {
+	clientSymbols := []string{"type Client struct", "caja_http_new_client", "caja_http_client_do", "caja_http_join_url"}
+
+	t.Run("a program using only Router emits no Client glue", func(t *testing.T) {
+		goCode := transpileSample(t, "http")
+		for _, sym := range clientSymbols {
+			if strings.Contains(goCode, sym) {
+				t.Errorf("expected Client-only symbol %q to be absent from a program that never calls http.newClient, but it was present:\n%s", sym, goCode)
+			}
+		}
+	})
+
+	t.Run("a program using http.newClient emits Client glue", func(t *testing.T) {
+		goCode := transpileSample(t, "http_client")
+		for _, sym := range clientSymbols {
+			if !strings.Contains(goCode, sym) {
+				t.Errorf("expected Client glue symbol %q to be present in a program using http.newClient, but it was absent:\n%s", sym, goCode)
+			}
 		}
 	})
 }
@@ -2682,5 +2716,103 @@ func TestReactiveChainPropagatesThroughDerivedActive(t *testing.T) {
 	}
 	if !strings.Contains(out, "102") {
 		t.Errorf("expected the updated chained value 102 after a=1, got:\n%s", out)
+	}
+}
+
+// httpClientSampleAddr is the fixed port samples/http_client/http_client.caja
+// listens on; httpClientUpstreamAddr is the fixed port its Client targets.
+// Both are hardcoded in the sample source (Caja has no way to read
+// environment variables), so the test's own fake upstream server must bind
+// that exact address rather than a random port from httptest.NewServer.
+const (
+	httpClientSampleAddr   = "127.0.0.1:8101"
+	httpClientUpstreamAddr = "127.0.0.1:8102"
+)
+
+// startFakeUpstreamServer starts a plain Go HTTP server on the fixed address
+// samples/http_client's Client is configured to call, echoing the request
+// method, the X-Api-Key header (to confirm Client's default headers actually
+// arrived), and the request body (to confirm http.toJSON's output round-trips
+// unchanged) -- enough for the tests below to assert what the Caja-side
+// Client actually sent, not just that a response came back.
+func startFakeUpstreamServer(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", httpClientUpstreamAddr)
+	if err != nil {
+		t.Fatalf("failed to bind fake upstream server on %s: %v", httpClientUpstreamAddr, err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/upstream", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		fmt.Fprintf(w, "method=%s api_key=%s body=%s", r.Method, r.Header.Get("X-Api-Key"), string(body))
+	})
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+}
+
+func TestHTTPClientSampleRelaysGetRequest(t *testing.T) {
+	startFakeUpstreamServer(t)
+	cmd, stderr := startHTTPSample(t, "http_client", httpClientSampleAddr)
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	resp, err := http.Get("http://" + httpClientSampleAddr + "/relay-get")
+	if err != nil {
+		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "method=GET") || !strings.Contains(string(body), "api_key=secret123") {
+		t.Errorf("expected the upstream to report a GET request carrying the Client's default X-Api-Key header, got %q", body)
+	}
+}
+
+func TestHTTPClientSampleRelaysPostWithJSONBody(t *testing.T) {
+	startFakeUpstreamServer(t)
+	cmd, stderr := startHTTPSample(t, "http_client", httpClientSampleAddr)
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	resp, err := http.Post("http://"+httpClientSampleAddr+"/relay-post", "text/plain", nil)
+	if err != nil {
+		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "method=POST") || !strings.Contains(string(body), `body={"hello":"world"}`) {
+		t.Errorf(`expected the upstream to report a POST request carrying the exact JSON body http.toJSON produced, got %q`, body)
+	}
+}
+
+// TestHTTPClientSampleFailsOpenOnUnreachableHost deliberately does NOT start
+// a server on port 8103 -- samples/http_client's badClient targets that
+// unbound port specifically to exercise Client's fail-open nullable path
+// (a refused connection must return nil, not crash the handler).
+func TestHTTPClientSampleFailsOpenOnUnreachableHost(t *testing.T) {
+	cmd, stderr := startHTTPSample(t, "http_client", httpClientSampleAddr)
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	resp, err := http.Get("http://" + httpClientSampleAddr + "/relay-fail")
+	if err != nil {
+		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(body) != "fallback" {
+		t.Errorf(`expected 200 "fallback" (Client.get against a refused connection returns nil, not a crash), got %d %q`, resp.StatusCode, body)
 	}
 }

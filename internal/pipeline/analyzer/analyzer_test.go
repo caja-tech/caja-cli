@@ -2415,6 +2415,43 @@ let handler = fn(req: http.Request) -> http.Response {
 			input:          "import http\nlet r = http.Response{status: 200, body: \"x\"}",
 			expectedErrors: []string{"missing required field"},
 		},
+		{
+			name: "newClient and all five verb methods type-check",
+			input: `
+import http
+import cast
+let client = http.newClient("https://api.example.com", {"X-Api-Key": "secret"})
+let a = client.get("/x")
+let b = client.post("/x", "body")
+let c = client.put("/x", "body")
+let d = client.delete("/x")
+let e = client.patch("/x", "body")
+let body = cast.to(a?.body, "fallback")
+`,
+		},
+		{
+			name: "newClient accepts an empty map literal for defaultHeaders",
+			input: `
+import http
+let client = http.newClient("https://api.example.com", {})
+let resp = client.get("/x")
+`,
+		},
+		{
+			name:           "newClient rejects wrong argument count",
+			input:          "import http\nlet client = http.newClient(\"https://api.example.com\")",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name:           "client.post rejects missing body argument",
+			input:          "import http\nlet client = http.newClient(\"https://api.example.com\", {})\nclient.post(\"/x\")",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name:           "client.get rejects wrong endpoint argument type",
+			input:          "import http\nlet client = http.newClient(\"https://api.example.com\", {})\nclient.get(123)",
+			expectedErrors: []string{"type error"},
+		},
 	}
 
 	runTestScenarios(t, tests)

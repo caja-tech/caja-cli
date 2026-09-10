@@ -208,11 +208,9 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 				// "centralize the event name as a string."
 				"on": NewBuiltinSymbol(moduleName, 3, "on(event: String, el: Element, handler: fn() -> Nothing) -> Nothing", "event: String", "el: Element", "handler: fn() -> Nothing"),
 				// GET-only, returns the body as String — no Response type
-				// here yet to carry status/headers separately (the parallel
-				// http-server branch already has its own http.Response; the
-				// two are meant to be unified later rather than guessed at
-				// now). Works with async/unwrap for free at the top level of
-				// a program: it's an ordinary builtin whose *generated Go
+				// here yet to carry status/headers separately. Works with
+				// async/unwrap for free at the top level of a program: it's
+				// an ordinary builtin whose *generated Go
 				// code* blocks on a channel bridging the JS fetch Promise, so
 				// `async browser.fetch(u)` runs it concurrently via the same
 				// machinery every other async expression already uses.
@@ -327,6 +325,26 @@ func getHTTPStandardModule(moduleName string) (map[string]Symbol, map[string]Sym
 		"use":    {Type: NewFunctionSymbol(moduleName, "use", []string{"middleware"}, nil, 1, []Symbol{middlewareSym}, nothingSym)},
 	}, "")
 
+	// Client mirrors Router's own opaque-struct-with-function-fields design
+	// (see the doc comment above this function) — get/post/put/delete/patch
+	// are plain function-typed fields, so client.get(...) needs the exact
+	// same zero-new-dispatch-code codegen path router.get(...) already gets.
+	nullableResponseSym := &NullableSymbol{Underlying: responseSym}
+	clientVerb := func(name string, hasBody bool) *FunctionSymbol {
+		if hasBody {
+			return NewFunctionSymbol(moduleName, name, []string{"endpoint", "body"}, nil, 2, []Symbol{strSym, strSym}, nullableResponseSym)
+		}
+		return NewFunctionSymbol(moduleName, name, []string{"endpoint"}, nil, 1, []Symbol{strSym}, nullableResponseSym)
+	}
+
+	clientSym := NewStructDefSymbol("Client", nil, map[string]StructFieldSymbol{
+		"get":    {Type: clientVerb("get", false)},
+		"post":   {Type: clientVerb("post", true)},
+		"put":    {Type: clientVerb("put", true)},
+		"delete": {Type: clientVerb("delete", false)},
+		"patch":  {Type: clientVerb("patch", true)},
+	}, "")
+
 	return map[string]Symbol{
 			"newRouter":              NewFunctionSymbol(moduleName, "newRouter", nil, nil, 0, nil, routerSym),
 			"listen":                 NewFunctionSymbol(moduleName, "listen", []string{"router", "port"}, nil, 2, []Symbol{routerSym, numSym}, nothingSym),
@@ -334,17 +352,20 @@ func getHTTPStandardModule(moduleName string) (map[string]Symbol, map[string]Sym
 			"text":                   NewFunctionSymbol(moduleName, "text", []string{"status", "body"}, nil, 2, []Symbol{numSym, strSym}, responseSym),
 			"json":                   NewFunctionSymbol(moduleName, "json", []string{"status", "value"}, []string{"T"}, 2, []Symbol{numSym, NewGenericSymbol("T")}, responseSym),
 			"parseJSON":              NewFunctionSymbol(moduleName, "parseJSON", []string{"body"}, nil, 1, []Symbol{strSym}, NewMapSymbol(strSym, AnySymbol())),
+			"toJSON":                 NewFunctionSymbol(moduleName, "toJSON", []string{"value"}, []string{"T"}, 1, []Symbol{NewGenericSymbol("T")}, strSym),
 			"notFound":               NewFunctionSymbol(moduleName, "notFound", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
 			"badRequest":             NewFunctionSymbol(moduleName, "badRequest", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
 			"serverError":            NewFunctionSymbol(moduleName, "serverError", []string{"body"}, nil, 1, []Symbol{strSym}, responseSym),
 			"rateLimiter":            NewFunctionSymbol(moduleName, "rateLimiter", []string{"requestsPerSecond", "burst", "keyFunc"}, nil, 3, []Symbol{numSym, numSym, keyFuncSym}, middlewareSym),
 			"concurrencyLimiter":     NewFunctionSymbol(moduleName, "concurrencyLimiter", []string{"maxConcurrent", "keyFunc"}, nil, 2, []Symbol{numSym, keyFuncSym}, middlewareSym),
 			"distributedRateLimiter": NewFunctionSymbol(moduleName, "distributedRateLimiter", []string{"maxRequests", "windowSeconds", "keyFunc"}, nil, 3, []Symbol{numSym, numSym, keyFuncSym}, middlewareSym),
+			"newClient":              NewFunctionSymbol(moduleName, "newClient", []string{"baseUrl", "defaultHeaders"}, nil, 2, []Symbol{strSym, strMapSym}, clientSym),
 		}, map[string]Symbol{
 			"Request":    requestSym,
 			"Response":   responseSym,
 			"Router":     routerSym,
 			"Handler":    handlerSym,
 			"Middleware": middlewareSym,
+			"Client":     clientSym,
 		}, true
 }

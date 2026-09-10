@@ -58,9 +58,32 @@ func isOwned(n ast.Expression) bool {
 func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *transpileContext) (string, error) {
 	ctx.usedModules[module] = true
 
+	// A bare empty literal ({} or []) infers as Map<Any,Any>/Array<Any> on
+	// its own (analyzer.go's analyzeMapLiteral/analyzeArrayLiteral), which
+	// type-checks fine against any concrete parameter type (MapSymbol/
+	// ArraySymbol.Equals both treat Any as a wildcard) but, with no expected
+	// type threaded through, transpiles to *cajaMap[any, any]/*cajaArray[any]
+	// -- a real Go type mismatch against a builtin whose declared parameter
+	// is concrete (e.g. http.newClient's Map<String,String> defaultHeaders).
+	// Looking up the callee's declared parameter types here and passing them
+	// through as expectedType reuses the exact fallback MapLiteral/
+	// ArrayLiteral codegen already has for this (transpiler.go) -- previously
+	// only reachable via a return statement or explicit let-binding type,
+	// never a plain builtin call argument.
+	var paramTypes []symbol.Symbol
+	if funcs, _, ok := symbol.GetStandardModule(module); ok {
+		if fnSym, ok := funcs[fn].(*symbol.FunctionSymbol); ok {
+			paramTypes = fnSym.ParamTypes()
+		}
+	}
+
 	var argStrs []string
-	for _, arg := range args {
-		s, err := transpileExpression(arg, ctx, "")
+	for i, arg := range args {
+		expectedType := ""
+		if i < len(paramTypes) {
+			expectedType = ctx.mapSymbolToGoType(paramTypes[i])
+		}
+		s, err := transpileExpression(arg, ctx, expectedType)
 		if err != nil {
 			return "", err
 		}
@@ -432,6 +455,15 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			ctx.usedModules["json"] = true
 			ctx.usedModules["reflect"] = true
 			return fmt.Sprintf("caja_http_json(%s, %s)", argStrs[0], argStrs[1]), nil
+		case "toJSON":
+			// Reuses the same "json"/"reflect" gate http.json/parseJSON already
+			// set -- caja_http_to_json_string lives in the same gated glue
+			// block as caja_http_json (see injectBuiltinDependencies), just
+			// returning the marshaled string directly instead of wrapping it
+			// in a Response.
+			ctx.usedModules["json"] = true
+			ctx.usedModules["reflect"] = true
+			return fmt.Sprintf("caja_http_to_json_string(%s)", argStrs[0]), nil
 		case "parseJSON":
 			// http_parse_json gates its own Go glue separately from the rest of
 			// the json-serialization glue (caja_http_json/caja_http_to_jsonable,
@@ -477,6 +509,13 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			ctx.usedModules["strconv"] = true
 			ctx.usedModules["http_distributed_rate_limiter"] = true
 			return fmt.Sprintf("caja_http_distributed_rate_limit(%s, %s, %s)", argStrs[0], argStrs[1], argStrs[2]), nil
+		case "newClient":
+			// client.get(...)/post(...)/etc. need no case here at all -- they're
+			// plain function-typed struct fields on Client, calling them is
+			// ordinary struct-field-call codegen (see the Client doc comment in
+			// symbol.go's getHTTPStandardModule), exactly like router.get(...).
+			ctx.usedModules["http_client"] = true
+			return fmt.Sprintf("caja_http_new_client(%s, %s)", argStrs[0], argStrs[1]), nil
 		}
 	}
 
@@ -1318,6 +1357,107 @@ func caja_http_text(status float64, body string) *Response {
 	return &Response{Status: status, Headers: caja_http_empty_map(), Body: body}
 }
 `)
+		if ctx.usedModules["http_client"] {
+			buf.WriteString(`
+// Client mirrors Router's exact opaque-struct-with-function-fields design
+// (see Router above and getHTTPStandardModule's doc comment) -- get/post/
+// put/delete/patch are plain function-typed fields, so client.get(...) gets
+// the same zero-special-casing struct-field-call codegen router.get(...)
+// already gets. Gated separately from the rest of "http" so a program using
+// only Router (no outbound requests) doesn't get Client's Go glue compiled
+// in, and vice versa.
+type Client struct {
+	cajaBaseURL        string
+	cajaDefaultHeaders *cajaMap[string, string]
+	Get                func(string) *Response
+	Post               func(string, string) *Response
+	Put                func(string, string) *Response
+	Delete             func(string) *Response
+	Patch              func(string, string) *Response
+	cajaShared         bool
+}
+
+func (s *Client) cajaSetShared() {
+	if s == nil {
+		return
+	}
+	s.cajaShared = true
+	// Unlike Router.cajaSetShared (which leaves its internal slices alone --
+	// they aren't COW-tracked types), cajaDefaultHeaders is a real
+	// *cajaMap[string,string], so it needs the same cascade Request.Headers
+	// gets.
+	s.cajaDefaultHeaders.cajaSetShared()
+}
+func (s *Client) cajaClone() *Client {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.cajaShared = false
+	return &clone
+}
+
+const caja_http_client_timeout = 15 * time.Second
+
+var caja_http_client = &http.Client{Timeout: caja_http_client_timeout}
+
+// caja_http_join_url joins a Client's base URL with a per-call endpoint,
+// tolerating either side having (or lacking) a slash at the join point --
+// avoids pulling in net/url just for path joining.
+func caja_http_join_url(base string, endpoint string) string {
+	return strings.TrimSuffix(base, "/") + "/" + strings.TrimPrefix(endpoint, "/")
+}
+
+// caja_http_client_do is the one place that actually performs an outbound
+// request for every Client verb -- every failure path (bad request
+// construction, dial/timeout/TLS error, response-body read error) returns
+// nil uniformly rather than panicking, which is what Client's Response?
+// return type exists for: a network failure becomes a normal value the
+// caller must handle, the same fail-open convention distributedRateLimiter
+// already uses for its own infrastructure failures.
+func caja_http_client_do(c *Client, method string, endpoint string, body string) *Response {
+	var bodyReader io.Reader
+	if body != "" {
+		bodyReader = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, caja_http_join_url(c.cajaBaseURL, endpoint), bodyReader)
+	if err != nil {
+		return nil
+	}
+	if c.cajaDefaultHeaders != nil {
+		for k, v := range c.cajaDefaultHeaders.Data {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := caja_http_client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+	headers := caja_http_empty_map()
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			headers.Data[k] = v[0]
+		}
+	}
+	return &Response{Status: float64(resp.StatusCode), Headers: headers, Body: string(b)}
+}
+
+func caja_http_new_client(baseURL string, defaultHeaders *cajaMap[string, string]) *Client {
+	c := &Client{cajaBaseURL: baseURL, cajaDefaultHeaders: defaultHeaders}
+	c.Get = func(endpoint string) *Response { return caja_http_client_do(c, "GET", endpoint, "") }
+	c.Post = func(endpoint string, body string) *Response { return caja_http_client_do(c, "POST", endpoint, body) }
+	c.Put = func(endpoint string, body string) *Response { return caja_http_client_do(c, "PUT", endpoint, body) }
+	c.Delete = func(endpoint string) *Response { return caja_http_client_do(c, "DELETE", endpoint, "") }
+	c.Patch = func(endpoint string, body string) *Response { return caja_http_client_do(c, "PATCH", endpoint, body) }
+	return c
+}
+`)
+		}
 		if ctx.usedModules["http_rate_limiter"] || ctx.usedModules["http_distributed_rate_limiter"] {
 			buf.WriteString(`
 // cajaRateLimitResult carries enough of a rate-limit check's outcome to fill
@@ -1883,14 +2023,18 @@ func caja_http_to_jsonable(v any) any {
 	}
 }
 
-func caja_http_json(status float64, value any) *Response {
+func caja_http_to_json_string(value any) string {
 	b, err := json.Marshal(caja_http_to_jsonable(value))
 	if err != nil {
 		panic(err)
 	}
+	return string(b)
+}
+
+func caja_http_json(status float64, value any) *Response {
 	headers := caja_http_empty_map()
 	headers.Data["Content-Type"] = "application/json"
-	return &Response{Status: status, Headers: headers, Body: string(b)}
+	return &Response{Status: status, Headers: headers, Body: caja_http_to_json_string(value)}
 }
 `)
 		}
