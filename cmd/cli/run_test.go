@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -42,5 +44,32 @@ func TestRunCmd_InvalidExtension(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "invalid file type") {
 		t.Errorf("Unexpected error message: %v", err)
+	}
+}
+
+// TestRunCmd_RefusesBrowserModule confirms `caja run` rejects a script that
+// imports the browser module before ever attempting `go run` on it — the
+// browser module's generated syscall/js calls only build under GOOS=js/
+// GOARCH=wasm, which `go run` (unlike `caja build`) can't target, so this
+// must fail fast with a clear message instead of a confusing build error.
+func TestRunCmd_RefusesBrowserModule(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "browser.caja")
+	source := "import browser\nbrowser.log(\"hello\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	cmd, _ := NewRunCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{"--file", filePath})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected an error refusing to run a browser-module script")
+	}
+	if !strings.Contains(err.Error(), "caja build") || !strings.Contains(err.Error(), "browser module") {
+		t.Errorf("expected an error explaining the browser module needs 'caja build', got: %v", err)
 	}
 }

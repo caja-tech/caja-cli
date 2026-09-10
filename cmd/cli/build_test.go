@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -64,5 +67,75 @@ func TestResolveOutputBin_WindowsGetsExeSuffix(t *testing.T) {
 	}
 	if !strings.HasSuffix(outBin, ".exe") {
 		t.Errorf("expected a windows target to end in .exe, got %s", outBin)
+	}
+}
+
+// TestResolveOutputBin_JsGetsWasmSuffix confirms a js target (used for the
+// browser module, which only builds under GOOS=js/GOARCH=wasm) always ends
+// in .wasm, mirroring the windows/.exe case above.
+func TestResolveOutputBin_JsGetsWasmSuffix(t *testing.T) {
+	outBin, _, _, _, err := resolveOutputBin("/scripts/myprog.caja", "js", "wasm", "darwin", "arm64")
+	if err != nil {
+		t.Fatalf("resolveOutputBin failed: %v", err)
+	}
+	if !strings.HasSuffix(outBin, ".wasm") {
+		t.Errorf("expected a js target to end in .wasm, got %s", outBin)
+	}
+}
+
+// TestBuildCmd_BrowserModuleDefaultsToWasm is an end-to-end check of the
+// `caja build` auto-defaulting logic: a script that imports the browser
+// module, built with neither --os nor --arch given, must still succeed by
+// silently targeting GOOS=js/GOARCH=wasm (the only target the module's
+// generated syscall/js calls can build under) instead of failing with a
+// raw "build constraints exclude all Go files" error on the host platform,
+// and the resulting binary must be named with the .wasm suffix and contain
+// real WebAssembly output.
+func TestBuildCmd_BrowserModuleDefaultsToWasm(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "browser.caja")
+	source := "import browser\nbrowser.log(\"hello\")\n"
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	cmd, _ := NewBuildCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{"--file", filePath})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected browser-module build to succeed by auto-defaulting to js/wasm, got error: %v\noutput:\n%s", err, bufOut.String())
+	}
+
+	// crossCompiling becomes true once targetOS/targetArch are auto-filled
+	// to "js"/"wasm", so resolveOutputBin also appends the "-js-wasm" name
+	// suffix on top of the .wasm extension (see resolveOutputBin).
+	wantBin := filepath.Join(dir, "browser-js-wasm.wasm")
+	data, err := os.ReadFile(wantBin)
+	if err != nil {
+		t.Fatalf("expected wasm binary at %s, got error reading it: %v (build output:\n%s)", wantBin, err, bufOut.String())
+	}
+	t.Cleanup(func() { os.Remove(wantBin) })
+
+	wantMagic := []byte{0x00, 'a', 's', 'm'} // WebAssembly binary magic number
+	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
+		got := data
+		if len(got) > 4 {
+			got = got[:4]
+		}
+		t.Errorf("expected %s to start with wasm magic bytes %x, got %x", wantBin, wantMagic, got)
+	}
+
+	// The auto-defaulted js/wasm build must also emit the browser test
+	// harness (wasm_exec.js + HTML loader) a wasm binary needs to actually
+	// run anywhere, since there's no other reason to produce a GOOS=js
+	// binary from this CLI today (see compiler.WriteBrowserHarness).
+	if _, err := os.Stat(filepath.Join(dir, "wasm_exec.js")); err != nil {
+		t.Errorf("expected wasm_exec.js to be written alongside the binary: %v", err)
+	}
+	wantHTML := filepath.Join(dir, "browser-js-wasm.html")
+	if _, err := os.Stat(wantHTML); err != nil {
+		t.Errorf("expected harness html at %s: %v", wantHTML, err)
 	}
 }

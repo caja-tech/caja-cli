@@ -1,0 +1,131 @@
+import browser
+import array
+import cast
+
+browser.log("caja browser demo booted")
+
+let app = browser.getElementById("app")
+browser.setHTML(app, "<h1>Caja Browser Demo</h1><input id='name' type='text'><label><input type='checkbox' id='remember'> Remember me</label><ul id='list'><li id='a-item' class='item'>a</li><li class='item'>b</li><li class='item'>c</li></ul><p id='status'>Ready</p><button id='btn'>Click me</button>")
+
+# localStorageGet is Nullable (the key may have never been set) — cast.to
+# unwraps it with "world" as the first-visit default, same pattern as
+# getAttribute/querySelector above.
+let savedName = browser.localStorageGet("name")
+let nameInput = browser.getElementById("name")
+browser.setValue(nameInput, cast.to(savedName, "world"))
+browser.focus(nameInput)
+
+# setChecked/getChecked read and write the checkbox's live "checked" property
+# rather than its HTML attribute — see symbol.GetStandardModule's
+# "getChecked" entry for why the attribute alone isn't enough. Defaulting it
+# to checked here means the "remember me" behavior below matches the old
+# unconditional localStorageSet call unless the user unchecks it.
+let remember = browser.getElementById("remember")
+browser.setChecked(remember, true)
+
+# insertBefore lands a new node ahead of a-item instead of at the end —
+# appendChild only ever adds last, so this is the only way to control where
+# in the list a programmatically-built item lands.
+let list = browser.getElementById("list")
+let firstOriginalItem = browser.getElementById("a-item")
+let extraItem = browser.createElement("li")
+browser.setText(extraItem, "top")
+browser.addClass(extraItem, "item")
+browser.setStyle(extraItem, "color", "blue")
+browser.insertBefore(list, extraItem, firstOriginalItem)
+
+# removeElement detaches a node from wherever it lives — demonstrated here as
+# a round trip (add a throwaway node, confirm the count grew, remove it,
+# confirm the count is back) rather than leaving a dangling element with no
+# UI to remove it through.
+let tempItem = browser.createElement("li")
+browser.appendChild(list, tempItem)
+browser.log(cast.to(array.len(browser.querySelectorAll("#list li")), ""))
+browser.removeElement(tempItem)
+browser.log(cast.to(array.len(browser.querySelectorAll("#list li")), ""))
+
+let revertStatus = fn() -> Nothing {
+	browser.setText(browser.getElementById("status"), "Ready")
+}
+
+let handleFetched = fn(body: String) -> Nothing {
+	browser.log(body)
+	browser.setText(browser.getElementById("status"), "Clicked! (fetched wasm_exec.js successfully)")
+
+	# clearTimeout cancels a timer before it fires — scheduled here with a
+	# short delay and cancelled immediately after, so it never actually
+	# fires, unlike the real revertStatus timer right below it.
+	let staleTimer = browser.setTimeout(50, fn() -> Nothing {
+		browser.log("stale timer fired (should not happen)")
+	})
+	browser.clearTimeout(staleTimer)
+
+	browser.setTimeout(2000, revertStatus)
+}
+
+# browser.on covers every DOM event through one function — the event name is
+# just passed straight through to addEventListener, so "input" here and
+# "click" below need no separate builtins.
+let handleInput = fn() -> Nothing {
+	browser.log("name input changed")
+}
+browser.on("input", browser.getElementById("name"), handleInput)
+
+let handleClick = fn() -> Nothing {
+	browser.log("button clicked")
+	let name = browser.getValue(browser.getElementById("name"))
+	browser.log(name)
+	browser.blur(browser.getElementById("name"))
+
+	# getChecked reads the checkbox's live state, not its HTML attribute — a
+	# real "remember me" toggle rather than an always-on localStorageSet.
+	if (browser.getChecked(browser.getElementById("remember"))) {
+		browser.localStorageSet("name", name)
+	} else {
+		browser.localStorageRemove("name")
+	}
+
+	let firstItem = browser.querySelector(".item")
+	if (firstItem != nil) {
+		# Caja has no if-narrowing: firstItem's static type stays Element?
+		# even inside this null-checked branch, so every browser.* call below
+		# would otherwise reject it outright ("must be a non-nullable
+		# Element"). cast.to is the only correct way to unwrap it — the
+		# fallback (re-fetched rather than capturing the outer "app", which
+		# purity forbids) is only there to satisfy the type system and can
+		# never actually run, since we already know firstItem isn't nil here.
+		let item = cast.to(firstItem, browser.getElementById("app"))
+		browser.setText(item, "first!")
+		browser.setAttribute(item, "data-picked", "true")
+		browser.addClass(item, "picked")
+		browser.removeClass(item, "item")
+
+		# toggleClass/hasClass are the query/toggle counterparts to
+		# addClass/removeClass — the primitive behind conditional styling
+		# ("active", "open", "selected").
+		browser.toggleClass(item, "featured")
+
+		# getAttribute is itself Nullable too (the attribute might be
+		# absent), unwrapped the same way.
+		let picked = browser.getAttribute(item, "data-picked")
+		browser.log(cast.to(picked, "not set"))
+
+		# removeAttribute fully clears it — a second getAttribute now comes
+		# back nil, logging "not set" again rather than an empty string.
+		browser.removeAttribute(item, "data-picked")
+		let pickedAfterRemove = browser.getAttribute(item, "data-picked")
+		browser.log(cast.to(pickedAfterRemove, "not set"))
+	}
+	let items = browser.querySelectorAll(".item")
+	browser.log(cast.to(array.len(items), ""))
+
+	# Uses fetchThen, not plain fetch: a plain synchronous browser.fetch call
+	# (even wrapped in async+unwrap) from inside a browser.on handler
+	# permanently freezes the whole page - see fetchThen's comment in
+	# symbol.GetStandardModule for why. Fetches wasm_exec.js itself rather
+	# than a custom endpoint, so this sample works standalone via
+	# 'caja serve' without needing a backend running alongside it.
+	browser.fetchThen("wasm_exec.js", handleFetched)
+}
+
+browser.on("click", browser.getElementById("btn"), handleClick)

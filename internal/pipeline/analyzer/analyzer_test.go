@@ -1593,6 +1593,573 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m)",
 			expectedErrors: []string{"arity error: expected 2 arguments for 'delete', got 1"},
 		},
+		{
+			name:  "browser.log() works with a string argument",
+			input: "import browser\nreturn browser.log(\"hello\")",
+		},
+		{
+			name:           "browser.log() rejects a non-string argument",
+			input:          "import browser\nreturn browser.log(42)",
+			expectedErrors: []string{"type error: first argument to 'log' must be String, got Number"},
+		},
+		{
+			name:           "browser.alert() rejects missing arguments",
+			input:          "import browser\nreturn browser.alert()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'alert', got 0"},
+		},
+		{
+			name:  "browser.getElementById() returns an Element",
+			input: "import browser\nlet el: browser.Element = browser.getElementById(\"app\")\nreturn el",
+		},
+		{
+			name:           "browser.getElementById() rejects a non-string argument",
+			input:          "import browser\nreturn browser.getElementById(42)",
+			expectedErrors: []string{"type error: first argument to 'getElementById' must be String, got Number"},
+		},
+		{
+			name:  "browser.setText() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"app\")\nreturn browser.setText(el, \"hi\")",
+		},
+		{
+			name:           "browser.setText() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.setText(\"not an element\", \"hi\")",
+			expectedErrors: []string{"type error: first argument to 'setText' must be Element, got String"},
+		},
+		{
+			name:           "browser.setHTML() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"app\")\nreturn browser.setHTML(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'setHTML' must be String, got Number"},
+		},
+		{
+			name:  "browser.getValue() works with an Element and returns String",
+			input: "import browser\nlet el = browser.getElementById(\"name\")\nlet v: String = browser.getValue(el)\nreturn v",
+		},
+		{
+			name:           "browser.getValue() rejects a non-Element argument",
+			input:          "import browser\nreturn browser.getValue(\"not an element\")",
+			expectedErrors: []string{"type error: first argument to 'getValue' must be Element, got String"},
+		},
+		{
+			name:           "browser.getValue() rejects missing arguments",
+			input:          "import browser\nreturn browser.getValue()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'getValue', got 0"},
+		},
+		{
+			name:  "browser.setValue() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"name\")\nreturn browser.setValue(el, \"hi\")",
+		},
+		{
+			name:           "browser.setValue() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.setValue(\"not an element\", \"hi\")",
+			expectedErrors: []string{"type error: first argument to 'setValue' must be Element, got String"},
+		},
+		{
+			name:           "browser.setValue() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"name\")\nreturn browser.setValue(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'setValue' must be String, got Number"},
+		},
+		{
+			name:  "browser.querySelector() works with a String selector and returns Nullable Element",
+			input: "import browser\nlet el: browser.Element? = browser.querySelector(\".item\")\nreturn el",
+		},
+		{
+			name:           "browser.querySelector() rejects a non-String selector",
+			input:          "import browser\nreturn browser.querySelector(42)",
+			expectedErrors: []string{"type error: first argument to 'querySelector' must be String, got Number"},
+		},
+		{
+			name:           "browser.querySelector() rejects missing arguments",
+			input:          "import browser\nreturn browser.querySelector()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'querySelector', got 0"},
+		},
+		{
+			name:  "browser.querySelectorAll() works with a String selector and returns Array<Element>",
+			input: "import browser\nlet els: [browser.Element] = browser.querySelectorAll(\".item\")\nreturn els",
+		},
+		{
+			name:           "browser.querySelectorAll() rejects a non-String selector",
+			input:          "import browser\nreturn browser.querySelectorAll(42)",
+			expectedErrors: []string{"type error: first argument to 'querySelectorAll' must be String, got Number"},
+		},
+		{
+			name:           "browser.querySelectorAll() rejects missing arguments",
+			input:          "import browser\nreturn browser.querySelectorAll()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'querySelectorAll', got 0"},
+		},
+		{
+			name:  "browser.setAttribute() works with an Element and two Strings",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setAttribute(el, \"data-role\", \"widget\")",
+		},
+		{
+			name:           "browser.setAttribute() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.setAttribute(\"not an element\", \"data-role\", \"widget\")",
+			expectedErrors: []string{"type error: first argument to 'setAttribute' must be Element, got String"},
+		},
+		{
+			name:           "browser.setAttribute() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setAttribute(el, 42, \"widget\")",
+			expectedErrors: []string{"type error: second argument to 'setAttribute' must be String, got Number"},
+		},
+		{
+			name:           "browser.setAttribute() rejects a non-String third argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setAttribute(el, \"data-role\", 42)",
+			expectedErrors: []string{"type error: third argument to 'setAttribute' must be String, got Number"},
+		},
+		{
+			name:           "browser.setAttribute() rejects missing arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setAttribute(el, \"data-role\")",
+			expectedErrors: []string{"arity error: expected 3 arguments for 'setAttribute', got 2"},
+		},
+		{
+			// No explicit "String?" annotation here: Caja's parser rejects a
+			// nullable annotation on a primitive type outright ("primitive
+			// type 'String' cannot be nullable") — only builtins can produce
+			// a Nullable<primitive> value (there's no user-facing syntax for
+			// it), so this just relies on inference like every real caller
+			// (e.g. the safe browser.caja sample) already does.
+			name:  "browser.getAttribute() works with an Element and a String, returns Nullable String",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nlet v = browser.getAttribute(el, \"data-role\")\nreturn v",
+		},
+		{
+			name:           "browser.getAttribute() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.getAttribute(\"not an element\", \"data-role\")",
+			expectedErrors: []string{"type error: first argument to 'getAttribute' must be Element, got String"},
+		},
+		{
+			name:           "browser.getAttribute() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.getAttribute(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'getAttribute' must be String, got Number"},
+		},
+		{
+			name:           "browser.getAttribute() rejects missing arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.getAttribute(el)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'getAttribute', got 1"},
+		},
+		{
+			name:  "browser.addClass() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.addClass(el, \"highlight\")",
+		},
+		{
+			name:           "browser.addClass() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.addClass(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'addClass' must be String, got Number"},
+		},
+		{
+			name:  "browser.removeClass() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.removeClass(el, \"highlight\")",
+		},
+		{
+			name:           "browser.removeClass() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.removeClass(\"not an element\", \"highlight\")",
+			expectedErrors: []string{"type error: first argument to 'removeClass' must be Element, got String"},
+		},
+		{
+			name:  "browser.on() works with an event String, an Element, and a niladic handler",
+			input: "import browser\nlet el = browser.getElementById(\"btn\")\nreturn browser.on(\"click\", el, fn() -> Nothing { browser.log(\"clicked\") })",
+		},
+		{
+			name:           "browser.on() rejects a non-String event",
+			input:          "import browser\nlet el = browser.getElementById(\"btn\")\nreturn browser.on(42, el, fn() -> Nothing { browser.log(\"clicked\") })",
+			expectedErrors: []string{"type error: first argument to 'on' must be String, got Number"},
+		},
+		{
+			name:           "browser.on() rejects a non-Element second argument",
+			input:          "import browser\nreturn browser.on(\"click\", \"not an element\", fn() -> Nothing { browser.log(\"clicked\") })",
+			expectedErrors: []string{"type error: second argument to 'on' must be Element, got String"},
+		},
+		{
+			name:           "browser.on() rejects a handler that takes arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"btn\")\nreturn browser.on(\"click\", el, fn(x: Number) -> Nothing { browser.log(\"clicked\") })",
+			expectedErrors: []string{"type error: third argument to 'on' must be a function taking 0 arguments, got fn(x: Number) -> Nothing"},
+		},
+		{
+			name:           "browser.on() rejects a non-function third argument",
+			input:          "import browser\nlet el = browser.getElementById(\"btn\")\nreturn browser.on(\"click\", el, 42)",
+			expectedErrors: []string{"type error: third argument to 'on' must be a function, got Number"},
+		},
+		{
+			name:           "browser.on() rejects missing arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"btn\")\nreturn browser.on(\"click\", el)",
+			expectedErrors: []string{"arity error: expected 3 arguments for 'on', got 2"},
+		},
+		// Systemic check: a Nullable value (Element?/String?) is rejected
+		// wherever a plain, non-nullable Element/String is required —
+		// NullableSymbol.Type() deliberately forwards to its underlying
+		// type, so a plain .Type() check alone would silently accept it too
+		// (see checkBrowserArgNotNullable in builtin.go for why that's
+		// unsound). A handful of representative call sites, not all sixteen.
+		{
+			name:           "browser.setText() rejects a Nullable Element (querySelector's result, unnarrowed)",
+			input:          "import browser\nlet el = browser.querySelector(\".item\")\nreturn browser.setText(el, \"hi\")",
+			expectedErrors: []string{"type error: first argument to 'setText' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:           "browser.getAttribute() rejects a Nullable Element even inside a nil-check (Caja has no if-narrowing)",
+			input:          "import browser\nlet el = browser.querySelector(\".item\")\nif (el != nil) { return browser.getAttribute(el, \"data-role\") }\nreturn nil",
+			expectedErrors: []string{"type error: first argument to 'getAttribute' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:           "browser.on() rejects a Nullable Element for its el argument",
+			input:          "import browser\nlet el = browser.querySelector(\".item\")\nreturn browser.on(\"click\", el, fn() -> Nothing { browser.log(\"x\") })",
+			expectedErrors: []string{"type error: second argument to 'on' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:           "browser.fetchThen() rejects a Nullable String url (e.g. from getAttribute)",
+			input:          "import browser\nlet el = browser.getElementById(\"link\")\nlet href = browser.getAttribute(el, \"href\")\nreturn browser.fetchThen(href, fn(body: String) -> Nothing { browser.log(body) })",
+			expectedErrors: []string{"type error: first argument to 'fetchThen' must be a non-nullable String, got String? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			// cast.to is the correct way to consume it — confirming the
+			// systemic check doesn't also reject the *unwrapped* value.
+			name:  "browser.setText() works with a querySelector result unwrapped via cast.to",
+			input: "import browser\nimport cast\nlet el = browser.querySelector(\".item\")\nreturn browser.setText(cast.to(el, browser.getElementById(\"app\")), \"hi\")",
+		},
+		{
+			name:  "browser.fetch() works with a String url and returns String",
+			input: "import browser\nlet body: String = browser.fetch(\"/data\")\nreturn body",
+		},
+		{
+			name:           "browser.fetch() rejects a non-String url",
+			input:          "import browser\nreturn browser.fetch(42)",
+			expectedErrors: []string{"type error: first argument to 'fetch' must be String, got Number"},
+		},
+		{
+			name:           "browser.fetch() rejects missing arguments",
+			input:          "import browser\nreturn browser.fetch()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'fetch', got 0"},
+		},
+		{
+			name:           "browser.fetch() rejects being called inside a function",
+			input:          "import browser\nlet f = fn() -> String { return browser.fetch(\"/data\") }",
+			expectedErrors: []string{"semantic error: 'browser.fetch' can only be called at the top level of a script, not inside a function — it can permanently freeze the page if that function ever runs as (or from) a browser.on handler; use browser.fetchThen instead"},
+		},
+		{
+			name:           "browser.fetch() rejects being called inside a function even wrapped in async",
+			input:          "import browser\nlet f = fn() -> Nothing { let t = async browser.fetch(\"/data\") }",
+			expectedErrors: []string{"semantic error: 'browser.fetch' can only be called at the top level of a script, not inside a function — it can permanently freeze the page if that function ever runs as (or from) a browser.on handler; use browser.fetchThen instead"},
+		},
+		{
+			name:  "browser.fetch() works at the top level of a script",
+			input: "import browser\nlet body = browser.fetch(\"/data\")\nreturn body",
+		},
+		{
+			name:  "browser.fetchThen() works with a String url and a String-arg handler",
+			input: "import browser\nreturn browser.fetchThen(\"/data\", fn(body: String) -> Nothing { browser.log(body) })",
+		},
+		{
+			name:           "browser.fetchThen() rejects a non-String url",
+			input:          "import browser\nreturn browser.fetchThen(42, fn(body: String) -> Nothing { browser.log(body) })",
+			expectedErrors: []string{"type error: first argument to 'fetchThen' must be String, got Number"},
+		},
+		{
+			name:           "browser.fetchThen() rejects a handler taking the wrong number of arguments",
+			input:          "import browser\nreturn browser.fetchThen(\"/data\", fn() -> Nothing { browser.log(\"x\") })",
+			expectedErrors: []string{"type error: second argument to 'fetchThen' must be a function taking 1 argument, got fn() -> Nothing"},
+		},
+		{
+			name:           "browser.fetchThen() rejects a handler whose argument isn't a String",
+			input:          "import browser\nreturn browser.fetchThen(\"/data\", fn(n: Number) -> Nothing { browser.log(\"x\") })",
+			expectedErrors: []string{"type error: second argument to 'fetchThen' must be a function taking a String, got fn(n: Number) -> Nothing"},
+		},
+		{
+			name:           "browser.fetchThen() rejects a non-function second argument",
+			input:          "import browser\nreturn browser.fetchThen(\"/data\", 42)",
+			expectedErrors: []string{"type error: second argument to 'fetchThen' must be a function, got Number"},
+		},
+		{
+			name:           "browser.fetchThen() rejects missing arguments",
+			input:          "import browser\nreturn browser.fetchThen(\"/data\")",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'fetchThen', got 1"},
+		},
+		{
+			name:  "browser.localStorageGet() works with a String key, returns Nullable String",
+			input: "import browser\nlet v = browser.localStorageGet(\"theme\")\nreturn v",
+		},
+		{
+			name:           "browser.localStorageGet() rejects a non-String key",
+			input:          "import browser\nreturn browser.localStorageGet(42)",
+			expectedErrors: []string{"type error: first argument to 'localStorageGet' must be String, got Number"},
+		},
+		{
+			name:           "browser.localStorageGet() rejects missing arguments",
+			input:          "import browser\nreturn browser.localStorageGet()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'localStorageGet', got 0"},
+		},
+		{
+			name:           "browser.localStorageGet() rejects a Nullable String key (Caja has no if-narrowing)",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nlet key = browser.getAttribute(el, \"data-key\")\nreturn browser.localStorageGet(key)",
+			expectedErrors: []string{"type error: first argument to 'localStorageGet' must be a non-nullable String, got String? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "browser.localStorageSet() works with two String arguments",
+			input: "import browser\nreturn browser.localStorageSet(\"theme\", \"dark\")",
+		},
+		{
+			name:           "browser.localStorageSet() rejects a non-String first argument",
+			input:          "import browser\nreturn browser.localStorageSet(42, \"dark\")",
+			expectedErrors: []string{"type error: first argument to 'localStorageSet' must be String, got Number"},
+		},
+		{
+			name:           "browser.localStorageSet() rejects a non-String second argument",
+			input:          "import browser\nreturn browser.localStorageSet(\"theme\", 42)",
+			expectedErrors: []string{"type error: second argument to 'localStorageSet' must be String, got Number"},
+		},
+		{
+			name:           "browser.localStorageSet() rejects missing arguments",
+			input:          "import browser\nreturn browser.localStorageSet(\"theme\")",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'localStorageSet', got 1"},
+		},
+		{
+			name:  "browser.localStorageRemove() works with a String key",
+			input: "import browser\nreturn browser.localStorageRemove(\"theme\")",
+		},
+		{
+			name:           "browser.localStorageRemove() rejects a non-String key",
+			input:          "import browser\nreturn browser.localStorageRemove(42)",
+			expectedErrors: []string{"type error: first argument to 'localStorageRemove' must be String, got Number"},
+		},
+		{
+			name:           "browser.localStorageRemove() rejects missing arguments",
+			input:          "import browser\nreturn browser.localStorageRemove()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'localStorageRemove', got 0"},
+		},
+		{
+			name:  "browser.createElement() works with a String tag, returns Element",
+			input: "import browser\nlet el = browser.createElement(\"li\")\nreturn el",
+		},
+		{
+			name:           "browser.createElement() rejects a non-String tag",
+			input:          "import browser\nreturn browser.createElement(42)",
+			expectedErrors: []string{"type error: first argument to 'createElement' must be String, got Number"},
+		},
+		{
+			name:           "browser.createElement() rejects missing arguments",
+			input:          "import browser\nreturn browser.createElement()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'createElement', got 0"},
+		},
+		{
+			name:           "browser.createElement() rejects a Nullable String tag (Caja has no if-narrowing)",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nlet tag = browser.getAttribute(el, \"data-tag\")\nreturn browser.createElement(tag)",
+			expectedErrors: []string{"type error: first argument to 'createElement' must be a non-nullable String, got String? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "browser.appendChild() works with two Elements",
+			input: "import browser\nlet parent = browser.getElementById(\"list\")\nlet child = browser.createElement(\"li\")\nreturn browser.appendChild(parent, child)",
+		},
+		{
+			name:           "browser.appendChild() rejects a non-Element first argument",
+			input:          "import browser\nlet child = browser.createElement(\"li\")\nreturn browser.appendChild(\"not an element\", child)",
+			expectedErrors: []string{"type error: first argument to 'appendChild' must be Element, got String"},
+		},
+		{
+			name:           "browser.appendChild() rejects a non-Element second argument",
+			input:          "import browser\nlet parent = browser.getElementById(\"list\")\nreturn browser.appendChild(parent, \"not an element\")",
+			expectedErrors: []string{"type error: second argument to 'appendChild' must be Element, got String"},
+		},
+		{
+			name:           "browser.appendChild() rejects missing arguments",
+			input:          "import browser\nlet parent = browser.getElementById(\"list\")\nreturn browser.appendChild(parent)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'appendChild', got 1"},
+		},
+		{
+			name:           "browser.appendChild() rejects a Nullable Element for its second argument",
+			input:          "import browser\nlet parent = browser.getElementById(\"list\")\nlet child = browser.querySelector(\".item\")\nreturn browser.appendChild(parent, child)",
+			expectedErrors: []string{"type error: second argument to 'appendChild' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "browser.removeElement() works with an Element",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.removeElement(el)",
+		},
+		{
+			name:           "browser.removeElement() rejects a non-Element argument",
+			input:          "import browser\nreturn browser.removeElement(\"not an element\")",
+			expectedErrors: []string{"type error: first argument to 'removeElement' must be Element, got String"},
+		},
+		{
+			name:           "browser.removeElement() rejects missing arguments",
+			input:          "import browser\nreturn browser.removeElement()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'removeElement', got 0"},
+		},
+		{
+			name:           "browser.removeElement() rejects a Nullable Element (Caja has no if-narrowing)",
+			input:          "import browser\nlet el = browser.querySelector(\".item\")\nreturn browser.removeElement(el)",
+			expectedErrors: []string{"type error: first argument to 'removeElement' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "browser.setStyle() works with an Element and two Strings",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setStyle(el, \"color\", \"blue\")",
+		},
+		{
+			name:           "browser.setStyle() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.setStyle(\"not an element\", \"color\", \"blue\")",
+			expectedErrors: []string{"type error: first argument to 'setStyle' must be Element, got String"},
+		},
+		{
+			name:           "browser.setStyle() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setStyle(el, 42, \"blue\")",
+			expectedErrors: []string{"type error: second argument to 'setStyle' must be String, got Number"},
+		},
+		{
+			name:           "browser.setStyle() rejects a non-String third argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setStyle(el, \"color\", 42)",
+			expectedErrors: []string{"type error: third argument to 'setStyle' must be String, got Number"},
+		},
+		{
+			name:           "browser.setStyle() rejects missing arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.setStyle(el, \"color\")",
+			expectedErrors: []string{"arity error: expected 3 arguments for 'setStyle', got 2"},
+		},
+		{
+			name:  "browser.removeAttribute() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.removeAttribute(el, \"data-open\")",
+		},
+		{
+			name:           "browser.removeAttribute() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.removeAttribute(\"not an element\", \"data-open\")",
+			expectedErrors: []string{"type error: first argument to 'removeAttribute' must be Element, got String"},
+		},
+		{
+			name:           "browser.removeAttribute() rejects missing arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.removeAttribute(el)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'removeAttribute', got 1"},
+		},
+		{
+			name:  "browser.toggleClass() works with an Element and a String",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.toggleClass(el, \"open\")",
+		},
+		{
+			name:           "browser.toggleClass() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.toggleClass(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'toggleClass' must be String, got Number"},
+		},
+		{
+			name:  "browser.hasClass() works with an Element and a String, returns Boolean",
+			input: "import browser\nlet el = browser.getElementById(\"box\")\nlet isOpen = browser.hasClass(el, \"open\")\nreturn isOpen",
+		},
+		{
+			name:           "browser.hasClass() rejects a non-Element first argument",
+			input:          "import browser\nreturn browser.hasClass(\"not an element\", \"open\")",
+			expectedErrors: []string{"type error: first argument to 'hasClass' must be Element, got String"},
+		},
+		{
+			name:           "browser.hasClass() rejects a non-String second argument",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.hasClass(el, 42)",
+			expectedErrors: []string{"type error: second argument to 'hasClass' must be String, got Number"},
+		},
+		{
+			name:           "browser.hasClass() rejects missing arguments",
+			input:          "import browser\nlet el = browser.getElementById(\"box\")\nreturn browser.hasClass(el)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'hasClass', got 1"},
+		},
+		{
+			name:           "browser.hasClass() rejects a Nullable Element (Caja has no if-narrowing)",
+			input:          "import browser\nlet el = browser.querySelector(\".item\")\nreturn browser.hasClass(el, \"open\")",
+			expectedErrors: []string{"type error: first argument to 'hasClass' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "browser.focus() and browser.blur() work with an Element",
+			input: "import browser\nlet el = browser.getElementById(\"name\")\nbrowser.focus(el)\nreturn browser.blur(el)",
+		},
+		{
+			name:           "browser.focus() rejects a non-Element argument",
+			input:          "import browser\nreturn browser.focus(\"not an element\")",
+			expectedErrors: []string{"type error: first argument to 'focus' must be Element, got String"},
+		},
+		{
+			name:           "browser.blur() rejects missing arguments",
+			input:          "import browser\nreturn browser.blur()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'blur', got 0"},
+		},
+		{
+			name:  "browser.getChecked() works with an Element, returns Boolean",
+			input: "import browser\nlet box = browser.getElementById(\"remember\")\nlet checked = browser.getChecked(box)\nreturn checked",
+		},
+		{
+			name:           "browser.getChecked() rejects a non-Element argument",
+			input:          "import browser\nreturn browser.getChecked(\"not an element\")",
+			expectedErrors: []string{"type error: first argument to 'getChecked' must be Element, got String"},
+		},
+		{
+			name:  "browser.setChecked() works with an Element and a Boolean",
+			input: "import browser\nlet box = browser.getElementById(\"remember\")\nreturn browser.setChecked(box, true)",
+		},
+		{
+			name:           "browser.setChecked() rejects a non-Boolean second argument",
+			input:          "import browser\nlet box = browser.getElementById(\"remember\")\nreturn browser.setChecked(box, \"true\")",
+			expectedErrors: []string{"type error: second argument to 'setChecked' must be Boolean, got String"},
+		},
+		{
+			name:           "browser.setChecked() rejects missing arguments",
+			input:          "import browser\nlet box = browser.getElementById(\"remember\")\nreturn browser.setChecked(box)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'setChecked', got 1"},
+		},
+		{
+			name:  "browser.insertBefore() works with three Elements",
+			input: "import browser\nlet list = browser.getElementById(\"list\")\nlet ref = browser.getElementById(\"a-item\")\nlet newItem = browser.createElement(\"li\")\nreturn browser.insertBefore(list, newItem, ref)",
+		},
+		{
+			name:           "browser.insertBefore() rejects a non-Element first argument",
+			input:          "import browser\nlet ref = browser.getElementById(\"a-item\")\nlet newItem = browser.createElement(\"li\")\nreturn browser.insertBefore(\"not an element\", newItem, ref)",
+			expectedErrors: []string{"type error: first argument to 'insertBefore' must be Element, got String"},
+		},
+		{
+			name:           "browser.insertBefore() rejects a non-Element second argument",
+			input:          "import browser\nlet list = browser.getElementById(\"list\")\nlet ref = browser.getElementById(\"a-item\")\nreturn browser.insertBefore(list, \"not an element\", ref)",
+			expectedErrors: []string{"type error: second argument to 'insertBefore' must be Element, got String"},
+		},
+		{
+			name:           "browser.insertBefore() rejects a non-Element third argument",
+			input:          "import browser\nlet list = browser.getElementById(\"list\")\nlet newItem = browser.createElement(\"li\")\nreturn browser.insertBefore(list, newItem, \"not an element\")",
+			expectedErrors: []string{"type error: third argument to 'insertBefore' must be Element, got String"},
+		},
+		{
+			name:           "browser.insertBefore() rejects missing arguments",
+			input:          "import browser\nlet list = browser.getElementById(\"list\")\nlet newItem = browser.createElement(\"li\")\nreturn browser.insertBefore(list, newItem)",
+			expectedErrors: []string{"arity error: expected 3 arguments for 'insertBefore', got 2"},
+		},
+		{
+			name:           "browser.insertBefore() rejects a Nullable Element for its second argument",
+			input:          "import browser\nlet list = browser.getElementById(\"list\")\nlet ref = browser.getElementById(\"a-item\")\nlet newItem = browser.querySelector(\".item\")\nreturn browser.insertBefore(list, newItem, ref)",
+			expectedErrors: []string{"type error: second argument to 'insertBefore' must be a non-nullable Element, got Element? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "browser.setTimeout() works with a Number and a niladic handler, returns Number",
+			input: "import browser\nlet id = browser.setTimeout(2000, fn() -> Nothing { browser.log(\"fired\") })\nreturn id",
+		},
+		{
+			name:           "browser.setTimeout() rejects a non-Number first argument",
+			input:          "import browser\nreturn browser.setTimeout(\"2000\", fn() -> Nothing { browser.log(\"fired\") })",
+			expectedErrors: []string{"type error: first argument to 'setTimeout' must be Number, got String"},
+		},
+		{
+			name:           "browser.setTimeout() rejects a handler that takes arguments",
+			input:          "import browser\nreturn browser.setTimeout(2000, fn(x: Number) -> Nothing { browser.log(\"fired\") })",
+			expectedErrors: []string{"type error: second argument to 'setTimeout' must be a function taking 0 arguments, got fn(x: Number) -> Nothing"},
+		},
+		{
+			name:           "browser.setTimeout() rejects a non-function second argument",
+			input:          "import browser\nreturn browser.setTimeout(2000, 42)",
+			expectedErrors: []string{"type error: second argument to 'setTimeout' must be a function, got Number"},
+		},
+		{
+			name:           "browser.setTimeout() rejects missing arguments",
+			input:          "import browser\nreturn browser.setTimeout(2000)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'setTimeout', got 1"},
+		},
+		{
+			name:  "browser.clearTimeout() works with a Number",
+			input: "import browser\nlet id = browser.setTimeout(2000, fn() -> Nothing { browser.log(\"fired\") })\nreturn browser.clearTimeout(id)",
+		},
+		{
+			name:           "browser.clearTimeout() rejects a non-Number argument",
+			input:          "import browser\nreturn browser.clearTimeout(\"not a number\")",
+			expectedErrors: []string{"type error: first argument to 'clearTimeout' must be Number, got String"},
+		},
+		{
+			name:           "browser.clearTimeout() rejects missing arguments",
+			input:          "import browser\nreturn browser.clearTimeout()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'clearTimeout', got 0"},
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -2635,6 +3202,21 @@ let r3 = unwrap p3
 			expectedErrors: []string{},
 		},
 		{
+			// browser.fetch is an ordinary builtin (no dedicated async
+			// support was added for it — see its comment in
+			// symbol.GetStandardModule), so wrapping it in `async` and
+			// pulling the result out via `unwrap` must work exactly like it
+			// does for any user-defined function, with the unwrapped type
+			// coming out as the fetch's declared String return type.
+			name: "browser.fetch composes with async/unwrap like any other call",
+			input: `
+import browser
+let t = async browser.fetch("/data")
+let body: String = unwrap t
+`,
+			expectedErrors: []string{},
+		},
+		{
 			name: "Valid single-operand await barrier",
 			input: `
 let compute = fn() -> Number { return 5 }
@@ -2969,6 +3551,144 @@ let result = apply(memo fn(n: Number) -> Number { return n }, 5)
 			expectedErrors: []string{
 				"semantic error: 'memo' is currently only supported directly on a let/const binding, e.g. let name = memo fn(...) {...}",
 			},
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestSemanticAnalysisActiveModifier(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid active let with reassignment",
+			input: `
+let active counter = 0
+counter = counter + 1
+return counter
+`,
+		},
+		{
+			name: "Active variable reads transparently as its underlying type",
+			input: `
+let active counter = 0
+let doubled = counter * 2
+return doubled
+`,
+		},
+		{
+			name: "private + active compose in either mention order",
+			input: `
+private let active n = "name"
+n = "renamed"
+return n
+`,
+		},
+		{
+			name: "active on a String works the same as Number",
+			input: `
+let active label = "hello"
+label = "world"
+return label
+`,
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+func TestSemanticAnalysisReactiveCall(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid reactive call: active result required and provided",
+			input: `
+import cast
+let active counter = 0
+let reactFn = fn(c: Number) -> String { return cast.to(c, "") }
+let active result = reactFn(react counter)
+return result
+`,
+		},
+		{
+			name: "Valid reactive call with multiple react params",
+			input: `
+import cast
+let active a = 0
+let active b = 1
+let combine = fn(x: Number, y: Number) -> Number { return x + y }
+let active total = combine(react a, react b)
+return total
+`,
+		},
+		{
+			name: "Reject reactive call result not declared active",
+			input: `
+import cast
+let active counter = 0
+let reactFn = fn(c: Number) -> String { return cast.to(c, "") }
+let result = reactFn(react counter)
+return result
+`,
+			expectedErrors: []string{
+				"semantic error: a variable bound to a reactive call result must be declared 'active' (e.g. 'let active result = ...')",
+			},
+		},
+		{
+			name: "Reject react on a non-active variable",
+			input: `
+import cast
+let notActive = 0
+let reactFn = fn(c: Number) -> String { return cast.to(c, "") }
+let active result = reactFn(react notActive)
+return result
+`,
+			expectedErrors: []string{
+				"semantic error: 'react' requires an active variable, got 'notActive' of type Number",
+			},
+		},
+		{
+			name: "Reject react on an undeclared variable",
+			input: `
+let reactFn = fn(c: Number) -> Number { return c }
+let active result = reactFn(react missing)
+return result
+`,
+			expectedErrors: []string{
+				"semantic error: undeclared variable 'missing'. Use 'let' to declare it.",
+			},
+		},
+		{
+			name: "Reject move + react on the same argument (move first)",
+			input: `
+import cast
+let active counter = 0
+let reactFn = fn(c: Number) -> String { return cast.to(c, "") }
+let active result = reactFn(move react counter)
+return result
+`,
+			expectedErrors: []string{
+				"semantic error: 'move' and 'react' cannot be combined on the same argument — react requires re-reading the active variable on future updates, but move consumes it once",
+			},
+		},
+		{
+			name: "Reject react + move on the same argument (react first)",
+			input: `
+import cast
+let active counter = 0
+let reactFn = fn(c: Number) -> String { return cast.to(c, "") }
+let active result = reactFn(react move counter)
+return result
+`,
+			expectedErrors: []string{
+				"semantic error: 'move' and 'react' cannot be combined on the same argument — react requires re-reading the active variable on future updates, but move consumes it once",
+			},
+		},
+		{
+			name: "Reactive call composes with a memoized callee",
+			input: `
+import cast
+let reactFn = memo fn(c: Number) -> String { return cast.to(c, "") }
+let active counter = 0
+let active result = reactFn(react counter)
+return result
+`,
 		},
 	}
 	runTestScenarios(t, tests)

@@ -4,7 +4,7 @@ import "log"
 # Struct to test moving complex nested data
 type State struct {
     items [Number]
-    active Boolean
+    isActive Boolean
 }
 
 # 1. Explicit move with array built-ins (zero-allocation append)
@@ -34,7 +34,7 @@ log.info("Moved pipeline result:", moved_result)
 # 4. Moving struct properties
 let state = State {
     items: [1, 2],
-    active: true
+    isActive: true
 }
 
 # We can explicitly move just a property out of a struct to avoid copying the nested data
@@ -42,7 +42,7 @@ let new_items = array.push(move state.items, 3)
 
 let new_state = State {
     items: new_items,
-    active: false
+    isActive: false
 }
 
-log.info("New state active:", new_state.active)
+log.info("New state active:", new_state.isActive)

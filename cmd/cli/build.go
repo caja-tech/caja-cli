@@ -46,7 +46,45 @@ func resolveOutputBin(filePath, targetOS, targetArch, hostOS, hostArch string) (
 	if resolvedOS == "windows" && !strings.HasSuffix(outBin, ".exe") {
 		outBin += ".exe"
 	}
+	if resolvedOS == "js" && !strings.HasSuffix(outBin, ".wasm") {
+		outBin += ".wasm"
+	}
 	return outBin, resolvedOS, resolvedArch, crossCompiling, nil
+}
+
+// transpileCajaFile validates that filePath is a .caja script, reads and
+// transpiles it (script.ParseWithDir -> compiler.Transpile), then runs
+// go/format.Source over the result, falling back to the unformatted source
+// if formatting fails. Shared by NewBuildCmd and buildBrowserPageServer
+// (NewServeCmd's helper), which both need exactly this "get me the Go source
+// for this script" step before deciding what to do with it (write a binary
+// vs. also serve it).
+func transpileCajaFile(filePath string) (goCode string, err error) {
+	ext := filepath.Ext(filePath)
+	if ext != file.EXTENSION {
+		return "", fmt.Errorf("invalid file type: expected a %s file, but got '%s'", file.EXTENSION, ext)
+	}
+
+	sourceCode, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file '%s': %w", filePath, err)
+	}
+
+	baseDir := filepath.Dir(filePath)
+	program, _, a, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
+	if err != nil {
+		return "", err
+	}
+
+	goCode, err = compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		return "", fmt.Errorf("transpilation failed: %w", err)
+	}
+
+	if formatted, ferr := format.Source([]byte(goCode)); ferr == nil {
+		goCode = string(formatted)
+	}
+	return goCode, nil
 }
 
 // NewBuildCmd creates and returns the 'build' command, responsible for compiling a .caja script.
@@ -65,37 +103,10 @@ func NewBuildCmd() (*cobra.Command, error) {
 				return fmt.Errorf("the --file flag is required to compile a script")
 			}
 
-			ext := filepath.Ext(filePath)
-			if ext != file.EXTENSION {
-				return fmt.Errorf("invalid file type: expected a %s file, but got '%s'", file.EXTENSION, ext)
-			}
-
-			sourceCode, err := os.ReadFile(filePath)
-			if err != nil {
-				return fmt.Errorf("failed to read file '%s': %w", filePath, err)
-			}
-
-			baseDir := filepath.Dir(filePath)
-
-			// Parse the script to get the AST
-			program, _, a, err := script.ParseWithDir(string(sourceCode), baseDir, filePath)
+			goCode, err := transpileCajaFile(filePath)
 			if err != nil {
 				return err
 			}
-
-			// Transpile to Go source
-			goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
-			if err != nil {
-				return fmt.Errorf("transpilation failed: %w", err)
-			}
-			
-			// Format the generated Go code
-			formattedCode, err := format.Source([]byte(goCode))
-			if err != nil {
-				// Fall back to unformatted code if formatting fails
-				formattedCode = []byte(goCode)
-			}
-			goCode = string(formattedCode)
 
 			targetOS, err := cmd.Flags().GetString("os")
 			if err != nil {
@@ -104,6 +115,13 @@ func NewBuildCmd() (*cobra.Command, error) {
 			targetArch, err := cmd.Flags().GetString("arch")
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'arch' flag: %w", err)
+			}
+			if targetOS == "" && targetArch == "" && compiler.UsesBrowserModule(goCode) {
+				// The browser module compiles to syscall/js, which only builds
+				// under GOOS=js/GOARCH=wasm — default to that target instead of
+				// letting `go build` fail with a raw "build constraints exclude
+				// all Go files" error on the host platform.
+				targetOS, targetArch = "js", "wasm"
 			}
 			outBin, resolvedOS, resolvedArch, crossCompiling, err := resolveOutputBin(filePath, targetOS, targetArch, runtime.GOOS, runtime.GOARCH)
 			if err != nil {
@@ -129,6 +147,14 @@ func NewBuildCmd() (*cobra.Command, error) {
 			// Compile the Go code
 			if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: targetOS, GOARCH: targetArch}); err != nil {
 				return err
+			}
+
+			if resolvedOS == "js" {
+				htmlPath, err := compiler.WriteBrowserHarness(outBin)
+				if err != nil {
+					return fmt.Errorf("failed to write browser test harness: %w", err)
+				}
+				fmt.Printf("Wrote browser test harness at %s (serve %s over HTTP and open %s in a browser)\n", htmlPath, filepath.Dir(htmlPath), filepath.Base(htmlPath))
 			}
 
 			fmt.Printf("Successfully built %s\n", outBin)

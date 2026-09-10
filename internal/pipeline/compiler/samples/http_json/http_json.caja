@@ -4,7 +4,7 @@ import "cast" as cast
 type UserInfo struct {
     name String
     age Number
-    active Boolean
+    isActive Boolean
 }
 
 let router = http.newRouter()
@@ -13,8 +13,8 @@ router.post("/users", fn(req: http.Request) -> http.Response {
     let parsed = http.parseJSON(req.body)
     let name = cast.to(parsed["name"], "unknown")
     let age = cast.to(parsed["age"], 0)
-    let active = cast.to(parsed["active"], false)
-    return http.json(200, UserInfo{ name: name, age: age, active: active })
+    let isActive = cast.to(parsed["active"], false)
+    return http.json(200, UserInfo{ name: name, age: age, isActive: isActive })
 })
 
 router.post("/nested", fn(req: http.Request) -> http.Response {
