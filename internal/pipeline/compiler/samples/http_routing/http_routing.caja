@@ -1,0 +1,23 @@
+import "http" as http
+
+let router = http.newRouter()
+
+router.get("/tags", fn(req: http.Request) -> http.Response {
+    let tags = req.queryAll["tag"]
+    return http.json(200, { "tags": tags })
+})
+
+router.get("/header-values", fn(req: http.Request) -> http.Response {
+    let values = req.headersAll["X-Tag"]
+    return http.json(200, { "values": values })
+})
+
+router.get("/files/exact", fn(req: http.Request) -> http.Response {
+    return http.ok("exact match")
+})
+
+router.get("/files/:path*", fn(req: http.Request) -> http.Response {
+    return http.ok(req.pathParams["path"])
+})
+
+http.listen(router, 8097)

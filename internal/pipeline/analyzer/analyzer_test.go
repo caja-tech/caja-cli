@@ -1598,6 +1598,261 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 	runTestScenarios(t, tests)
 }
 
+func TestSemanticAnalysisHTTP(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "newRouter, route registration, use, and listen all type-check",
+			input: `
+import http
+let router = http.newRouter()
+router.get("/hello", fn(req: http.Request) -> http.Response {
+	return http.ok("hi")
+})
+router.use(fn(next: http.Handler) -> http.Handler {
+	return next
+})
+http.listen(router, 8080)
+`,
+		},
+		{
+			name: "router.static type-checks",
+			input: `
+import http
+let router = http.newRouter()
+router.static("/static/", "public")
+`,
+		},
+		{
+			name: "response constructors and json all type-check",
+			input: `
+import http
+let a = http.ok("hi")
+let b = http.text(201, "created")
+let c = http.notFound("nope")
+let d = http.badRequest("bad")
+let e = http.serverError("oops")
+let f = http.json(200, { "x": 1 })
+`,
+		},
+		{
+			name: "request struct fields resolve to their declared types",
+			input: `
+import http
+import map
+let handler = fn(req: http.Request) -> http.Response {
+	let m = req.method
+	let p = req.path
+	let id = req.pathParams["id"]
+	let q = req.query["q"]
+	if (map.containsKey(req.headers, "Authorization")) {
+		return http.ok(req.body)
+	}
+	return http.badRequest("missing header")
+}
+`,
+		},
+		{
+			name: "middleware composition (fn(Handler) -> Handler) type-checks",
+			input: `
+import http
+let requireAuth = fn(next: http.Handler) -> http.Handler {
+	return fn(req: http.Request) -> http.Response {
+		return next(req)
+	}
+}
+let router = http.newRouter()
+router.get("/admin", requireAuth(fn(req: http.Request) -> http.Response {
+	return http.ok("welcome")
+}))
+`,
+		},
+		{
+			name:           "router.get rejects wrong handler arity",
+			input:          "import http\nlet router = http.newRouter()\nrouter.get(\"/x\", fn(a: http.Request, b: String) -> http.Response { return http.ok(\"y\") })",
+			expectedErrors: []string{"type error"},
+		},
+		{
+			name:           "router.get rejects wrong handler parameter type",
+			input:          "import http\nlet router = http.newRouter()\nrouter.get(\"/x\", fn(req: String) -> http.Response { return http.ok(\"y\") })",
+			expectedErrors: []string{"type error"},
+		},
+		{
+			name:           "router.get rejects wrong argument count",
+			input:          "import http\nlet router = http.newRouter()\nrouter.get(\"/x\")",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name:           "http.listen rejects wrong argument count",
+			input:          "import http\nlet router = http.newRouter()\nhttp.listen(router)",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name: "req.ip resolves to String",
+			input: `
+import http
+let handler = fn(req: http.Request) -> http.Response {
+	let clientIp = req.ip
+	return http.ok(clientIp)
+}
+`,
+		},
+		{
+			name: "req.queryAll and req.headersAll resolve to Map<String, Array<String>>",
+			input: `
+import http
+let handler = fn(req: http.Request) -> http.Response {
+	let tags = req.queryAll["tag"]
+	let first = tags[0]
+	let accept = req.headersAll["Accept"]
+	return http.ok(first)
+}
+`,
+		},
+		{
+			name: "rateLimiter used via router.use type-checks",
+			input: `
+import http
+let router = http.newRouter()
+router.use(http.rateLimiter(10, 5, fn(req: http.Request) -> String {
+	return req.ip
+}))
+`,
+		},
+		{
+			name: "rateLimiter wrapping a single route type-checks",
+			input: `
+import http
+let router = http.newRouter()
+let limited = http.rateLimiter(10, 5, fn(req: http.Request) -> String {
+	return req.ip
+})
+router.get("/x", limited(fn(req: http.Request) -> http.Response {
+	return http.ok("y")
+}))
+`,
+		},
+		{
+			name:           "rateLimiter rejects wrong argument count",
+			input:          "import http\nlet mw = http.rateLimiter(10, 5)",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name:           "rateLimiter rejects wrong keyFunc signature",
+			input:          "import http\nlet mw = http.rateLimiter(10, 5, fn(req: http.Request) -> Number { return 1 })",
+			expectedErrors: []string{"type error"},
+		},
+		{
+			name: "concurrencyLimiter used via router.use type-checks",
+			input: `
+import http
+let router = http.newRouter()
+router.use(http.concurrencyLimiter(5, fn(req: http.Request) -> String {
+	return req.ip
+}))
+`,
+		},
+		{
+			name:           "concurrencyLimiter rejects wrong argument count",
+			input:          "import http\nlet mw = http.concurrencyLimiter(5)",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name:           "concurrencyLimiter rejects wrong keyFunc signature",
+			input:          "import http\nlet mw = http.concurrencyLimiter(5, fn(req: http.Request) -> Number { return 1 })",
+			expectedErrors: []string{"type error"},
+		},
+		{
+			name: "distributedRateLimiter used via router.use type-checks",
+			input: `
+import http
+let router = http.newRouter()
+router.use(http.distributedRateLimiter(100, 60, fn(req: http.Request) -> String {
+	return req.ip
+}))
+`,
+		},
+		{
+			name: "distributedRateLimiter wrapping a single route type-checks",
+			input: `
+import http
+let router = http.newRouter()
+let limited = http.distributedRateLimiter(100, 60, fn(req: http.Request) -> String {
+	return req.ip
+})
+router.get("/x", limited(fn(req: http.Request) -> http.Response {
+	return http.ok("y")
+}))
+`,
+		},
+		{
+			name:           "distributedRateLimiter rejects wrong argument count",
+			input:          "import http\nlet mw = http.distributedRateLimiter(100, 60)",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			name:           "distributedRateLimiter rejects wrong keyFunc signature",
+			input:          "import http\nlet mw = http.distributedRateLimiter(100, 60, fn(req: http.Request) -> Number { return 1 })",
+			expectedErrors: []string{"type error"},
+		},
+		{
+			name: "parseJSON result can be indexed and cast",
+			input: `
+import http
+import cast
+let handler = fn(req: http.Request) -> http.Response {
+	let parsed = http.parseJSON(req.body)
+	let name = cast.to(parsed["name"], "unknown")
+	return http.json(200, { "name": name })
+}
+`,
+		},
+		{
+			name:           "parseJSON rejects wrong argument count",
+			input:          "import http\nlet parsed = http.parseJSON()",
+			expectedErrors: []string{"arity error"},
+		},
+		{
+			// http.Response/http.Request are ordinary module-exported struct
+			// types (getHTTPStandardModule's second return value), so a
+			// module-qualified struct literal ("http.Response{...}") must
+			// resolve and type-check exactly like any other dotted struct
+			// literal (find.go's dotted-name lookup through
+			// ModuleSymbol.GetType) -- not just be reachable indirectly
+			// through http.ok/text/json/newRouter.
+			name: "http.Response and http.Request struct literals type-check directly",
+			input: `
+import http
+let handler = fn(req: http.Request) -> http.Response {
+	let synthetic = http.Request{
+		method: "GET",
+		path: "/x",
+		pathParams: {"id": "1"},
+		query: {},
+		headers: {},
+		body: "",
+		ip: "127.0.0.1",
+		queryAll: {},
+		headersAll: {},
+	}
+	return http.Response{status: 200, headers: {"X-Custom": "yes"}, body: synthetic.method}
+}
+`,
+		},
+		{
+			name:           "http.Response struct literal rejects wrong field type",
+			input:          "import http\nlet r = http.Response{status: \"200\", headers: {}, body: \"x\"}",
+			expectedErrors: []string{"type error"},
+		},
+		{
+			name:           "http.Response struct literal rejects missing field",
+			input:          "import http\nlet r = http.Response{status: 200, body: \"x\"}",
+			expectedErrors: []string{"missing required field"},
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
 func TestSemanticLogicalOperators(t *testing.T) {
 	tests := []testScenario{
 		{

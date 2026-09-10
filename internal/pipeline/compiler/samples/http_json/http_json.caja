@@ -1,0 +1,34 @@
+import "http" as http
+import "cast" as cast
+
+type UserInfo struct {
+    name String
+    age Number
+    active Boolean
+}
+
+let router = http.newRouter()
+
+router.post("/users", fn(req: http.Request) -> http.Response {
+    let parsed = http.parseJSON(req.body)
+    let name = cast.to(parsed["name"], "unknown")
+    let age = cast.to(parsed["age"], 0)
+    let active = cast.to(parsed["active"], false)
+    return http.json(200, UserInfo{ name: name, age: age, active: active })
+})
+
+router.post("/nested", fn(req: http.Request) -> http.Response {
+    let parsed = http.parseJSON(req.body)
+    let address = parsed["address"]
+    let city = cast.to(address["city"], "unknown")
+    return http.json(200, { "city": city })
+})
+
+router.post("/tags", fn(req: http.Request) -> http.Response {
+    let parsed = http.parseJSON(req.body)
+    let tags = parsed["tags"]
+    let first = cast.to(tags[0], "none")
+    return http.json(200, { "first": first })
+})
+
+http.listen(router, 8095)
