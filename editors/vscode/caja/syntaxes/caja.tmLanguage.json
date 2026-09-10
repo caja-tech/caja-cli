@@ -74,7 +74,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(import|from|as|return|if|else|constraints|with|move|async|await|unwrap)\\b",
+          "match": "\\b(import|from|as|return|if|else|constraints|with|move|react|async|await|unwrap)\\b",
           "name": "keyword.control.caja"
         },
         {
@@ -86,7 +86,7 @@
           "name": "storage.type.caja"
         },
         {
-          "match": "\\b(private|memo)\\b",
+          "match": "\\b(private|memo|active)\\b",
           "name": "storage.modifier.caja"
         }
       ]
