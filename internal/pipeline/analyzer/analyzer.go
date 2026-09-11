@@ -1853,12 +1853,36 @@ func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *sy
 	filled := make([]bool, arity)
 	ok := true
 
-	if len(n.Arguments) > arity {
-		a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, len(n.Arguments)))
+	// Trailing-block/lambda sugar appends its argument positionally but means
+	// "bind this to the LAST parameter". With named arguments in play the
+	// remaining positional slots no longer run contiguously from 0, so the
+	// trailing argument has to be lifted out and placed explicitly -- left in
+	// the positional run it would land in slot 0 instead.
+	positional := n.Arguments
+	var trailing ast.Expression
+	if n.HasTrailingArgument && len(positional) > 0 {
+		trailing = positional[len(positional)-1]
+		positional = positional[:len(positional)-1]
+	}
+
+	if trailing != nil && arity > 0 {
+		resolved[arity-1] = trailing
+		filled[arity-1] = true
+	}
+
+	if len(positional) > arity {
+		a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, len(positional)))
 		ok = false
 	}
-	for i, arg := range n.Arguments {
+	for i, arg := range positional {
 		if i < arity {
+			if filled[i] {
+				// Only reachable when the trailing argument already claimed
+				// this slot, i.e. the call fills the last parameter twice.
+				a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, len(positional)+1))
+				ok = false
+				continue
+			}
 			resolved[i] = arg
 			filled[i] = true
 		}

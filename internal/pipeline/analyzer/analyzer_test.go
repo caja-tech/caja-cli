@@ -4325,6 +4325,58 @@ map.containsKey(map: m, key: "x")
 			},
 		},
 		{
+			// Trailing-block sugar appends its array positionally but means
+			// "last parameter". With named arguments filling the earlier
+			// slots it must still land last, not in slot 0.
+			name: "Trailing block combines with a named argument",
+			input: `
+let section = fn(title: String, items: [Number]) -> Number { return items[0] }
+let r = section(title: "x") {
+	10
+	20
+}
+`,
+		},
+		{
+			name: "Trailing lambda combines with a named argument",
+			input: `
+let apply = fn(factor: Number, f: fn(Number) -> Number) -> Number { return f(factor) }
+let r = apply(factor: 5) n => n * 2
+`,
+		},
+		{
+			name: "Trailing block conflicting with a named argument is rejected",
+			input: `
+let section = fn(title: String, items: [Number]) -> Number { return items[0] }
+let r = section(title: "x", items: [9]) {
+	10
+}
+`,
+			expectedErrors: []string{
+				"type error: parameter 'items' supplied both positionally and by name",
+			},
+		},
+		{
+			// The piped value occupies the first parameter, so naming it too
+			// is a genuine conflict.
+			name: "Piped value plus a named argument for the same parameter is rejected",
+			input: `
+let add3 = fn(a: Number, b: Number, c: Number) -> Number { return a + b + c }
+let r = 1 |> add3(a: 10, c: 3)
+`,
+			expectedErrors: []string{
+				"type error: parameter 'a' supplied both positionally and by name",
+				"arity error: missing argument for parameter 'b'",
+			},
+		},
+		{
+			name: "Piped value fills the first parameter and named arguments the rest",
+			input: `
+let add3 = fn(a: Number, b: Number, c: Number) -> Number { return a + b + c }
+let r = 1 |> add3(c: 3, b: 2)
+`,
+		},
+		{
 			name: "Named argument on a generic function still infers correctly",
 			input: `
 let identity = fn<T>(value: T) -> T { return value }

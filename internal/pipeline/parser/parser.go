@@ -614,6 +614,7 @@ func (p *Parser) parseTrailingBlockCall(call *ast.CallExpression) ast.Expression
 		Token:    openBrace,
 		Elements: elements,
 	})
+	call.HasTrailingArgument = true
 	call.RParenToken = p.currToken // extend the call's span to the block's closing '}'
 
 	return call
@@ -1511,6 +1512,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 				fn.Parameters = []*ast.Parameter{{Token: paramTok, Name: paramTok.Literal, Type: ""}}
 				fn.Body = p.parseArrowFunctionBody()
 				call.Arguments = append(call.Arguments, fn)
+				call.HasTrailingArgument = true
 				call.RParenToken = p.currToken // extend the call's span, mirroring parseTrailingBlockCall
 			}
 		}

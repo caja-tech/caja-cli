@@ -697,7 +697,14 @@ type CallExpression struct {
 	TypeArguments  []string    // Generic type arguments e.g., f::<Number>()
 	Arguments      []Expression
 	NamedArguments []*NamedArgument
-	RParenToken    lexer.Token
+	// HasTrailingArgument marks a call whose final positional argument came
+	// from trailing-block `f(x) { ... }` or trailing-lambda `f(x) n => ...`
+	// sugar. Both mean "bind this to the LAST parameter", which only matters
+	// once named arguments are in play: without them the trailing argument is
+	// already last, but with them the remaining positional slots no longer
+	// line up left-to-right and the distinction becomes load-bearing.
+	HasTrailingArgument bool
+	RParenToken         lexer.Token
 }
 
 func (ce *CallExpression) expressionNode()      {}
