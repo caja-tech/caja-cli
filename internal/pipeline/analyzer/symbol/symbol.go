@@ -114,12 +114,15 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 
 	case "http":
 		return getHTTPStandardModule(moduleName)
-	case "page":
+	case "doc":
 		return map[string]Symbol{
-			// write is the whole of the page module for now: writes content
-			// to path (creating parent directories as needed), used by
-			// static-page projects to produce their dist/ output when the
-			// compiled binary runs once at `caja build` time.
+			// write is the whole of the doc module for now: writes content
+			// (a document — HTML, CSS, anything textual) to path, creating
+			// parent directories as needed. Used by static-page projects to
+			// produce their dist/ output when the compiled binary runs once
+			// at `caja build` time. The module was renamed from `page` so the
+			// name says what the call does (write a document) and leaves
+			// "page" free to mean an actual page of a site.
 			"write": NewBuiltinSymbol(moduleName, 2, "write(path: String, content: String) -> Nothing", "path: String", "content: String"),
 		}, nil, true
 

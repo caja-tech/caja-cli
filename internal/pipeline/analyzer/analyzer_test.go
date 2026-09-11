@@ -2018,23 +2018,30 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: first argument to 'localStorageGet' must be a non-nullable String, got String? — use cast.to(value, fallback) to unwrap it first"},
 		},
 		{
-			name:  "page.write() works with two String arguments",
-			input: "import page\nreturn page.write(\"dist/index.html\", \"<h1>hi</h1>\")",
+			name:  "doc.write() works with two String arguments",
+			input: "import doc\nreturn doc.write(\"dist/index.html\", \"<h1>hi</h1>\")",
 		},
 		{
-			name:           "page.write() rejects a non-String first argument",
-			input:          "import page\nreturn page.write(42, \"<h1>hi</h1>\")",
+			name:           "doc.write() rejects a non-String first argument",
+			input:          "import doc\nreturn doc.write(42, \"<h1>hi</h1>\")",
 			expectedErrors: []string{"type error: first argument to 'write' must be String, got Number"},
 		},
 		{
-			name:           "page.write() rejects a non-String second argument",
-			input:          "import page\nreturn page.write(\"dist/index.html\", 42)",
+			name:           "doc.write() rejects a non-String second argument",
+			input:          "import doc\nreturn doc.write(\"dist/index.html\", 42)",
 			expectedErrors: []string{"type error: second argument to 'write' must be String, got Number"},
 		},
 		{
-			name:           "page.write() rejects missing arguments",
-			input:          "import page\nreturn page.write(\"dist/index.html\")",
+			name:           "doc.write() rejects missing arguments",
+			input:          "import doc\nreturn doc.write(\"dist/index.html\")",
 			expectedErrors: []string{"arity error: expected 2 arguments for 'write', got 1"},
+		},
+		{
+			// The module was renamed from `page` with no alias kept — the old
+			// name must fail to resolve, not silently keep working.
+			name:           "the old page module name no longer resolves",
+			input:          "import page\nreturn 1",
+			expectedErrors: []string{"failed to import 'page'"},
 		},
 		{
 			name:  "browser.localStorageSet() works with two String arguments",

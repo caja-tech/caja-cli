@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - Syntax highlighting for the new `active` (storage modifier) and `react` (control keyword) reactive-programming keywords.
+- **Code folding for `#region`/`#endregion`**: wrap a block in C#-style `#region` and `#endregion` comments (a name after `#region` is optional) to make it collapsible. Provided by the Caja language server's new `textDocument/foldingRange` support, so it requires the same CLI version as the other LSP features below.
 
 ## [0.1.2] - 2026-08-29
 ### Added

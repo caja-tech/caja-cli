@@ -1,11 +1,52 @@
 # {{.Name}}
 
-A Caja **static-page** project — `main.caja` runs once at build time and writes
-plain HTML/CSS into `dist/` via the `page` builtin module, the same way a
-static site generator's build step works. The page itself is built as a
-`@caja/siriguela` View tree (`renderToString()` turns it into the HTML
-`page.write` writes) rather than a hand-written HTML string — see
-`main.caja` for the pattern, and https://www.cajalang.com for more.
+A Caja **static-page** project — a small multi-page site. `main.caja` runs
+once at build time and writes plain HTML/CSS into `dist/` via the `doc`
+builtin module, the same way a static site generator's build step works.
+Every page is built as a `@caja/siriguela` View tree rather than a
+hand-written HTML string; see https://www.cajalang.com for more.
+
+## Layout
+
+```
+main.caja        the site builder: lists the pages, wraps each in the shared
+                 layout and navigation, writes dist/*.html and dist/style.css
+pages/           one .caja file per page, each exporting `page`
+  index.caja     the home page (a reference for every siriguela component)
+  about.caja     a second page, so there is something to navigate to
+assets/          images, documents, anything a page references
+dist/            the generated site — never edit it by hand
+```
+
+**Adding a page:** create `pages/name.caja` exporting
+`let page = ui.definePage("Title", "name.html", content)`, import it in
+`main.caja` (`import "pages/name" as name`) and append `name.page` to the
+`site` list. The navigation, the layout and the writer all pick it up from
+that one list. A page module only *builds* its page; writing files is
+`main.caja`'s job — which is also why `caja run -f pages/name.caja` still
+works for a quick check while `caja run -f main.caja` is refused.
+
+**Assets:** put files in `assets/` and reference them as `assets/<name>` from
+a page (`ui.image("assets/logo.svg", "Logo")`). Every build recreates
+`dist/assets/` from scratch, so a renamed or deleted asset disappears from
+the output too. Generated pages are *not* cleared: if you rename a page,
+delete its old `dist/*.html` yourself (or delete `dist/` entirely).
+
+**Styles:** siriguela emits inline styles. Anything selector-based — a hover
+state, a pseudo-element, a media query, an element or attribute selector —
+is written entirely in Caja at the bottom of `main.caja`: `ui.rule(...)`
+for element/combinator/attribute selectors, `ui.media(...)` for responsive
+rules, and `ui.class(...)` for the common single-class case (collected in
+`siteClasses`; `pages/about.caja` does this for its hero box). `ui.stylesheet`
+joins all three into `dist/style.css`. The home page's "Site" tab documents
+the full API — there is no hand-written CSS string anywhere in this project.
+
+## Dependencies
+
+`@caja/siriguela` must be reachable from a `node_modules/` at or above this
+folder (a static-page project has no `package.json`; `caja init` runs no
+install step for it). Until the package is published, copy or link it into
+`node_modules/@caja/siriguela/`.
 
 ## Development
 
@@ -21,8 +62,8 @@ Builds the project and serves `dist/` over HTTP for local development.
 caja build
 ```
 
-Compiles `main.caja`, runs it once to (re)generate `dist/`, and prints where
-the output landed.
+Compiles `main.caja`, runs it once to (re)generate `dist/`, copies `assets/`
+into `dist/assets/`, and prints where the output landed.
 
 ## Deploying
 

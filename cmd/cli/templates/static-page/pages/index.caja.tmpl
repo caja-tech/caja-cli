@@ -1,0 +1,567 @@
+import "@caja/siriguela" as ui
+
+# The home page: a working reference for siriguela itself, built with
+# nothing but siriguela — every component documented below is also used to
+# render the documentation you are reading. It is an ordinary page module:
+# it exports `page` at the bottom and never writes a file; main.caja wraps
+# it in the site layout and writes it. Edit it freely, or replace it.
+#
+# Two things worth knowing before you start cutting it down:
+#   - Nothing here attaches an event handler. A static-page build has no
+#     JS runtime, so renderToString() drops handlers (and warns at build
+#     time). Every interactive demo below is CSS-only or native HTML.
+#   - The site's stylesheet lives at the bottom of main.caja. siriguela
+#     emits inline styles; anything a style attribute cannot express — a
+#     hover, a checked sibling, a pseudo-element — needs a real selector,
+#     either hand-written there or defined in Caja with class() (see the
+#     Site tab of the reference below).
+#
+# Helpers here are `const fn`s and read only other consts and the ui
+# module — a module-level function may never read a module-level `let`.
+
+# ---------------------------------------------------------------------
+# Small helpers, composed from siriguela primitives like any other
+# component. These are what the page's own layout is built from.
+# ---------------------------------------------------------------------
+
+const docSection = fn(anchor: String, title: String, children: [ui.View]) -> ui.View {
+	let body = ui.column(children) |> ui.gap("16px")
+	let sec = ui.section() {
+		ui.heading(2, title)
+		body
+	}
+	return sec |> ui.elementId(anchor) |> ui.className("doc-section")
+}
+
+# componentDoc is the repeated unit of this page: the function signature,
+# one line of prose, a copy-pasteable sample, and the live result of that
+# sample rendered right underneath it.
+const componentDoc = fn(names: String, summary: String, sample: String, demo: ui.View) -> ui.View {
+	let demoBox = ui.box(demo) |> ui.className("demo")
+	let entry = ui.column() {
+		ui.code(names) |> ui.className("sig")
+		ui.muted(summary)
+		ui.codeBlock(sample)
+		demoBox
+	}
+	return entry |> ui.className("component") |> ui.gap("10px")
+}
+
+const tocLink = fn(anchor: String, text: String) -> ui.View {
+	return ui.listItem("") |> ui.addChild(ui.link("#${anchor}", text))
+}
+
+const paletteRow = fn(name: String, hex: String) -> ui.View {
+	let swatch = ui.el("span") |> ui.className("swatch") |> ui.backgroundColor(hex)
+	return ui.tableRow() {
+		ui.tableCell("") |> ui.addChild(swatch)
+		ui.tableCell("") |> ui.addChild(ui.code(name))
+		ui.tableCell(hex)
+	}
+}
+
+const modifierRow = fn(group: String, names: String) -> ui.View {
+	return ui.tableRow() {
+		ui.tableCell(group)
+		ui.tableCell("") |> ui.addChild(ui.code(names))
+	}
+}
+
+# ---------------------------------------------------------------------
+# 1. What siriguela is
+# ---------------------------------------------------------------------
+
+let intro = docSection("what", "What is siriguela?", [
+	ui.lead("A renderer-agnostic UI component DSL for Caja. Describe an interface once as a View tree; render that same tree to an HTML string at build time, or mount it as live DOM in a browser."),
+	ui.text("A View is plain data: a tag, its attributes, its inline styles, its children. Building one never touches a DOM and never writes a string — only the two terminals do that, by walking the same tree two different ways. That is the entire model. There is no virtual DOM, no reactive runtime, and the library itself emits no JavaScript at all."),
+	ui.text("A component is a function that returns a View. A modifier is a function that takes a View and returns a View. Everything on this page is one or the other, which is why the page can document siriguela using only siriguela."),
+	ui.text("It is named after the fruit: deep plum skin, amber flesh, olive leaf. Those are the default theme's colors.")
+])
+
+# ---------------------------------------------------------------------
+# 2. Install and first page
+# ---------------------------------------------------------------------
+
+let install = docSection("install", "Install", [
+	ui.text("A static-page project needs only this package. Importing it (and never @caja/siriguela-dom) is what keeps caja build producing a plain native binary rather than wasm."),
+	ui.codeBlock("npm install @caja/siriguela"),
+	ui.heading(3, "Two ways to import"),
+	ui.text("Qualified, which is what this page uses — every call visibly says where it came from:"),
+	ui.codeBlock("import \"@caja/siriguela\" as ui\n\nlet hello = ui.text(\"Hello\")"),
+	ui.text("Or named, which drops the prefix and reads closer to a dedicated language:"),
+	ui.codeBlock("import { column, text, primaryButton } from \"@caja/siriguela\"\n\nlet hello = text(\"Hello\")"),
+	ui.muted("Named imports bring in values only. If a function signature of yours needs to name the View type, keep a qualified import alongside and write ui.View."),
+	ui.heading(3, "A whole page"),
+	ui.codeBlock("import \"@caja/siriguela\" as ui\nimport doc\n\nlet body = ui.column() {\n\tui.pageHeading(\"Hello\")\n\tui.text(\"Welcome.\")\n}\n\ndoc.write(\"dist/index.html\", ui.htmlDocument(\"Hello\", \"style.css\", [body]))")
+])
+
+# ---------------------------------------------------------------------
+# 3. Core concepts
+# ---------------------------------------------------------------------
+
+let concepts = docSection("concepts", "Core concepts", [
+	ui.heading(3, "Components are just functions"),
+	ui.text("Call one, get a View. Nest them by passing Views as children. Nothing is registered, declared or configured anywhere."),
+	ui.codeBlock("let greeting = ui.column([\n\tui.heading(1, \"Hello\"),\n\tui.text(\"Welcome.\")\n])"),
+
+	ui.heading(3, "Modifiers pipe"),
+	ui.text("Every modifier has the same shape: View in, View out. The pipe operator chains them, so styling reads top to bottom in the order it applies."),
+	ui.codeBlock("let boxed = ui.text(\"Careful\")\n\t|> ui.padding(\"12px 16px\")\n\t|> ui.backgroundColor(\"#FBF3E6\")\n\t|> ui.rounded(\"6px\")"),
+	ui.box(ui.text("Careful") |> ui.padding("12px 16px") |> ui.backgroundColor("#FBF3E6") |> ui.rounded("6px")) |> ui.className("demo"),
+
+	ui.heading(3, "Blocks instead of arrays"),
+	ui.text("Any component whose last parameter is a list of Views accepts a trailing block, so the brackets and commas disappear. The two forms below compile to exactly the same call."),
+	ui.codeBlock("ui.column([ui.text(\"a\"), ui.text(\"b\")])\n\nui.column() {\n\tui.text(\"a\")\n\ttext(\"b\")\n}"),
+	ui.muted("The parentheses before the block are required. Only plain expressions go inside it — no let, no if. Build anything computed as a list first, then pass it."),
+
+	ui.heading(3, "Two terminals"),
+	ui.text("renderToString walks the tree into an HTML string, which is how this page was generated. mount, from the companion @caja/siriguela-dom package, walks the same tree into live DOM nodes and attaches any event handlers. Components never know which one will consume them."),
+	ui.codeBlock("let html = ui.renderToString(view)\n\ndom.mount(view, browser.getElementById(\"app\"))")
+])
+
+# ---------------------------------------------------------------------
+# 4. Component reference, organised with siriguela's own tabs()
+# ---------------------------------------------------------------------
+
+let layoutPanel = ui.column() {
+	componentDoc(
+		"column(children) / row(children)",
+		"Flex containers. Everything else nests inside these two.",
+		"ui.column() {\n\tui.text(\"top\")\n\tui.row() {\n\t\tui.text(\"left\")\n\t\tui.text(\"right\")\n\t}\n}",
+		ui.column([ui.text("top"), ui.row([ui.text("left"), ui.text("right")]) |> ui.gap("12px")])
+	)
+	componentDoc(
+		"box(child)",
+		"A single-child wrapper, for padding or a background without imposing any layout of its own.",
+		"ui.box(ui.text(\"padded\")) |> ui.padding(\"16px\")",
+		ui.box(ui.text("padded")) |> ui.padding("16px") |> ui.backgroundColor("#FBF3E6")
+	)
+	componentDoc(
+		"spacer(size)",
+		"An empty flex item that exists only to take up room inside a row or column.",
+		"ui.row() {\n\tui.text(\"left\")\n\tui.spacer(\"40px\")\n\tui.text(\"right\")\n}",
+		ui.row([ui.text("left"), ui.spacer("40px"), ui.text("right")])
+	)
+	componentDoc(
+		"addChild(view, child) / addChildren(view, children)",
+		"Append to any View after the fact. Every container above is sugar over these.",
+		"ui.el(\"div\")\n\t|> ui.addChild(ui.text(\"one\"))\n\t|> ui.addChildren([ui.text(\"two\"), ui.text(\"three\")])",
+		ui.el("div") |> ui.addChild(ui.text("one")) |> ui.addChildren([ui.text("two"), ui.text("three")])
+	)
+	componentDoc(
+		"section / article / nav / header / footer / mainEl / aside / form",
+		"Unstyled semantic wrappers, each taking a list of children. mainEl is the odd name out because main collides with the generated program entry point.",
+		"ui.header() {\n\tui.heading(1, \"Title\")\n}\nui.mainEl() {\n\tui.text(\"Body copy.\")\n}",
+		ui.column([ui.header([ui.heading(3, "Title")]), ui.mainEl([ui.text("Body copy.")])])
+	)
+	componentDoc(
+		"buttonGroup(children)",
+		"A gapless row of buttons. Round each button's inner corners yourself if you want the seamless look.",
+		"ui.buttonGroup() {\n\tui.button(\"Left\")\n\tui.button(\"Middle\")\n\tui.button(\"Right\")\n}",
+		ui.buttonGroup([ui.button("Left"), ui.button("Middle"), ui.button("Right")])
+	)
+	componentDoc(
+		"scrollArea(maxHeightPx, child)",
+		"A height-capped, scrollable box. Note this is scrolling only — custom scrollbar styling needs pseudo-elements a View cannot carry.",
+		"ui.scrollArea(\"80px\", ui.column() {\n\tui.text(\"one\")\n\tui.text(\"two\")\n\tui.text(\"three\")\n})",
+		ui.scrollArea("80px", ui.column([ui.text("one"), ui.text("two"), ui.text("three"), ui.text("four")]))
+	)
+	componentDoc(
+		"separator()",
+		"A horizontal rule.",
+		"ui.separator()",
+		ui.separator()
+	)
+}
+
+let contentPanel = ui.column() {
+	componentDoc(
+		"text(content) / heading(level, content)",
+		"A paragraph, and h1 through h6 by level number.",
+		"ui.heading(2, \"A heading\")\nui.text(\"A paragraph of copy.\")",
+		ui.column([ui.heading(3, "A heading"), ui.text("A paragraph of copy.")])
+	)
+	componentDoc(
+		"lead(content) / muted(content) / blockquote(content)",
+		"Typography presets: a larger intro line, de-emphasised copy, and a quotation.",
+		"ui.lead(\"The important first line.\")\nui.muted(\"Secondary detail.\")\nui.blockquote(\"Someone said this.\")",
+		ui.column([ui.lead("The important first line."), ui.muted("Secondary detail."), ui.blockquote("Someone said this.")])
+	)
+	componentDoc(
+		"span(content) / link(href, label) / image(src, alt)",
+		"Inline text, an anchor, and an image. Files under assets/ are copied to dist/assets/ on every build, so reference them as assets/<name>.",
+		"ui.span(\"inline\")\nui.link(\"https://www.cajalang.com\", \"Caja\")\nui.image(\"assets/siriguela.svg\", \"The siriguela mark\")",
+		ui.row([ui.span("inline"), ui.link("https://www.cajalang.com", "Caja"), ui.image("assets/siriguela.svg", "The siriguela mark") |> ui.width("40px") |> ui.height("40px")]) |> ui.gap("12px") |> ui.alignItems("center")
+	)
+	componentDoc(
+		"code(content) / codeBlock(content)",
+		"Inline code and a preformatted block. Angle brackets and pipes are escaped for you, so samples display exactly as written.",
+		"ui.code(\"padding(view, value)\")\nui.codeBlock(\"let x = 1\\nlet y = 2\")",
+		ui.column([ui.code("padding(view, value)"), ui.codeBlock("let x = 1\nlet y = 2")])
+	)
+	componentDoc(
+		"kbd(content) / marker(content)",
+		"A keyboard key and a highlighted run of text.",
+		"ui.kbd(\"Ctrl+K\")\nui.marker(\"highlighted\")",
+		ui.row([ui.kbd("Ctrl+K"), ui.marker("highlighted")]) |> ui.gap("12px")
+	)
+	componentDoc(
+		"badge(label) / avatar(src, alt)",
+		"A small pill label and a circular image.",
+		"ui.badge(\"New\")\nui.avatar(\"assets/siriguela.svg\", \"Me\")",
+		ui.row([ui.badge("New") |> ui.className("pill"), ui.badge("Beta") |> ui.className("pill"), ui.avatar("assets/siriguela.svg", "Me") |> ui.width("32px") |> ui.height("32px")]) |> ui.gap("8px") |> ui.alignItems("center")
+	)
+	componentDoc(
+		"unorderedList(items) / orderedList(items) / listItem(content)",
+		"Lists. Wrap each entry in listItem yourself, so an item can be anything, not just text.",
+		"ui.unorderedList() {\n\tui.listItem(\"first\")\n\tui.listItem(\"second\")\n}",
+		ui.unorderedList([ui.listItem("first"), ui.listItem("second")])
+	)
+	componentDoc(
+		"table / tableRow / tableCell / tableHeaderCell",
+		"Tabular data, assembled row by row.",
+		"ui.table() {\n\tui.tableRow() {\n\t\tui.tableHeaderCell(\"Fruit\")\n\t\tui.tableHeaderCell(\"Colour\")\n\t}\n\tui.tableRow() {\n\t\tui.tableCell(\"Siriguela\")\n\t\tui.tableCell(\"Plum\")\n\t}\n}",
+		ui.table([
+			ui.tableRow([ui.tableHeaderCell("Fruit"), ui.tableHeaderCell("Colour")]),
+			ui.tableRow([ui.tableCell("Siriguela"), ui.tableCell("Plum")])
+		])
+	)
+	componentDoc(
+		"card / cardHeader / cardTitle / cardDescription / cardContent / cardFooter",
+		"A themed surface plus composable parts, so a card can be assembled piece by piece.",
+		"ui.card() {\n\tui.cardHeader() {\n\t\tui.cardTitle(\"Plan\")\n\t\tui.cardDescription(\"Everything included.\")\n\t}\n\tui.cardContent() {\n\t\tui.text(\"Body.\")\n\t}\n\tui.cardFooter() {\n\t\tui.primaryButton(\"Choose\")\n\t}\n}",
+		ui.card([
+			ui.cardHeader([ui.cardTitle("Plan"), ui.cardDescription("Everything included.")]),
+			ui.cardContent([ui.text("Body.")]),
+			ui.cardFooter([ui.primaryButton("Choose")])
+		])
+	)
+	componentDoc(
+		"breadcrumb(items) / pagination(items)",
+		"Navigation trails and page links, both a nav wrapping a list.",
+		"ui.breadcrumb() {\n\tui.listItem(\"\") |> ui.addChild(ui.link(\"/\", \"Home\"))\n\tui.listItem(\"Docs\")\n}",
+		ui.column([
+			ui.breadcrumb([ui.listItem("") |> ui.addChild(ui.link("/", "Home")), ui.listItem("Docs")]),
+			ui.pagination([ui.listItem("") |> ui.addChild(ui.link("#", "1")), ui.listItem("") |> ui.addChild(ui.link("#", "2"))])
+		])
+	)
+	componentDoc(
+		"item(children) / empty(children)",
+		"A generic aligned row for list entries, and a centred empty-state block.",
+		"ui.item() {\n\tui.badge(\"1\")\n\tui.text(\"An entry\")\n}\n\nui.empty() {\n\tui.text(\"Nothing here yet.\")\n}",
+		ui.column([
+			ui.item([ui.badge("1") |> ui.className("pill"), ui.text("An entry")]),
+			ui.empty([ui.muted("Nothing here yet.")])
+		])
+	)
+}
+
+let formsPanel = ui.column() {
+	componentDoc(
+		"input(inputType, placeholder) / textField(placeholder) / textArea(placeholder, rows)",
+		"Text-like inputs. input covers text, email, password, number, date, tel, url and search; file, checkbox and radio have their own components.",
+		"ui.input(\"email\", \"you@example.com\")\nui.textField(\"Plain text\")\nui.textArea(\"Longer copy\", \"3\")",
+		ui.column([ui.input("email", "you@example.com"), ui.textArea("Longer copy", "3")])
+	)
+	componentDoc(
+		"label(forId, content) / field(labelText, forId, control, description)",
+		"A label bound to a control by id, and the whole labelled group in one call.",
+		"ui.field(\"Email\", \"email-1\", ui.input(\"email\", \"you@example.com\"), \"We never share it.\")",
+		ui.field("Email", "email-1", ui.input("email", "you@example.com") |> ui.elementId("email-1"), "We never share it.")
+	)
+	componentDoc(
+		"checkbox(checked) / switchInput(checked)",
+		"A checkbox, and the same input marked up as a switch. Both take their state as a plain boolean.",
+		"ui.checkbox(true)\nui.switchInput(true)",
+		ui.row([ui.checkbox(true), ui.switchInput(true)]) |> ui.gap("12px")
+	)
+	componentDoc(
+		"radio(name, value, checked) / radioGroup(name, options)",
+		"Radio inputs sharing a name, and a labelled grouping wrapper around them.",
+		"ui.radioGroup(\"plan\") {\n\tui.radio(\"plan\", \"free\", true)\n\tui.radio(\"plan\", \"pro\", false)\n}",
+		ui.radioGroup("plan", [
+			ui.row([ui.radio("plan", "free", true), ui.span("Free")]) |> ui.gap("6px"),
+			ui.row([ui.radio("plan", "pro", false), ui.span("Pro")]) |> ui.gap("6px")
+		])
+	)
+	componentDoc(
+		"select(options) / option(value, label, selected)",
+		"A native dropdown.",
+		"ui.select() {\n\tui.option(\"br\", \"Brazil\", true)\n\tui.option(\"ca\", \"Canada\", false)\n}",
+		ui.select([ui.option("br", "Brazil", true), ui.option("ca", "Canada", false)])
+	)
+	componentDoc(
+		"combobox(placeholder, datalistId, options)",
+		"A text input with native autocomplete, backed by a datalist. No JavaScript involved.",
+		"ui.combobox(\"Pick a country\", \"countries\") {\n\tui.option(\"br\", \"Brazil\", false)\n\tui.option(\"ca\", \"Canada\", false)\n}",
+		ui.combobox("Pick a country", "countries", [ui.option("br", "Brazil", false), ui.option("ca", "Canada", false)])
+	)
+	componentDoc(
+		"slider(min, max, value) / progress(value, max)",
+		"A range input and a progress bar.",
+		"ui.slider(\"0\", \"100\", \"40\")\nui.progress(\"40\", \"100\")",
+		ui.column([ui.slider("0", "100", "40"), ui.progress("40", "100")])
+	)
+	componentDoc(
+		"inputGroup(children)",
+		"An aligned row for an input plus an adornment such as a prefix or a button.",
+		"ui.inputGroup() {\n\tui.span(\"$\")\n\tui.textField(\"0.00\")\n\tui.button(\"Add\")\n}",
+		ui.inputGroup([ui.span("$"), ui.textField("0.00"), ui.button("Add")])
+	)
+	componentDoc(
+		"toggle(id, label, pressed) / toggleGroup(items)",
+		"A hidden checkbox plus a label you can style as a pressed button. The stylesheet rule input:checked + label does the visual work.",
+		"ui.toggleGroup() {\n\tui.toggle(\"b\", \"Bold\", true)\n\tui.toggle(\"i\", \"Italic\", false)\n}",
+		ui.toggleGroup([ui.toggle("demo-b", "Bold", true), ui.toggle("demo-i", "Italic", false)])
+	)
+	componentDoc(
+		"inputOtp(groupId, length)",
+		"A row of single-character boxes with predictable ids. Markup only — wire auto-advance yourself in a web-app build.",
+		"ui.inputOtp(\"otp\", 4)",
+		ui.inputOtp("otp", 4)
+	)
+}
+
+let interactivePanel = ui.column() {
+	ui.text("Everything in this group works with no JavaScript at all, using native HTML behaviour or a stylesheet rule. That is what makes them usable in a static-page build like this one.")
+	componentDoc(
+		"details(summary, children) / accordion(items)",
+		"Native collapsible sections — the browser handles opening and closing. Give several the same name attribute and they behave as a one-at-a-time accordion.",
+		"ui.accordion() {\n\tui.details(\"First question\") {\n\t\tui.text(\"First answer.\")\n\t} |> ui.attr(\"name\", \"faq\")\n\tui.details(\"Second question\") {\n\t\tui.text(\"Second answer.\")\n\t} |> ui.attr(\"name\", \"faq\")\n}",
+		ui.accordion([
+			ui.details("First question", [ui.text("First answer.")]) |> ui.attr("name", "faq"),
+			ui.details("Second question", [ui.text("Second answer.")]) |> ui.attr("name", "faq")
+		])
+	)
+	componentDoc(
+		"tabs(groupName, items) / tab(id, label, content)",
+		"Radio inputs plus generated sibling-selector rules. The panel you are reading right now is one of these.",
+		"ui.tabs(\"demo\", [\n\tui.tab(\"a\", \"One\", ui.text(\"First panel\")),\n\tui.tab(\"b\", \"Two\", ui.text(\"Second panel\"))\n])",
+		ui.tabs("demo-inner", [
+			ui.tab("a", "One", ui.text("First panel")),
+			ui.tab("b", "Two", ui.text("Second panel"))
+		]) |> ui.className("tabs")
+	)
+	componentDoc(
+		"popover(id, trigger, content)",
+		"The native popover attribute: the browser gives you click-outside-to-dismiss and Escape-to-close for free.",
+		"ui.popover(\"menu\", ui.button(\"Open menu\")) {\n\tui.text(\"Menu contents\")\n}",
+		ui.popover("demo-menu", ui.button("Open menu"), [ui.text("Menu contents")])
+	)
+	componentDoc(
+		"sheet(id, trigger, content)",
+		"The same mechanism styled as a slide-in panel. Non-modal: it does not trap focus or block the page behind it.",
+		"ui.sheet(\"panel\", ui.button(\"Open panel\")) {\n\tui.heading(3, \"Panel\")\n\tui.text(\"Slide-in contents.\")\n}",
+		ui.sheet("demo-panel", ui.button("Open panel"), [ui.heading(3, "Panel"), ui.text("Slide-in contents.")])
+	)
+	componentDoc(
+		"tooltip(content, child)",
+		"Adds a data-tooltip attribute; the shared rule from tooltipStyles() renders it on hover.",
+		"ui.tooltipStyles()\n\nui.tooltip(\"Saves your work\", ui.button(\"Save\"))",
+		ui.tooltip("Saves your work", ui.button("Save"))
+	)
+	componentDoc(
+		"skeleton(width, height) / spinner()",
+		"Loading placeholders. Both animate, so both need their shared keyframes included once.",
+		"ui.skeletonStyles()\nui.spinnerStyles()\n\nui.skeleton(\"180px\", \"14px\")\nui.spinner()",
+		ui.row([ui.skeleton("180px", "14px"), ui.spinner()]) |> ui.gap("16px") |> ui.alignItems("center")
+	)
+	ui.heading(3, "The styles-once rule")
+	ui.text("Three components need a stylesheet rule that never varies between instances: a keyframe block, or a pseudo-element. A View cannot inject a page-wide rule, so each ships a companion function returning that one static style element. Include it once anywhere in the tree; calling it twice is harmless.")
+	ui.codeBlock("ui.column() {\n\tui.tooltipStyles()\n\tui.skeletonStyles()\n\tui.spinnerStyles()\n\n\t# ... the rest of your page\n}")
+}
+
+let themePanel = ui.column() {
+	ui.text("The default theme is a thin layer of opinionated wrappers over the catalog. Nothing requires you to use it, and a custom theme is just another module of wrappers of your own.")
+	ui.heading(3, "Palette")
+	ui.table() {
+		ui.tableRow() {
+			ui.tableHeaderCell("")
+			ui.tableHeaderCell("Constant")
+			ui.tableHeaderCell("Hex")
+		}
+		paletteRow("siriguelaSkin", ui.siriguelaSkin)
+		paletteRow("siriguelaFlesh", ui.siriguelaFlesh)
+		paletteRow("siriguelaLeaf", ui.siriguelaLeaf)
+		paletteRow("siriguelaCream", ui.siriguelaCream)
+		paletteRow("siriguelaInk", ui.siriguelaInk)
+		paletteRow("siriguelaDanger", ui.siriguelaDanger)
+	}
+	componentDoc(
+		"primaryButton(label) / secondaryButton(label)",
+		"Buttons in the theme's plum and cream.",
+		"ui.primaryButton(\"Save\")\nui.secondaryButton(\"Cancel\")",
+		ui.row([ui.primaryButton("Save"), ui.secondaryButton("Cancel")]) |> ui.gap("8px")
+	)
+	componentDoc(
+		"pageHeading(content) / themedLink(href, label)",
+		"A themed h1 and a themed anchor.",
+		"ui.pageHeading(\"Documentation\")\nui.themedLink(\"https://www.cajalang.com\", \"Caja\")",
+		ui.column([ui.heading(3, "Documentation") |> ui.color(ui.siriguelaInk), ui.themedLink("https://www.cajalang.com", "Caja")])
+	)
+	componentDoc(
+		"themedAlert(variant, message) / themedBadge(variant, label)",
+		"Variant-aware components. Variant is a closed enum, so an unknown one is a compile error rather than a silent typo.",
+		"ui.themedAlert(ui.Variant.Success, \"Saved.\")\nui.themedBadge(ui.Variant.Danger, \"Failed\")",
+		ui.column([
+			ui.themedAlert(ui.Variant.Info, "Heads up."),
+			ui.themedAlert(ui.Variant.Success, "Saved."),
+			ui.themedAlert(ui.Variant.Warning, "Check this."),
+			ui.themedAlert(ui.Variant.Danger, "Something broke."),
+			ui.row([
+				ui.themedBadge(ui.Variant.Success, "Active"),
+				ui.themedBadge(ui.Variant.Danger, "Failed")
+			]) |> ui.gap("8px")
+		])
+	)
+	componentDoc(
+		"alert(children)",
+		"The unstyled structural version, if you would rather bring your own colours.",
+		"ui.alert() {\n\tui.text(\"Plain alert.\")\n}",
+		ui.alert([ui.text("Plain alert.")]) |> ui.padding("12px") |> ui.border("1px solid #ddd") |> ui.rounded("6px")
+	)
+	ui.heading(3, "Your own theme")
+	ui.text("A theme is a module that imports siriguela and exports its own wrappers. Note the palette constant is a const, not a let: a function may read an outer const, never an outer let.")
+	ui.codeBlock("import \"@caja/siriguela\" as ui\n\nconst brandPrimary = \"#1D7A85\"\n\nconst brandButton = fn(label: String) -> ui.View {\n\treturn ui.button(label)\n\t\t|> ui.backgroundColor(brandPrimary)\n\t\t|> ui.color(\"#FFFFFF\")\n\t\t|> ui.rounded(\"6px\")\n\t\t|> ui.padding(\"8px 16px\")\n}")
+}
+
+# The Site tab's live class demo. Defined at module level so the tab can
+# both apply it (withClass) and print its generated CSS (classCss).
+let demoCard = ui.class("demo-card", ui.styles()
+		|> ui.padding("16px")
+		|> ui.rounded("10px")
+		|> ui.backgroundColor(ui.siriguelaCream)
+		|> ui.transition("box-shadow 0.2s ease"))
+	|> ui.variant("hover", ui.styles() |> ui.boxShadow("0 8px 24px #7a204833"))
+
+let sitePanel = ui.column() {
+	ui.text("A site is more than one page. You are reading pages/index.caja of {{.Name}}; the About link in the header goes to pages/about.caja. Both are ordinary modules that export a Page, and main.caja is a short loop that wraps each one in the shared layout and writes it. siriguela only builds pages — writing them is the doc module's job, and it stays in main.caja on purpose (a library that wrote files would make every program importing it un-runnable with caja run).")
+	componentDoc(
+		"definePage(title, path, content) / navLinks(pages, currentPath)",
+		"A Page is a title, an output path (also the href other pages use) and a content View. navLinks renders one link per page and marks the current one with aria-current='page' — a stylesheet hook as much as an accessibility one.",
+		"let home = ui.definePage(\"Home\", \"index.html\", homeContent)\nlet about = ui.definePage(\"About\", \"about.html\", aboutContent)\n\nui.navLinks([home, about], \"about.html\")",
+		ui.navLinks([ui.definePage("Home", "index.html", ui.text("")), ui.definePage("About", "about.html", ui.text(""))], "about.html") |> ui.className("site-nav")
+	)
+	componentDoc(
+		"htmlDocument(title, stylesheetHref, body)",
+		"Wraps a body in a complete document — html, head with charset/viewport/title/stylesheet, body — and returns the String, doctype included. body is the last parameter, so a trailing block works.",
+		"ui.htmlDocument(\"Hello\", \"style.css\") {\n\tui.text(\"hi\")\n}",
+		ui.codeBlock(ui.htmlDocument("Hello", "style.css", [ui.text("hi")]))
+	)
+	componentDoc(
+		"styles() / class(name, template) / variant(cls, pseudo, template)",
+		"A CSS class defined in Caja. styles() is an empty View that exists only to collect modifiers; class() lifts what they wrote into a Class; variant() adds a pseudo-state rule. Hover the box below — its hover shadow is a Caja-defined variant, something no inline style could express.",
+		"let demoCard = ui.class(\"demo-card\", ui.styles()\n\t\t|> ui.padding(\"16px\")\n\t\t|> ui.rounded(\"10px\")\n\t\t|> ui.backgroundColor(ui.siriguelaCream))\n\t|> ui.variant(\"hover\", ui.styles() |> ui.boxShadow(\"0 8px 24px #7a204833\"))",
+		ui.column([ui.classStylesheet([demoCard]), ui.box(ui.text("Hover me")) |> ui.withClass(demoCard)])
+	)
+	componentDoc(
+		"withClass(view, cls) / withClasses(view, classes) / classCss(classes) / classStylesheet(classes)",
+		"Apply a Class to a View (withClasses combines several into one class attribute), and emit the rules — as a String for a .css file written with doc.write, or as a style element to drop straight into a page.",
+		"ui.box(content) |> ui.withClasses([demoCard, other])\n\ndoc.write(\"dist/style.css\", ui.classCss([demoCard, other]))\n\nui.classStylesheet([demoCard])",
+		ui.codeBlock(ui.classCss([demoCard]))
+	)
+	componentDoc(
+		"rule(selector, template) / media(query, rules) / stylesheet(rules, classes, queries)",
+		"A Class only covers one class name plus its pseudo-states. Real stylesheets also need element selectors, comma-grouped selectors, descendant/child/sibling combinators, attribute selectors and media queries — none of which have a fixed set of properties to hang a modifier chain off of. A Rule keeps the type-checked half (declarations, via the same modifier chain) and takes the selector as plain, unchecked text, same as a selector in any CSS-in-language library. stylesheet renders rules, then classes, then media queries into one String, in the cascade order a hand-written stylesheet would use — this project's main.caja calls it once to build the whole of dist/style.css.",
+		"let rules: [ui.Rule] = [\n\tui.rule(\"h1, h2, h3\", ui.styles() |> ui.lineHeight(\"1.25\")),\n\tui.rule(\".site-nav a[aria-current=page]\", ui.styles() |> ui.color(\"#7A2048\"))\n]\nlet queries: [ui.MediaQuery] = [\n\tui.media(\"(max-width: 640px)\", [ui.rule(\".page\", ui.styles() |> ui.gap(\"28px\"))])\n]\n\ndoc.write(\"dist/style.css\", ui.stylesheet(rules, [demoCard], queries))",
+		ui.codeBlock(ui.rulesCss([ui.rule("h1, h2, h3", ui.styles() |> ui.lineHeight("1.25")), ui.rule(".site-nav a[aria-current=page]", ui.styles() |> ui.color("#7A2048"))]))
+	)
+	ui.heading(3, "How main.caja assembles the site")
+	ui.text("The whole site builder is a page list, a layout function and a recursive writer. Add a page module, import it, add it to the list — that is the entire workflow.")
+	ui.codeBlock("import \"pages/index\" as home\nimport \"pages/about\" as about\n\nlet site: [ui.Page] = [home.page, about.page]\n\nconst writeSite = fn(remaining: [ui.Page], all: [ui.Page]) -> Nothing {\n\tif (array.len(remaining) == 0) {\n\t\treturn\n\t}\n\tlet current = array.head(remaining)\n\tdoc.write(\"dist/\${current.path}\", ui.htmlDocument(current.title, \"style.css\", layout(current, all)))\n\treturn writeSite(array.tail(remaining), all)\n}\n\nwriteSite(site, site)")
+}
+
+let catalog = docSection("catalog", "Component reference", [
+	ui.text("Every component siriguela ships, grouped by what it is for. Each entry shows its signature, a sample, and the live result of that sample."),
+	ui.tabs("catalog", [
+		ui.tab("layout", "Layout", layoutPanel),
+		ui.tab("content", "Content", contentPanel),
+		ui.tab("forms", "Forms", formsPanel),
+		ui.tab("interactive", "Interactive", interactivePanel),
+		ui.tab("theme", "Theme", themePanel),
+		ui.tab("site", "Site", sitePanel)
+	]) |> ui.className("tabs")
+])
+
+# ---------------------------------------------------------------------
+# 5. Modifier reference
+# ---------------------------------------------------------------------
+
+let modifiers = docSection("modifiers", "Modifiers", [
+	ui.text("Every modifier takes a View and a string value and returns the View with one more inline style. They are chained with the pipe operator and can be applied to anything, including components you write yourself."),
+	ui.codeBlock("ui.text(\"Hello\")\n\t|> ui.fontSize(\"18px\")\n\t|> ui.color(ui.siriguelaSkin)\n\t|> ui.padding(\"8px\")"),
+	ui.table() {
+		ui.tableRow() {
+			ui.tableHeaderCell("Group")
+			ui.tableHeaderCell("Modifiers")
+		}
+		modifierRow("Spacing", "padding, paddingTop, paddingBottom, margin, marginTop, gap")
+		modifierRow("Sizing", "width, height, minWidth, maxWidth, minHeight, maxHeight, aspectRatio")
+		modifierRow("Text", "color, fontSize, fontFamily, fontWeight, lineHeight, textAlign, letterSpacing, textDecoration, textTransform, whiteSpace, verticalAlign")
+		modifierRow("Flexbox", "display, flexDirection, flexBasis, flexGrow, flexShrink, flexWrap, alignItems, alignSelf, justifyContent")
+		modifierRow("Grid", "gridTemplateColumns, gridTemplateRows")
+		modifierRow("Surface", "background, backgroundColor, border, borderWidth, borderColor, borderStyle, borderTop, borderBottom, borderCollapse, rounded, boxShadow, opacity")
+		modifierRow("Position", "position, top, right, bottom, left, zIndex, overflow, overflowX, boxSizing, pointerEvents")
+		modifierRow("Motion", "transition, animation")
+		modifierRow("Attributes", "className, elementId, withClass, withClasses, rtl, ltr, attr, cursor")
+	},
+	ui.muted("style(view, property, value) is the primitive all of these call. Its property argument is a closed CSSProperty enum, so a misspelled property name is a compile-time error rather than a rule the browser quietly ignores. The same chain builds a Class — see the Site tab."),
+	ui.codeBlock("ui.style(myView, ui.CSSProperty.Padding, \"12px\")")
+])
+
+# ---------------------------------------------------------------------
+# 6. Rendering
+# ---------------------------------------------------------------------
+
+let rendering = docSection("rendering", "Rendering a tree", [
+	ui.heading(3, "Static HTML"),
+	ui.text("renderToString walks the tree into a string, and htmlDocument wraps a body in a full document. Pair either with the doc module to write files, which is exactly what this project's main.caja does for every page."),
+	ui.codeBlock("doc.write(\"dist/index.html\", ui.htmlDocument(\"Title\", \"style.css\", body))"),
+	ui.heading(3, "Live DOM"),
+	ui.text("For a web-app build, install @caja/siriguela-dom and mount the same tree instead. mount attaches handlers registered with onClick and onInput; sync re-renders a subtree after state changes."),
+	ui.codeBlock("import \"@caja/siriguela-dom\" as dom\n\ndom.mount(view, browser.getElementById(\"app\"))"),
+	ui.themedAlert(ui.Variant.Warning, "Handlers only run in a web-app build. In a static page renderToString drops them and warns at build time, which is why nothing on this page is clickable."),
+	ui.heading(3, "Where styles come from"),
+	ui.text("Modifiers produce inline styles, which cover most layout and colour work. Anything selector-based — a hover state, a checked sibling, a pseudo-element, a media query — belongs in a stylesheet, and this project's is written entirely in Caja: rule()/media() for element, combinator and attribute selectors, class()/variant() for the common single-class case, joined by stylesheet() into dist/style.css (main.caja does exactly this; the Site tab above documents the full API)."),
+	ui.codeBlock("let panel = ui.box(body) |> ui.className(\"panel\")\n\ndoc.write(\"dist/style.css\", ui.rulesCss([ui.rule(\".panel:hover\", ui.styles() |> ui.borderColor(\"#7A2048\"))]))")
+])
+
+# ---------------------------------------------------------------------
+# 7. Page assembly — this module only builds a Page; main.caja writes it
+# ---------------------------------------------------------------------
+
+let toc = ui.nav() {
+	ui.unorderedList() {
+		tocLink("what", "What is siriguela?")
+		tocLink("install", "Install")
+		tocLink("concepts", "Core concepts")
+		tocLink("catalog", "Component reference")
+		tocLink("modifiers", "Modifiers")
+		tocLink("rendering", "Rendering a tree")
+	}
+} |> ui.className("toc")
+
+let masthead = ui.header() {
+	ui.pageHeading("siriguela")
+	ui.lead("A UI component DSL for Caja. One View tree, rendered to static HTML or to live DOM.")
+	ui.row() {
+		ui.themedBadge(ui.Variant.Success, "zero JavaScript")
+		ui.themedBadge(ui.Variant.Info, "static or live")
+	}
+} |> ui.className("masthead")
+
+let content = ui.column() {
+	ui.tooltipStyles()
+	ui.skeletonStyles()
+	ui.spinnerStyles()
+	masthead
+	toc
+	intro
+	install
+	concepts
+	catalog
+	modifiers
+	rendering
+} |> ui.gap("48px")
+
+let page = ui.definePage("siriguela", "index.html", content)

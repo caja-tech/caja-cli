@@ -51,13 +51,18 @@ func renderProjectTemplates(projectType project.Type, targetDir string, data tem
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			return nil
-		}
 
 		rel, err := filepath.Rel(srcDir, path)
 		if err != nil {
 			return err
+		}
+
+		// A nested template directory (static-page's pages/ and assets/)
+		// has to exist before the files inside it can be created —
+		// os.Create/os.WriteFile don't make parents. rel is "." for the
+		// root entry, which MkdirAll on targetDir itself tolerates.
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(targetDir, rel), 0755)
 		}
 
 		content, err := templatesFS.ReadFile(path)

@@ -130,10 +130,17 @@ func TestServeCmd_ServesBuiltBrowserPage(t *testing.T) {
 // approach of fetching over a real, pre-reserved port.
 func TestServeCmd_ServesStaticPageDist(t *testing.T) {
 	dir := t.TempDir()
-	source := "import page\npage.write(\"dist/index.html\", \"hello from static-page\")\n"
+	source := "import doc\ndoc.write(\"dist/index.html\", \"hello from static-page\")\n"
 	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
 		t.Fatalf("failed to write main.caja: %v", err)
 	}
+	// Same assets/ fixture as TestBuildCmd_StaticPageAutoDiscovery: serve
+	// must mirror it into dist/assets/ too (it goes through the shared
+	// generateStaticPage), and the mirrored file must then be reachable
+	// over HTTP under the served root.
+	writeProjectFile(t, dir, filepath.Join("assets", "logo.txt"), "logo")
+	writeProjectFile(t, dir, filepath.Join("assets", "img", "pixel.txt"), "pixel")
+	writeProjectFile(t, dir, filepath.Join("dist", "assets", "stale.txt"), "old")
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -165,6 +172,21 @@ func TestServeCmd_ServesStaticPageDist(t *testing.T) {
 	}
 	if string(body) != "hello from static-page" {
 		t.Errorf("response body = %q, want %q", body, "hello from static-page")
+	}
+
+	assertStaticPageAssets(t, dir)
+
+	assetResp, err := http.Get(url + "assets/logo.txt")
+	if err != nil {
+		t.Fatalf("failed to fetch mirrored asset: %v", err)
+	}
+	defer assetResp.Body.Close()
+	assetBody, err := io.ReadAll(assetResp.Body)
+	if err != nil {
+		t.Fatalf("failed to read asset body: %v", err)
+	}
+	if assetResp.StatusCode != http.StatusOK || string(assetBody) != "logo" {
+		t.Errorf("GET assets/logo.txt = %d %q, want 200 %q", assetResp.StatusCode, assetBody, "logo")
 	}
 
 	server.Close()

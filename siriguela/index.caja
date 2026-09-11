@@ -21,7 +21,11 @@ import log
 # existing pattern.
 enum CSSProperty {
 	Padding = "padding",
+	PaddingTop = "padding-top",
+	PaddingBottom = "padding-bottom",
 	Margin = "margin",
+	MarginTop = "margin-top",
+	Background = "background",
 	BackgroundColor = "background-color",
 	Color = "color",
 	FontSize = "font-size",
@@ -56,10 +60,16 @@ enum CSSProperty {
 	BorderWidth = "border-width",
 	BorderColor = "border-color",
 	BorderStyle = "border-style",
+	BorderTop = "border-top",
+	BorderBottom = "border-bottom",
+	BorderCollapse = "border-collapse",
 	BoxShadow = "box-shadow",
 	Opacity = "opacity",
 	Cursor = "cursor",
+	PointerEvents = "pointer-events",
 	Overflow = "overflow",
+	OverflowX = "overflow-x",
+	VerticalAlign = "vertical-align",
 	Position = "position",
 	Top = "top",
 	Right = "right",
@@ -68,6 +78,8 @@ enum CSSProperty {
 	ZIndex = "z-index",
 	Transition = "transition",
 	BoxSizing = "box-sizing",
+	AspectRatio = "aspect-ratio",
+	Animation = "animation",
 }
 
 # Handler defers event attachment to mount() (in the separate
@@ -169,19 +181,17 @@ const style = fn(view: View, property: CSSProperty, value: String) -> View {
 	return v
 }
 
-const addChild = fn(view: View, child: View) -> View {
-	let v = view
-	v.children = array.push(v.children, child)
-	return v
-}
-
 # Modifier chain — every function here has the same shape: take a View,
 # merge one entry into its styles array via style(), return it. Piped
 # together (`view |> padding(...) |> color(...)`), that's the whole
 # customization story. None of these need to know which terminal will
 # eventually walk the tree.
 const padding = fn(view: View, value: String) -> View { return style(view, CSSProperty.Padding, value) }
+const paddingTop = fn(view: View, value: String) -> View { return style(view, CSSProperty.PaddingTop, value) }
+const paddingBottom = fn(view: View, value: String) -> View { return style(view, CSSProperty.PaddingBottom, value) }
 const margin = fn(view: View, value: String) -> View { return style(view, CSSProperty.Margin, value) }
+const marginTop = fn(view: View, value: String) -> View { return style(view, CSSProperty.MarginTop, value) }
+const background = fn(view: View, value: String) -> View { return style(view, CSSProperty.Background, value) }
 const backgroundColor = fn(view: View, value: String) -> View { return style(view, CSSProperty.BackgroundColor, value) }
 const color = fn(view: View, value: String) -> View { return style(view, CSSProperty.Color, value) }
 const fontSize = fn(view: View, value: String) -> View { return style(view, CSSProperty.FontSize, value) }
@@ -216,10 +226,16 @@ const border = fn(view: View, value: String) -> View { return style(view, CSSPro
 const borderWidth = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderWidth, value) }
 const borderColor = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderColor, value) }
 const borderStyle = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderStyle, value) }
+const borderTop = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderTop, value) }
+const borderBottom = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderBottom, value) }
+const borderCollapse = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderCollapse, value) }
 const boxShadow = fn(view: View, value: String) -> View { return style(view, CSSProperty.BoxShadow, value) }
 const opacity = fn(view: View, value: String) -> View { return style(view, CSSProperty.Opacity, value) }
 const cursor = fn(view: View, value: String) -> View { return style(view, CSSProperty.Cursor, value) }
+const pointerEvents = fn(view: View, value: String) -> View { return style(view, CSSProperty.PointerEvents, value) }
 const overflow = fn(view: View, value: String) -> View { return style(view, CSSProperty.Overflow, value) }
+const overflowX = fn(view: View, value: String) -> View { return style(view, CSSProperty.OverflowX, value) }
+const verticalAlign = fn(view: View, value: String) -> View { return style(view, CSSProperty.VerticalAlign, value) }
 const position = fn(view: View, value: String) -> View { return style(view, CSSProperty.Position, value) }
 const top = fn(view: View, value: String) -> View { return style(view, CSSProperty.Top, value) }
 const right = fn(view: View, value: String) -> View { return style(view, CSSProperty.Right, value) }
@@ -228,6 +244,8 @@ const left = fn(view: View, value: String) -> View { return style(view, CSSPrope
 const zIndex = fn(view: View, value: String) -> View { return style(view, CSSProperty.ZIndex, value) }
 const transition = fn(view: View, value: String) -> View { return style(view, CSSProperty.Transition, value) }
 const boxSizing = fn(view: View, value: String) -> View { return style(view, CSSProperty.BoxSizing, value) }
+const aspectRatio = fn(view: View, value: String) -> View { return style(view, CSSProperty.AspectRatio, value) }
+const animation = fn(view: View, value: String) -> View { return style(view, CSSProperty.Animation, value) }
 
 # Component catalog — leaf components (no children). Every entry is sugar
 # over el() (plus, for text content, a direct `v.text = ...` assignment —
@@ -327,6 +345,13 @@ const label = fn(forId: String, content: String) -> View {
 	return v
 }
 
+# addChild inserts a View as a child on another View
+const addChild = fn(view: View, child: View) -> View {
+	let v = view
+	v.children = array.push(v.children, child)
+	return v
+}
+
 # addChildren folds addChild over an entire [View] array — the first real
 # workout for array recursion in this file beyond a straight walk-and-concat
 # (mapConcat). A pure tail call (`return addChildren(...)` directly, nothing
@@ -337,7 +362,9 @@ const addChildren = fn(view: View, children: [View]) -> View {
 	if (array.len(children) == 0) {
 		return view
 	}
-	return addChildren(addChild(view, array.head(children)), array.tail(children))
+	let child = array.head(children)
+	let rest = array.tail(children)
+	return view |> addChild(child) |> addChildren(rest)
 }
 
 # column/row are flex-container wrappers — nesting them builds a tree the
@@ -370,54 +397,54 @@ const spacer = fn(size: String) -> View {
 # flex-direction the way column/row do. Pipe on your own layout modifiers
 # as needed, same as any other View.
 const section = fn(children: [View]) -> View {
-	return addChildren(el("section"), children)
+	return el("section") |> addChildren(children)
 }
 
 const article = fn(children: [View]) -> View {
-	return addChildren(el("article"), children)
+	return el("article") |> addChildren(children)
 }
 
 const nav = fn(children: [View]) -> View {
-	return addChildren(el("nav"), children)
+	return el("nav") |> addChildren(children)
 }
 
 const header = fn(children: [View]) -> View {
-	return addChildren(el("header"), children)
+	return el("header") |> addChildren(children)
 }
 
 const footer = fn(children: [View]) -> View {
-	return addChildren(el("footer"), children)
+	return el("footer") |> addChildren(children)
 }
 
 # Named mainEl, not main — "main" is the transpiler's own generated Go
 # entry point name (every compiled program has exactly one func main());
 # a top-level Caja binding named "main" would collide with it.
 const mainEl = fn(children: [View]) -> View {
-	return addChildren(el("main"), children)
+	return el("main") |> addChildren(children)
 }
 
 const aside = fn(children: [View]) -> View {
-	return addChildren(el("aside"), children)
+	return el("aside") |> addChildren(children)
 }
 
 const form = fn(children: [View]) -> View {
-	return addChildren(el("form"), children)
+	return el("form") |> addChildren(children)
 }
 
 const unorderedList = fn(items: [View]) -> View {
-	return addChildren(el("ul"), items)
+	return el("ul") |> addChildren(items)
 }
 
 const orderedList = fn(items: [View]) -> View {
-	return addChildren(el("ol"), items)
+	return el("ol") |> addChildren(items)
 }
 
 const table = fn(children: [View]) -> View {
-	return addChildren(el("table"), children)
+	return el("table") |> addChildren(children)
 }
 
 const tableRow = fn(children: [View]) -> View {
-	return addChildren(el("tr"), children)
+	return el("tr") |> addChildren(children)
 }
 
 # Stateful form elements. HTML boolean attributes (checked, selected) are
@@ -470,6 +497,509 @@ const select = fn(options: [View]) -> View {
 # shaped things as strings (padding("20px")) rather than a new pattern.
 const textArea = fn(placeholder: String, rows: String) -> View {
 	return el("textarea") |> attr("placeholder", placeholder) |> attr("rows", rows)
+}
+
+# input generalizes textField to any text-LIKE HTML input type (text, email,
+# password, number, date, tel, url, search — anything whose value is a
+# plain string the browser edits in place). Deliberately does NOT accept
+# "file"/"checkbox"/"radio": those need different attrs entirely (no
+# meaningful "value", "checked"/"name" respectively) and already have their
+# own dedicated components (checkbox, radio) — silently accepting them here
+# would produce a View that LOOKS right but is missing required attrs.
+const input = fn(inputType: String, placeholder: String) -> View {
+	let v = el("input") |> attr("type", inputType) |> attr("placeholder", placeholder)
+	v.void = true
+	return v
+}
+
+const avatar = fn(src: String, alt: String) -> View {
+	return image(src, alt) |> rounded("50%")
+}
+
+const badge = fn(badgeLabel: String) -> View {
+	let v = el("span")
+	v.text = badgeLabel
+	return v
+}
+
+const kbd = fn(content: String) -> View {
+	let v = el("kbd")
+	v.text = content
+	return v
+}
+
+const marker = fn(content: String) -> View {
+	let v = el("mark")
+	v.text = content
+	return v
+}
+
+# code/codeBlock — inline <code> and a <pre><code> block. Source text is
+# passed through renderToString's ordinary escapeHTML like any other
+# .text, which is exactly right here and not a limitation: a code sample
+# containing "|>" or "<div>" MUST reach the browser as "|&gt;"/"&lt;div&gt;"
+# to display as the literal characters a reader is meant to copy. Newlines
+# and tabs inside the sample survive verbatim (they're plain characters,
+# untouched by escaping) — a <pre> preserves both, so a multi-line sample
+# written as "line one\n\tline two" renders exactly as typed.
+const code = fn(content: String) -> View {
+	let v = el("code")
+	v.text = content
+	return v
+}
+
+const codeBlock = fn(content: String) -> View {
+	let inner = code(content)
+	return el("pre") |> addChild(inner)
+}
+
+const separator = fn() -> View {
+	let v = el("hr")
+	v.void = true
+	return v
+}
+
+const progress = fn(value: String, max: String) -> View {
+	let v = el("progress") |> attr("value", value) |> attr("max", max)
+	v.void = true
+	return v
+}
+
+const slider = fn(min: String, max: String, value: String) -> View {
+	let v = el("input") |> attr("type", "range") |> attr("min", min) |> attr("max", max) |> attr("value", value)
+	v.void = true
+	return v
+}
+
+# Typography presets — thin styled wrappers over text()/heading(), not a new
+# mechanism. Left unthemed (no siriguela palette colors) here on purpose,
+# same as the rest of this catalog section — see "Theme layer" further down
+# for the palette-aware components.
+const lead = fn(content: String) -> View {
+	return text(content) |> fontSize("1.25rem")
+}
+
+const muted = fn(content: String) -> View {
+	return text(content) |> opacity("0.7")
+}
+
+const blockquote = fn(content: String) -> View {
+	let v = el("blockquote")
+	v.text = content
+	return v
+}
+
+# rtl/ltr/className/elementId are the modifiers in this file wrapping
+# attr() instead of style() — "modifier" here just means "View -> View,
+# pipeable," not "always CSS." Direction, class and id are HTML
+# attributes, not style properties, so there's no CSSProperty member for
+# any of them.
+#
+# className/elementId exist because inline styles (what style() and the
+# whole modifier chain emit) genuinely cannot express everything: a
+# :hover/:checked rule, a pseudo-element, a media query, or a keyframe
+# animation all need a real stylesheet selector to attach to. Hooking one
+# up means putting a class or id on the View — so these two are the bridge
+# between a siriguela tree and whatever stylesheet ships alongside it.
+#
+# elementId is named elementId, not id: a bare `id` is far too common a
+# local variable name, and a local `let id = ...` shadowing a same-named
+# top-level function in this module is exactly the collision that produces
+# a confusing transpile failure rather than a clean shadow (the same
+# reason option()'s second parameter is optionLabel, not label).
+const rtl = fn(view: View) -> View { return attr(view, "dir", "rtl") }
+const ltr = fn(view: View) -> View { return attr(view, "dir", "ltr") }
+const className = fn(view: View, name: String) -> View { return attr(view, "class", name) }
+const elementId = fn(view: View, value: String) -> View { return attr(view, "id", value) }
+
+# alert is a structural, unstyled box — see "Theme layer" below for
+# themedAlert, the palette-aware variant-selecting version.
+const alert = fn(children: [View]) -> View {
+	return el("div") |> attr("role", "alert") |> addChildren(children)
+}
+
+const breadcrumb = fn(items: [View]) -> View {
+	return nav([unorderedList(items)])
+}
+
+# buttonGroup only removes the gap between children and rounds the group's
+# own outer corners — it does NOT round each child's own corners to 0 (that
+# would require reaching into each child's existing styles and overriding
+# them, which style()/attr() have no "remove a prior entry" operation for,
+# only "append another"). Round each button's OWN inner corners to 0
+# yourself if you want the classic seamless look; documented in the README.
+const buttonGroup = fn(children: [View]) -> View {
+	return row(children) |> gap("0")
+}
+
+const cardHeader = fn(children: [View]) -> View {
+	return column(children)
+}
+
+const cardTitle = fn(content: String) -> View {
+	return heading(3, content)
+}
+
+const cardDescription = fn(content: String) -> View {
+	return muted(content)
+}
+
+const cardContent = fn(children: [View]) -> View {
+	return column(children)
+}
+
+const cardFooter = fn(children: [View]) -> View {
+	return row(children)
+}
+
+const empty = fn(children: [View]) -> View {
+	return column(children) |> alignItems("center") |> textAlign("center")
+}
+
+# field pairs a label with an arbitrary control View (a textField, select,
+# checkbox, whatever) and an optional description below it — description
+# passed as "" is simply an empty-but-present muted() paragraph, not a
+# special-cased absence; callers who don't want one can also just not pipe
+# field() at all and use label()/the control directly.
+const field = fn(labelText: String, forId: String, control: View, description: String) -> View {
+	let pieces: [View] = [label(forId, labelText), control, muted(description)]
+	return column(pieces)
+}
+
+const inputGroup = fn(children: [View]) -> View {
+	return row(children) |> alignItems("center") |> gap("8px")
+}
+
+const item = fn(children: [View]) -> View {
+	return row(children) |> alignItems("center") |> gap("8px")
+}
+
+const pagination = fn(items: [View]) -> View {
+	return nav([unorderedList(items)])
+}
+
+const radioGroup = fn(name: String, options: [View]) -> View {
+	return column(options) |> attr("role", "radiogroup") |> attr("aria-label", name)
+}
+
+# scrollArea covers the easy 80% (a scrollable, height-capped box) — not
+# shadcn's actual differentiator, which is cross-browser custom SCROLLBAR
+# styling via ::-webkit-scrollbar pseudo-elements. Pseudo-elements aren't
+# representable as View children at all (nothing to attach them to), and
+# unlike tooltipStyles() below this can't be solved with one shared static
+# rule either, since scrollbar color needs to vary per theme/instance.
+# Ship the scrolling behavior; document the styling gap plainly.
+const scrollArea = fn(maxHeightPx: String, child: View) -> View {
+	return box(child) |> overflow("auto") |> maxHeight(maxHeightPx)
+}
+
+# skeleton()/skeletonStyles() and spinner()/spinnerStyles() below share one
+# convention: a `@keyframes` block is a STATIC, instance-independent rule —
+# nothing about it varies per call — so it's split into its own xStyles()
+# View, meant to be included once anywhere in the page tree (calling it
+# more than once is harmless duplication, not an error; there's no
+# singleton/global registry here, just an ordinary View like any other).
+# Each instance itself (skeleton()/spinner()) only sets the per-instance
+# animation() reference by name — the same "static shared rule +
+# purely-data-driven instance" split tooltipStyles()/tooltip() use below.
+#
+# The generated CSS text below only uses selectors this file's own
+# renderToString can safely emit: no "<", ">", or "&" anywhere. <style> is
+# an HTML raw-text element — a real browser parser never decodes entities
+# inside it, but renderToString's escapeHTML rewrites those three
+# characters unconditionally regardless of tag name, so a child combinator
+# (">") here would come out as literal "&gt;" in the page source and
+# silently fail to parse. mount() has no such restriction (browser.setText
+# is a raw string assign), but every CSS block in this file is written to
+# be safe under BOTH terminals rather than relying on which one happens to
+# be used.
+const skeletonStyles = fn() -> View {
+	let css = "@keyframes siriguela-pulse{0%{opacity:1}50%{opacity:0.4}100%{opacity:1}}"
+	let v = el("style")
+	v.text = css
+	return v
+}
+
+const skeleton = fn(widthPx: String, heightPx: String) -> View {
+	return el("div")
+		|> width(widthPx)
+		|> height(heightPx)
+		|> backgroundColor("#E5E5E5")
+		|> rounded("4px")
+		|> animation("siriguela-pulse 1.5s ease-in-out infinite")
+}
+
+const spinnerStyles = fn() -> View {
+	let css = "@keyframes siriguela-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}"
+	let v = el("style")
+	v.text = css
+	return v
+}
+
+const spinner = fn() -> View {
+	return el("div")
+		|> width("20px")
+		|> height("20px")
+		|> border("2px solid #E5E5E5")
+		|> rounded("50%")
+		|> animation("siriguela-spin 0.6s linear infinite")
+}
+
+# details/accordion — native <details>/<summary>, the browser handles
+# open/close entirely on its own; no JS, no CSS trick, no siriguela
+# mechanism at all beyond el() itself. For true single-open-at-a-time
+# behavior across several details() calls, pipe each through
+# `|> attr("name", "some-group")` — modern browsers give every <details>
+# sharing a "name" accordion behavior natively; attr() is already fully
+# generic, so this needs no dedicated function.
+const details = fn(summary: String, children: [View]) -> View {
+	let summaryEl = el("summary")
+	summaryEl.text = summary
+	return el("details") |> addChild(summaryEl) |> addChildren(children)
+}
+
+const accordion = fn(items: [View]) -> View {
+	return column(items) |> gap("4px")
+}
+
+# popover — native `popover` attribute + `popovertarget`. popovertarget is
+# a pure id lookup, and browser-shown popover content is promoted to the
+# top layer, decoupled from its DOM parent's layout entirely — wrapping
+# trigger+content in one plain div is cosmetically inert, not a
+# correctness compromise. `id` uniqueness across multiple popover() calls
+# on one page is the caller's responsibility (same idiom as radioGroup's
+# `name` or option's grouping — siriguela never auto-generates ids).
+const popover = fn(id: String, trigger: View, content: [View]) -> View {
+	let triggerEl = attr(trigger, "popovertarget", id)
+	let contentEl = el("div") |> attr("id", id) |> attr("popover", "auto") |> addChildren(content)
+	let pair: [View] = [triggerEl, contentEl]
+	return el("div") |> addChildren(pair)
+}
+
+# sheet reuses the exact same `popover` attribute mechanism as popover()
+# above, styled as a fixed-position slide-in panel instead of an anchored
+# menu. Explicitly a WEAK/non-modal version: the native popover API gives
+# click-outside-dismiss and Escape-to-close for free, but does NOT trap
+# Tab-key focus inside the panel or block interaction with the rest of the
+# page the way a true modal dialog would — same honesty bar as combobox()/
+# input("date", ...) elsewhere in this file, which also trade full behavior
+# for a zero-JS implementation.
+const sheet = fn(id: String, trigger: View, content: [View]) -> View {
+	let triggerEl = attr(trigger, "popovertarget", id)
+	let contentEl = el("div")
+		|> attr("id", id)
+		|> attr("popover", "auto")
+		|> addChildren(content)
+		|> position("fixed")
+		|> style(CSSProperty.Right, "0")
+		|> style(CSSProperty.Top, "0")
+		|> height("100vh")
+		|> transition("transform 0.2s ease")
+	let pair: [View] = [triggerEl, contentEl]
+	return el("div") |> addChildren(pair)
+}
+
+const switchInput = fn(checked: Boolean) -> View {
+	return checkbox(checked) |> attr("role", "switch")
+}
+
+# toggle/toggleGroup reuse checkbox()'s existing conditional-checked logic
+# and label()'s existing for/id link directly rather than reimplementing
+# either — the only new thing here is wrapping both in one <span> so the
+# CSS "input:checked + label {...}" adjacent-sibling rule (yours to write,
+# same as tooltipStyles()/skeletonStyles() below — this file ships the
+# markup shape, not a bundled visual style) has guaranteed-adjacent
+# siblings to match.
+const toggle = fn(id: String, toggleLabel: String, pressed: Boolean) -> View {
+	let inputEl = checkbox(pressed) |> attr("id", id)
+	let labelEl = label(id, toggleLabel)
+	let pair: [View] = [inputEl, labelEl]
+	return el("span") |> addChildren(pair)
+}
+
+const toggleGroup = fn(items: [View]) -> View {
+	return row(items) |> gap("4px")
+}
+
+# tooltip()/tooltipStyles() split the same way skeleton()/skeletonStyles()
+# do: tooltip() only sets a per-instance data-tooltip attribute value;
+# tooltipStyles() is one STATIC shared rule (call once anywhere in your
+# page tree, same as skeletonStyles()/spinnerStyles() — duplicate calls are
+# harmless). The rule itself needs zero per-instance interpolation because
+# CSS's own content:attr(data-tooltip) function reads the attribute
+# directly at render time — no way for siriguela to accidentally emit a
+# stale or mismatched value here.
+const tooltipStyles = fn() -> View {
+	let css = "[data-tooltip]{position:relative}[data-tooltip]:hover::before{content:attr(data-tooltip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);white-space:nowrap;padding:4px 8px;border-radius:4px;background:#000;color:#fff;font-size:12px}"
+	let v = el("style")
+	v.text = css
+	return v
+}
+
+const tooltip = fn(content: String, child: View) -> View {
+	return attr(child, "data-tooltip", content)
+}
+
+# combobox — native <input list=datalistId> + <datalist>, free browser
+# autocomplete, zero JS. option() is reused unchanged as <datalist>
+# children: it's already fully generic (el("option") |> attr("value", ...)
+# with .text set), nothing select()-specific baked into it — a "selected"
+# option() inside a <datalist> is simply ignored by the browser, not an
+# error. Same "id-reference, not DOM-adjacency" reasoning as popover()
+# applies to the input's `list` attribute here.
+const combobox = fn(inputPlaceholder: String, datalistId: String, options: [View]) -> View {
+	let inputEl = el("input") |> attr("type", "text") |> attr("placeholder", inputPlaceholder) |> attr("list", datalistId)
+	inputEl.void = true
+	let datalistEl = el("datalist") |> attr("id", datalistId) |> addChildren(options)
+	let pair: [View] = [inputEl, datalistEl]
+	return el("span") |> addChildren(pair)
+}
+
+# inputOtp ships the static N-single-char-input markup only — ids are
+# "${groupId}-0", "${groupId}-1", ... (a Number auto-stringifies inside
+# string interpolation via the same caja_format_value helper log.info's
+# own arg formatting uses, so no caller-supplied array of id strings is
+# needed here). Deliberately does NOT implement auto-advance-focus between
+# boxes: that needs a live onInput handler calling browser.focus on the
+# next box, which only exists once @caja/siriguela-dom's mount() has
+# attached it — exactly the "handlers re-fetch state fresh, wired at
+# mount() time" pattern onClick/onInput already establish elsewhere in
+# this file, not a shortcut taken here alone. Wire it up in your own
+# onInput handler; this function only builds the boxes.
+private const inputOtpBoxes = fn(groupId: String, index: Number, length: Number) -> [View] {
+	if (index >= length) {
+		let noBoxes: [View] = []
+		return noBoxes
+	}
+	let otpBox = el("input")
+		|> attr("type", "text")
+		|> attr("maxlength", "1")
+		|> attr("id", "${groupId}-${index}")
+	otpBox.void = true
+	let rest = inputOtpBoxes(groupId, index + 1, length)
+	let head: [View] = [otpBox]
+	return array.join(head, rest)
+}
+
+const inputOtp = fn(groupId: String, length: Number) -> View {
+	return row(inputOtpBoxes(groupId, 0, length)) |> gap("4px")
+}
+
+# tabs — the "hidden radio inputs + CSS sibling-selector" trick, zero JS.
+# Tab is a plain, non-recursive struct (id/label/content), not a View
+# subtype — tab() just constructs one.
+type Tab struct {
+	id String
+	label String
+	content View
+}
+
+const tab = fn(id: String, label: String, content: View) -> Tab {
+	return Tab{id: id, label: label, content: content}
+}
+
+# tabRadio mirrors radio()'s own conditional-checked shape exactly (early
+# return from inside the if, not a reassignment) — the one tab that starts
+# checked is the group's initially-selected tab.
+private const tabRadio = fn(groupName: String, id: String, checked: Boolean) -> View {
+	let base = el("input") |> attr("type", "radio") |> attr("name", groupName) |> attr("id", "tab-${id}")
+	base.void = true
+	if (checked) {
+		return attr(base, "checked", "checked")
+	}
+	return base
+}
+
+# tabHeaders builds one [radio, label] pair per tab and flattens them into
+# a single interleaved array via array.join — the radio/label pair for tab
+# N must be siblings of every other tab's pair (and of the panels wrapper
+# tabs() builds below), never nested under each other, for the "~" general
+# sibling selector in tabStyleRules to have anything to match.
+private const tabHeaders = fn(groupName: String, items: [Tab], isFirst: Boolean) -> [View] {
+	if (array.len(items) == 0) {
+		let none: [View] = []
+		return none
+	}
+	let head = array.head(items)
+	let radioEl = tabRadio(groupName, head.id, isFirst)
+	let labelEl = el("label") |> attr("for", "tab-${head.id}")
+	labelEl.text = head.label
+	let pair: [View] = [radioEl, labelEl]
+	let rest = tabHeaders(groupName, array.tail(items), false)
+	return array.join(pair, rest)
+}
+
+private const tabPanel = fn(item: Tab) -> View {
+	return box(item.content) |> attr("id", "panel-${item.id}")
+}
+
+private const tabPanels = fn(items: [Tab]) -> [View] {
+	if (array.len(items) == 0) {
+		let none: [View] = []
+		return none
+	}
+	let head = array.head(items)
+	let one: [View] = [tabPanel(head)]
+	let rest = tabPanels(array.tail(items))
+	return array.join(one, rest)
+}
+
+# tabHideSelectors builds the comma-separated "#panel-a,#panel-b,..."
+# selector list every panel is hidden by default under, before the
+# per-tab show rules below override the currently-checked one back to
+# visible. Comma is a plain selector-list separator, safe under
+# renderToString's <style>-text escaping the same way every other
+# character used here is (see the design-constraint comment on
+# skeletonStyles above — no "<", ">", or "&" anywhere in this file's
+# generated CSS).
+private const tabHideSelectors = fn(items: [Tab]) -> String {
+	if (array.len(items) == 0) {
+		return ""
+	}
+	let head = array.head(items)
+	let rest = tabHideSelectors(array.tail(items))
+	if (string.len(rest) == 0) {
+		return "#panel-${head.id}"
+	}
+	return "#panel-${head.id},${rest}"
+}
+
+# tabShowRules generates one rule per tab using only descendant (space) and
+# general-sibling (~) combinators — deliberately never ">", which
+# renderToString's escapeHTML would corrupt inside <style> text (see the
+# same design-constraint comment referenced above).
+private const tabShowRules = fn(groupName: String, items: [Tab]) -> String {
+	if (array.len(items) == 0) {
+		return ""
+	}
+	let head = array.head(items)
+	let rest = tabShowRules(groupName, array.tail(items))
+	let showRule = "#tab-${head.id}:checked ~ #panels-${groupName} #panel-${head.id}{display:block}"
+	return "${showRule}${rest}"
+}
+
+private const tabStyleRules = fn(groupName: String, items: [Tab]) -> String {
+	let hideSelectors = tabHideSelectors(items)
+	let showRules = tabShowRules(groupName, items)
+	return "${hideSelectors}{display:none}${showRules}"
+}
+
+# tabs() assembles: every [radio, label] pair (in order), then the panels
+# wrapper, then the generated <style> block. The panels wrapper appearing
+# AFTER every radio/label pair in this order is load-bearing, not
+# stylistic — general-sibling ("~") selectors only match FOLLOWING
+# siblings, so reordering this breaks every show rule silently (no compile
+# error, the CSS would just never match).
+const tabs = fn(groupName: String, items: [Tab]) -> View {
+	let headers = tabHeaders(groupName, items, true)
+	let panelsWrapper = el("div") |> attr("id", "panels-${groupName}") |> addChildren(tabPanels(items))
+	let styleEl = el("style")
+	styleEl.text = tabStyleRules(groupName, items)
+	let panelsList: [View] = [panelsWrapper]
+	let styleList: [View] = [styleEl]
+	let withPanels = array.join(headers, panelsList)
+	let allChildren = array.join(withPanels, styleList)
+	return el("div") |> addChildren(allChildren)
 }
 
 # onClick/onInput append to view.handlers rather than calling browser.on
@@ -540,8 +1070,8 @@ private const renderAttrEntries = fn(attrs: [Attr]) -> String {
 	}
 	let head = array.head(attrs)
 	let rest = renderAttrEntries(array.tail(attrs))
-	let entry = " " |> string.concat(head.name) |> string.concat("='") |> string.concat(escapeAttrValue(head.value)) |> string.concat("'")
-	return entry |> string.concat(rest)
+	let entry = " ${head.name}='${escapeAttrValue(head.value)}'"
+	return "${entry}${rest}"
 }
 
 private const renderStyleDeclarations = fn(styles: [Style]) -> String {
@@ -550,20 +1080,28 @@ private const renderStyleDeclarations = fn(styles: [Style]) -> String {
 	}
 	let head = array.head(styles)
 	let rest = renderStyleDeclarations(array.tail(styles))
-	let decl = head.property |> string.concat(":") |> string.concat(escapeAttrValue(head.value)) |> string.concat(";")
-	return decl |> string.concat(rest)
+	let decl = "${head.property}:${head.value};"
+	return "${decl}${rest}"
 }
 
 # renderAttrs folds a View's styles array into a single synthesized
 # style='...' attribute alongside its plain attrs — the same shape a
 # hand-written <tag attr='x' style='prop:val;'> would have.
+#
+# Attribute escaping happens HERE, once over the whole declaration list,
+# not inside renderStyleDeclarations per value: that helper is also the
+# raw "prop:val;" joiner classCss() below uses to build a real stylesheet,
+# where a quote must stay a quote (font-family:'Inter'), not become &#39;.
+# Escaping the joined string is byte-identical to escaping each value —
+# property names are enum literals containing none of &<>' and the ":"/";"
+# separators are untouched by escapeAttrValue.
 private const renderAttrs = fn(view: View) -> String {
 	let attrsStr = renderAttrEntries(view.attrs)
 	let styleDecls = renderStyleDeclarations(view.styles)
 	if (string.len(styleDecls) == 0) {
 		return attrsStr
 	}
-	return attrsStr |> string.concat(" style='") |> string.concat(styleDecls) |> string.concat("'")
+	return "${attrsStr} style='${escapeAttrValue(styleDecls)}'"
 }
 
 # mapConcat renders each item of a [View] via `render` and concatenates the
@@ -584,7 +1122,7 @@ private const mapConcat = fn(items: [View], render: fn(View) -> String) -> Strin
 	}
 	let head = array.head(items)
 	let rest = mapConcat(array.tail(items), render)
-	return render(head) |> string.concat(rest)
+	return "${render(head)}${rest}"
 }
 
 # renderToString — the static-page terminal. Pure except for one
@@ -597,7 +1135,7 @@ private const mapConcat = fn(items: [View], render: fn(View) -> String) -> Strin
 # static-page's own main.caja would.
 const renderToString = fn(view: View) -> String {
 	if (array.len(view.handlers) > 0) {
-		let msg = "siriguela: view <" |> string.concat(view.tag) |> string.concat("> has event handlers, but renderToString() drops them (no JS runtime in a static-page build)")
+		let msg = "siriguela: view <${view.tag}> has event handlers, but renderToString() drops them (no JS runtime in a static-page build)"
 		log.warn(msg, "")
 	}
 
@@ -605,19 +1143,14 @@ const renderToString = fn(view: View) -> String {
 		return escapeHTML(view.text)
 	}
 
-	let openTag = "<" |> string.concat(view.tag) |> string.concat(renderAttrs(view))
+	let openTag = "<${view.tag}${renderAttrs(view)}"
 
 	if (view.void) {
-		return openTag |> string.concat(" />")
+		return "${openTag} />"
 	}
 
-	let inner = escapeHTML(view.text) |> string.concat(mapConcat(view.children, renderToString))
-	return openTag
-		|> string.concat(">")
-		|> string.concat(inner)
-		|> string.concat("</")
-		|> string.concat(view.tag)
-		|> string.concat(">")
+	let inner = "${escapeHTML(view.text)}${mapConcat(view.children, renderToString)}"
+	return "${openTag}>${inner}</${view.tag}>"
 }
 
 # Default theme, based on the siriguela fruit itself: a deep magenta skin, a
@@ -670,4 +1203,313 @@ const pageHeading = fn(content: String) -> View {
 const themedLink = fn(href: String, label: String) -> View {
 	return link(href, label)
 		|> color(siriguelaLeaf)
+}
+
+# themedAlert/themedBadge — a small closed Variant enum (same mechanism
+# CSSProperty itself uses) selecting one of the palette colors above, plus
+# one new semantic constant (siriguelaDanger) the fruit palette doesn't
+# otherwise stretch to. Deliberately kept to two variant-aware components,
+# not a variant-per-function explosion — everything else in this catalog
+# stays unstyled/structural by design, same scope as the rest of this
+# theme layer (5 wrapper functions before this addition).
+enum Variant {
+	Info = "info",
+	Success = "success",
+	Warning = "warning",
+	Danger = "danger",
+}
+
+const siriguelaDanger = "#B3261E"
+
+private const variantColor = fn(variant: Variant) -> String {
+	if (variant == Variant.Success) {
+		return siriguelaLeaf
+	}
+	if (variant == Variant.Warning) {
+		return siriguelaFlesh
+	}
+	if (variant == Variant.Danger) {
+		return siriguelaDanger
+	}
+	return siriguelaSkin
+}
+
+const themedAlert = fn(variant: Variant, message: String) -> View {
+	let accentColor = variantColor(variant)
+	return alert([text(message)])
+		|> backgroundColor(siriguelaCream)
+		|> color(accentColor)
+		|> border("1px solid ${accentColor}")
+		|> padding("12px 16px")
+		|> rounded("6px")
+}
+
+const themedBadge = fn(variant: Variant, badgeLabel: String) -> View {
+	return badge(badgeLabel)
+		|> backgroundColor(variantColor(variant))
+		|> color(siriguelaCream)
+		|> padding("2px 8px")
+		|> rounded("999px")
+		|> fontSize("0.75rem")
+}
+
+# ---------------------------------------------------------------------
+# Multi-page sites: Page, navLinks, htmlDocument
+#
+# siriguela only BUILDS pages; it never writes them. Writing is the `doc`
+# builtin module's job, and it must stay out of this file: `caja run`
+# refuses any program whose transpiled output contains doc.write, and
+# cross-module transpilation emits every top-level statement of every
+# import — so a doc.write anywhere in this library would make every
+# consumer un-runnable. A project's main.caja imports doc, lists its pages,
+# and writes htmlDocument(...)'s output itself.
+#
+# This section (and the CSS-class section after it) sits at the very end
+# of the file on purpose: htmlDocument calls renderToString and classCss
+# calls renderStyleDeclarations, and Caja has no forward references
+# between separate bindings.
+# ---------------------------------------------------------------------
+
+# Page is one page of a site. path is both the output file under dist/
+# AND the href other pages link to ("about.html") — a flat site served
+# from the dist root needs no base-URL logic that way.
+type Page struct {
+	title String
+	path String
+	content View
+}
+
+const definePage = fn(title: String, path: String, content: View) -> Page {
+	return Page{title: title, path: path, content: content}
+}
+
+private const navLink = fn(p: Page, currentPath: String) -> View {
+	let a = link(p.path, p.title)
+	if (p.path == currentPath) {
+		return attr(a, "aria-current", "page")
+	}
+	return a
+}
+
+private const navLinkList = fn(pages: [Page], currentPath: String) -> [View] {
+	if (array.len(pages) == 0) {
+		let none: [View] = []
+		return none
+	}
+	let head = array.head(pages)
+	let one: [View] = [navLink(head, currentPath)]
+	let rest = navLinkList(array.tail(pages), currentPath)
+	return array.join(one, rest)
+}
+
+# navLinks renders one link per page in the order given; the page whose
+# path equals currentPath gets aria-current='page', which is both the
+# accessible way to mark the current page and a stylesheet hook
+# ([aria-current=page] { ... }). Unstyled beyond that, like nav() itself.
+const navLinks = fn(pages: [Page], currentPath: String) -> View {
+	return nav(navLinkList(pages, currentPath))
+}
+
+# htmlDocument wraps a body in a complete HTML document — html/head/body,
+# charset and viewport metas, the title, and one stylesheet link — and
+# returns the rendered String with the doctype prepended. The doctype is a
+# literal string prefix, not a View's .text, so it is not escaped. body is
+# the last parameter so the trailing-block sugar works:
+#     ui.htmlDocument("Title", "style.css") { header content footer }
+# The <meta>/<link> elements are built with el() and void = true (the
+# textField/image pattern); siriguela's link() is an <a>, not this.
+const htmlDocument = fn(title: String, stylesheetHref: String, body: [View]) -> String {
+	let charset = el("meta") |> attr("charset", "utf-8")
+	charset.void = true
+	let viewport = el("meta") |> attr("name", "viewport") |> attr("content", "width=device-width, initial-scale=1")
+	viewport.void = true
+	let stylesheetEl = el("link") |> attr("rel", "stylesheet") |> attr("href", stylesheetHref)
+	stylesheetEl.void = true
+	let titleEl = el("title")
+	titleEl.text = title
+	let headChildren: [View] = [charset, viewport, titleEl, stylesheetEl]
+	let headEl = el("head") |> addChildren(headChildren)
+	let bodyEl = el("body") |> addChildren(body)
+	let pair: [View] = [headEl, bodyEl]
+	let html = el("html") |> attr("lang", "en") |> addChildren(pair)
+	return "<!doctype html>${renderToString(html)}"
+}
+
+# ---------------------------------------------------------------------
+# CSS classes from Caja code: styles, class, variant, withClass(es),
+# classCss, classStylesheet
+#
+# Inline styles (what every modifier above emits) can't express a :hover,
+# a :focus, a pseudo-element or a media query — those need a selector in
+# a real stylesheet. A Class is that selector, defined in Caja: the SAME
+# modifier chain builds it (so the closed CSSProperty enum still validates
+# every property at compile time, and nothing is duplicated), applied to
+# an empty starter View from styles() whose only purpose is to collect the
+# modifiers' output. class() then lifts that View's .styles into a Class.
+# ---------------------------------------------------------------------
+
+type ClassVariant struct {
+	pseudo String
+	styles [Style]
+}
+
+type Class struct {
+	name String
+	styles [Style]
+	variants [ClassVariant]
+}
+
+# styles() is an empty View used purely as a modifier target — its tag is
+# "" and it is never rendered; only its .styles field is ever read.
+const styles = fn() -> View {
+	return el("")
+}
+
+const class = fn(name: String, template: View) -> Class {
+	let noVariants: [ClassVariant] = []
+	return Class{name: name, styles: template.styles, variants: noVariants}
+}
+
+# variant adds a pseudo-state rule to a Class (.name:hover { ... }). Takes
+# the Class first so it pipes:
+#     ui.class("card", ui.styles() |> ui.padding("8px"))
+#         |> ui.variant("hover", ui.styles() |> ui.boxShadow("0 4px 12px #0002"))
+const variant = fn(cls: Class, pseudo: String, template: View) -> Class {
+	let c = cls
+	c.variants = array.push(c.variants, ClassVariant{pseudo: pseudo, styles: template.styles})
+	return c
+}
+
+# withClass sets the class attribute to this Class's name. attr() is
+# append-only, so calling withClass twice on one View yields two class
+# attributes — use withClasses to combine several into one.
+const withClass = fn(view: View, cls: Class) -> View {
+	return className(view, cls.name)
+}
+
+private const classNames = fn(classes: [Class]) -> String {
+	if (array.len(classes) == 0) {
+		return ""
+	}
+	let head = array.head(classes)
+	let rest = classNames(array.tail(classes))
+	if (string.len(rest) == 0) {
+		return head.name
+	}
+	return "${head.name} ${rest}"
+}
+
+const withClasses = fn(view: View, classes: [Class]) -> View {
+	return className(view, classNames(classes))
+}
+
+private const variantRules = fn(name: String, variants: [ClassVariant]) -> String {
+	if (array.len(variants) == 0) {
+		return ""
+	}
+	let head = array.head(variants)
+	let rest = variantRules(name, array.tail(variants))
+	return ".${name}:${head.pseudo}{${renderStyleDeclarations(head.styles)}}${rest}"
+}
+
+# classCss renders every Class (and each of its variants) as a stylesheet
+# fragment: ".card{padding:8px;}.card:hover{box-shadow:...;}". Written to a
+# .css file via doc.write it has no character restrictions. Emitted via
+# classStylesheet instead — a <style> View that renderToString HTML-escapes
+# like any other .text — the values must avoid "<", ">" and "&" (the same
+# rule tabs()/tooltipStyles() live under); a "'" survives both routes, so
+# quoted font names work everywhere.
+const classCss = fn(classes: [Class]) -> String {
+	if (array.len(classes) == 0) {
+		return ""
+	}
+	let head = array.head(classes)
+	let rest = classCss(array.tail(classes))
+	let base = ".${head.name}{${renderStyleDeclarations(head.styles)}}"
+	return "${base}${variantRules(head.name, head.variants)}${rest}"
+}
+
+const classStylesheet = fn(classes: [Class]) -> View {
+	let v = el("style")
+	v.text = classCss(classes)
+	return v
+}
+
+# ---------------------------------------------------------------------
+# Arbitrary CSS rules: Rule, MediaQuery, rule, media, rulesCss, mediaCss,
+# rulesStylesheet, stylesheet
+#
+# Class/variant cover the common case — one class name, plus a handful of
+# pseudo-state rules on it — because that shape has a stable place to hang
+# a modifier chain: the class's own declarations. A real site stylesheet
+# also needs element selectors (body, h2), comma-grouped selectors
+# (h1, h2, h3), descendant/child/sibling combinators (.tabs > label,
+# input:checked + label), attribute selectors ([popover],
+# [aria-current=page]) and media queries — none of which have a modifier
+# chain to hang off of, because a selector isn't a set of CSS properties,
+# it's arbitrary CSS syntax with no fixed shape. A Rule keeps the half that
+# DOES have a fixed shape — the declarations, via the same modifier chain
+# and closed CSSProperty enum every component above uses — and takes the
+# selector as a plain String, unchecked, the same way a selector inside a
+# template literal is unchecked in any CSS-in-JS library — CSS selector
+# syntax isn't a set of properties, so there's nothing for Caja's type
+# system to validate it against.
+# ---------------------------------------------------------------------
+
+type Rule struct {
+	selector String
+	styles [Style]
+}
+
+const rule = fn(selector: String, template: View) -> Rule {
+	return Rule{selector: selector, styles: template.styles}
+}
+
+const rulesCss = fn(rules: [Rule]) -> String {
+	if (array.len(rules) == 0) {
+		return ""
+	}
+	let head = array.head(rules)
+	let rest = rulesCss(array.tail(rules))
+	return "${head.selector}{${renderStyleDeclarations(head.styles)}}${rest}"
+}
+
+# rulesStylesheet is the arbitrary-selector counterpart to classStylesheet:
+# a <style> View, HTML-escaped by renderToString like any other .text, so
+# its declaration values must avoid "<", ">" and "&" the same as every
+# other CSS-emitting component here. Written to a .css file via doc.write,
+# rulesCss has no such restriction.
+const rulesStylesheet = fn(rules: [Rule]) -> View {
+	let v = el("style")
+	v.text = rulesCss(rules)
+	return v
+}
+
+# MediaQuery groups Rules under one @media condition. query is the raw
+# condition text ("(max-width: 640px)"), unchecked for the same reason a
+# Rule's selector is: it's CSS syntax, not a set of properties.
+type MediaQuery struct {
+	query String
+	rules [Rule]
+}
+
+const media = fn(query: String, rules: [Rule]) -> MediaQuery {
+	return MediaQuery{query: query, rules: rules}
+}
+
+const mediaCss = fn(queries: [MediaQuery]) -> String {
+	if (array.len(queries) == 0) {
+		return ""
+	}
+	let head = array.head(queries)
+	let rest = mediaCss(array.tail(queries))
+	return "@media ${head.query}{${rulesCss(head.rules)}}${rest}"
+}
+
+# stylesheet is the one-call way to render a whole site's CSS: plain rules
+# first (resets, elements, combinators), then classes, then media queries
+# last — the same cascade order a hand-written stylesheet would use, so a
+# responsive rule can still override an earlier one at the same specificity.
+const stylesheet = fn(rules: [Rule], classes: [Class], queries: [MediaQuery]) -> String {
+	return "${rulesCss(rules)}${classCss(classes)}${mediaCss(queries)}"
 }

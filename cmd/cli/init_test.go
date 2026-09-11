@@ -147,11 +147,41 @@ func TestInitCmd_ScaffoldsStaticPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read main.caja: %v", err)
 	}
-	if !strings.Contains(string(mainCaja), "import page") {
-		t.Errorf("expected main.caja to import the page module, got:\n%s", mainCaja)
+	if !strings.Contains(string(mainCaja), "import doc") {
+		t.Errorf("expected main.caja to import the doc module, got:\n%s", mainCaja)
 	}
 	if !strings.Contains(string(mainCaja), "demo-site") {
 		t.Errorf("expected main.caja to be rendered with the project name, got:\n%s", mainCaja)
+	}
+
+	// The static-page scaffold is a small multi-page site: pages/ holds one
+	// module per page (rendered through text/template, so the project name
+	// must reach them too) and assets/ ships a real file — both live in
+	// NESTED template directories, which renderProjectTemplates has to
+	// create before it can write into them.
+	for _, rel := range []string{
+		filepath.Join("assets", "siriguela.svg"),
+		filepath.Join("pages", "index.caja"),
+		filepath.Join("pages", "about.caja"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("expected %s to be scaffolded: %v", rel, err)
+		}
+	}
+	for _, rel := range []string{filepath.Join("pages", "index.caja"), filepath.Join("pages", "about.caja")} {
+		content, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			continue // already reported above
+		}
+		if !strings.Contains(string(content), "demo-site") {
+			t.Errorf("expected %s to be rendered with the project name", rel)
+		}
+		if strings.Contains(string(content), "{{") {
+			t.Errorf("expected %s to have no unrendered template actions left, got one", rel)
+		}
+	}
+	if svg, err := os.ReadFile(filepath.Join(dir, "assets", "siriguela.svg")); err == nil && !strings.HasPrefix(string(svg), "<svg") {
+		t.Errorf("expected assets/siriguela.svg to be copied verbatim, got:\n%s", svg)
 	}
 }
 

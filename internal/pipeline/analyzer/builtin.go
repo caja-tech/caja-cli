@@ -62,8 +62,8 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeMapContainsKeyFunction(n), true
 	case "map.delete":
 		return a.analyzeMapDeleteFunction(n), true
-	case "page.write":
-		return a.analyzePageWriteFunction(n), true
+	case "doc.write":
+		return a.analyzeDocWriteFunction(n), true
 	case "browser.log", "browser.alert":
 		return a.analyzeBrowserStringArgFunction(functionName, n), true
 	case "browser.getElementById", "browser.createElement":
@@ -162,12 +162,12 @@ func (a *Analyzer) analyzeStringSubstringFunction(n *ast.CallExpression) symbol.
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
 }
 
-// analyzePageWriteFunction checks the arity and type for page.write(path,
+// analyzeDocWriteFunction checks the arity and type for doc.write(path,
 // content), which writes content to disk at path (creating parent
 // directories as needed) when the compiled binary runs. Produces no value
 // in the compiler, so this must return NULL_OBJ — see analyzeLogFunction's
 // comment for why.
-func (a *Analyzer) analyzePageWriteFunction(n *ast.CallExpression) symbol.Symbol {
+func (a *Analyzer) analyzeDocWriteFunction(n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 2 {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'write', got %d", len(n.Arguments)))
 		return symbol.AnySymbol()

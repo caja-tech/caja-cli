@@ -57,7 +57,7 @@ func buildBrowserPageServer(filePath string, port int) (server *http.Server, url
 
 // buildStaticPageServer builds filePath as a static-page project: a native
 // compile (no GOOS/GOARCH override, unlike buildBrowserPageServer), then
-// runs the resulting generator binary once so its page.write calls populate
+// runs the resulting generator binary once so its doc.write calls populate
 // the project's dist/ directory, then returns a plain *http.Server rooted
 // there — bypassing the UsesBrowserModule gate entirely, since a static-page
 // project's main.caja is never expected to import browser.
@@ -77,7 +77,7 @@ func buildStaticPageServer(filePath string, port int) (server *http.Server, url 
 	}
 
 	projectDir := filepath.Dir(filePath)
-	if err := runBuiltBinaryOnce(outBin, projectDir); err != nil {
+	if err := generateStaticPage(outBin, projectDir); err != nil {
 		return nil, "", err
 	}
 

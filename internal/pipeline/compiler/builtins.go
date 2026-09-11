@@ -18,7 +18,7 @@ var builtinModules = map[string]bool{
 	"cast":    true,
 	"http":    true,
 	"browser": true,
-	"page":    true,
+	"doc":     true,
 }
 
 // UsesBrowserModule reports whether transpiled Go source came from a Caja
@@ -29,14 +29,14 @@ func UsesBrowserModule(goSource string) bool {
 	return strings.Contains(goSource, "\"syscall/js\"")
 }
 
-// UsesPageModule reports whether transpiled Go source came from a Caja
-// program that calls page.write. `caja run` executes via `go run` inside a
+// UsesDocModule reports whether transpiled Go source came from a Caja
+// program that calls doc.write. `caja run` executes via `go run` inside a
 // throwaway temp directory (see compiler.Run) that's removed the moment the
-// process exits — any files page.write wrote would vanish along with it —
+// process exits — any files doc.write wrote would vanish along with it —
 // so callers use this to steer such scripts toward `caja build` instead,
 // the same way UsesBrowserModule steers wasm-only scripts away from 'run'.
-func UsesPageModule(goSource string) bool {
-	return strings.Contains(goSource, "caja_page_write(")
+func UsesDocModule(goSource string) bool {
+	return strings.Contains(goSource, "caja_doc_write(")
 }
 
 // isOwned reports whether n is a freshly-produced, definitely-unaliased
@@ -361,11 +361,11 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			return result, nil
 		}
 
-	case "page":
+	case "doc":
 		switch fn {
 		case "write":
-			ctx.usedModules["page_write"] = true
-			return fmt.Sprintf("caja_page_write(%s, %s)", argStrs[0], argStrs[1]), nil
+			ctx.usedModules["doc_write"] = true
+			return fmt.Sprintf("caja_doc_write(%s, %s)", argStrs[0], argStrs[1]), nil
 		}
 
 	case "browser":
@@ -2526,20 +2526,20 @@ func caja_browser_local_storage_get(key string) *string {
 `)
 	}
 
-	if ctx.usedModules["page_write"] {
+	if ctx.usedModules["doc_write"] {
 		buf.WriteString(`
-// caja_page_write writes content to path, creating any missing parent
-// directories first — the whole of the page module's runtime support,
+// caja_doc_write writes content to path, creating any missing parent
+// directories first — the whole of the doc module's runtime support,
 // used by static-page projects to produce their dist/ output when the
 // compiled generator binary runs once at build time.
-func caja_page_write(path string, content string) {
+func caja_doc_write(path string, content string) {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			panic(fmt.Sprintf("page.write: failed to create directory %q: %v", dir, err))
+			panic(fmt.Sprintf("doc.write: failed to create directory %q: %v", dir, err))
 		}
 	}
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		panic(fmt.Sprintf("page.write: failed to write %q: %v", path, err))
+		panic(fmt.Sprintf("doc.write: failed to write %q: %v", path, err))
 	}
 }
 `)

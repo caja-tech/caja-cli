@@ -153,7 +153,7 @@ func TestBuildCmd_BrowserModuleDefaultsToWasm(t *testing.T) {
 // the resulting binary once, and leave the generated dist/ output behind.
 func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
 	dir := t.TempDir()
-	source := "import page\npage.write(\"dist/index.html\", \"hello from static-page\")\n"
+	source := "import doc\ndoc.write(\"dist/index.html\", \"hello from static-page\")\n"
 	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
 		t.Fatalf("failed to write main.caja: %v", err)
 	}
@@ -161,6 +161,12 @@ func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
 	if err := project.Save(dir, manifest); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
+	// assets/ (including a nested folder) must be mirrored into dist/assets/,
+	// and a stale file already sitting in dist/assets/ from a previous build
+	// must NOT survive — dist/assets is recreated from scratch each time.
+	writeProjectFile(t, dir, filepath.Join("assets", "logo.txt"), "logo")
+	writeProjectFile(t, dir, filepath.Join("assets", "img", "pixel.txt"), "pixel")
+	writeProjectFile(t, dir, filepath.Join("dist", "assets", "stale.txt"), "old")
 	chdir(t, dir)
 
 	cmd, _ := NewBuildCmd()
@@ -178,6 +184,44 @@ func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
 	}
 	if string(got) != "hello from static-page" {
 		t.Errorf("dist/index.html = %q, want %q", got, "hello from static-page")
+	}
+
+	assertStaticPageAssets(t, dir)
+}
+
+// writeProjectFile writes content to rel inside dir, creating parents.
+func writeProjectFile(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	full := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatalf("failed to create %s: %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", full, err)
+	}
+}
+
+// assertStaticPageAssets checks the assets/ → dist/assets/ mirror that
+// generateStaticPage performs, for a project prepared with writeProjectFile
+// the way TestBuildCmd_StaticPageAutoDiscovery does. Shared with the serve
+// test so both commands are held to the same contract.
+func assertStaticPageAssets(t *testing.T, dir string) {
+	t.Helper()
+	for rel, want := range map[string]string{
+		filepath.Join("dist", "assets", "logo.txt"):         "logo",
+		filepath.Join("dist", "assets", "img", "pixel.txt"): "pixel",
+	} {
+		got, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			t.Errorf("expected %s to be copied from assets/: %v", rel, err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("%s = %q, want %q", rel, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dist", "assets", "stale.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected stale dist/assets/stale.txt to be removed by the rebuild, stat err = %v", err)
 	}
 }
 

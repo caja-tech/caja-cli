@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="siriguela">
+  <circle cx="60" cy="68" r="44" fill="#7A2048"/>
+  <ellipse cx="46" cy="52" rx="16" ry="9" fill="#F0A23A" opacity="0.4"/>
+  <path d="M62 26 C 70 8, 96 8, 102 20 C 88 24, 76 30, 64 28 Z" fill="#6E8B3D"/>
+  <path d="M62 28 C 61 20, 58 14, 53 9" stroke="#2B1710" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg>

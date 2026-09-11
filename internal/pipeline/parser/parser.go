@@ -1471,35 +1471,60 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		leftExpression = infix(leftExpression)
 	}
 
-	// Kotlin-style trailing lambda: "call(args) paramName => { ... }" appends
-	// a bare FunctionLiteral (not an ArrayLiteral, unlike the trailing-BLOCK
-	// sugar above which triggers on '{' via infixParseFuncs[LBRACE]) as the
-	// call's last argument. Deliberately NOT implemented as a registered
-	// infixParseFuncs[IDENT] entry: IDENT is the single most common prefix
-	// token in the grammar, so giving it a real infix precedence would make
-	// the loop above attempt this check after every identifier-ending
-	// expression, everywhere — a much larger blast radius than this
-	// call-expression-only, two-token-confirmed pattern needs. The
+	// Kotlin-style trailing lambda: "call(args) paramName => { ... }" (one
+	// param) or "call(args) => { ... }" (zero params) appends a bare
+	// FunctionLiteral (not an ArrayLiteral, unlike the trailing-BLOCK sugar
+	// above which triggers on '{' via infixParseFuncs[LBRACE]) as the call's
+	// last argument. Deliberately NOT implemented as a registered
+	// infixParseFuncs[IDENT]/[FAT_ARROW] entry: IDENT is the single most
+	// common prefix token in the grammar, so giving it a real infix
+	// precedence would make the loop above attempt this check after every
+	// identifier-ending expression, everywhere — a much larger blast radius
+	// than this call-expression-only, two-token-confirmed pattern needs. The
 	// "precedence == LOWEST_PRECEDENCE" guard restricts this to where an
 	// expression is entered fresh (a statement, a let/const RHS, a call
 	// argument) rather than mid-operator, which is every context the actual
 	// feature needs and no more.
+	//
+	// The zero-param branch (bare FAT_ARROW, no identifier before it) is
+	// safe to add unconditionally: FAT_ARROW has no registered infix
+	// precedence anywhere in the grammar (it's used only inside the three
+	// arrow-function-parsing sites, never as a general operator), so a call
+	// expression directly followed by '=>' was a guaranteed parse error
+	// before this branch existed — this only gives meaning to a previously-
+	// invalid sequence, it can't reinterpret anything that used to parse.
+	// '() => { ... }' as a general anonymous-function expression already
+	// works today (parseAnonymousFunctionParameters handles an empty
+	// parameter list before '=>'); this branch is the narrower fix of
+	// wiring that same zero-param shape into the trailing-lambda-after-a-
+	// call position, which previously only recognized the one-param
+	// IDENT-then-FAT_ARROW shape below.
 	if precedence == lexer.LOWEST_PRECEDENCE {
-		if call, ok := leftExpression.(*ast.CallExpression); ok && p.peekToken.Type == lexer.IDENT {
-			// One-token-ahead-of-peek check via a cloned lexer, mirroring
-			// isAnonymousFunctionLookahead's established pattern: p.tknzr's
-			// cursor already sits just past peekToken, so cloning it and
-			// pulling one token tells us what follows the identifier
-			// without consuming anything from the real parser state.
-			if p.tknzr.Clone().NextToken().Type == lexer.FAT_ARROW {
-				paramTok := p.peekToken
-				p.nextToken() // consume the parameter identifier
+		if call, ok := leftExpression.(*ast.CallExpression); ok {
+			if p.peekToken.Type == lexer.FAT_ARROW {
+				arrowTok := p.peekToken
 				p.nextToken() // consume FAT_ARROW
-				fn := &ast.FunctionLiteral{Token: paramTok}
-				fn.Parameters = []*ast.Parameter{{Token: paramTok, Name: paramTok.Literal, Type: ""}}
+				fn := &ast.FunctionLiteral{Token: arrowTok}
+				fn.Parameters = []*ast.Parameter{}
 				fn.Body = p.parseArrowFunctionBody()
 				call.Arguments = append(call.Arguments, fn)
 				call.RParenToken = p.currToken // extend the call's span, mirroring parseTrailingBlockCall
+			} else if p.peekToken.Type == lexer.IDENT {
+				// One-token-ahead-of-peek check via a cloned lexer, mirroring
+				// isAnonymousFunctionLookahead's established pattern: p.tknzr's
+				// cursor already sits just past peekToken, so cloning it and
+				// pulling one token tells us what follows the identifier
+				// without consuming anything from the real parser state.
+				if p.tknzr.Clone().NextToken().Type == lexer.FAT_ARROW {
+					paramTok := p.peekToken
+					p.nextToken() // consume the parameter identifier
+					p.nextToken() // consume FAT_ARROW
+					fn := &ast.FunctionLiteral{Token: paramTok}
+					fn.Parameters = []*ast.Parameter{{Token: paramTok, Name: paramTok.Literal, Type: ""}}
+					fn.Body = p.parseArrowFunctionBody()
+					call.Arguments = append(call.Arguments, fn)
+					call.RParenToken = p.currToken // extend the call's span, mirroring parseTrailingBlockCall
+				}
 			}
 		}
 	}

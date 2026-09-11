@@ -210,7 +210,7 @@ func NewBuildCmd() (*cobra.Command, error) {
 			}
 
 			if manifest != nil && manifest.Type == project.TypeStaticPage {
-				if err := runBuiltBinaryOnce(outBin, filepath.Dir(filePath)); err != nil {
+				if err := generateStaticPage(outBin, filepath.Dir(filePath)); err != nil {
 					return err
 				}
 				fmt.Printf("Wrote static output to %s\n", filepath.Join(filepath.Dir(filePath), project.StaticPageOutputDir))

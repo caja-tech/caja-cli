@@ -19,3 +19,28 @@ let count = registerRoutes() {
 	}
 	route("/status") req => req
 }
+
+type Task struct {
+	name    String
+	handler fn() -> String
+}
+
+let task = fn(name: String, handler: fn() -> String) -> Task {
+	return Task { name: name, handler: handler }
+}
+
+let registerTasks = fn(tasks: [Task]) -> Number {
+	return array.len(tasks)
+}
+
+# Zero-parameter trailing lambda: "call(args) => { ... }" (no identifier
+# before the "=>", unlike route(...)'s one-param "req => ..." above) appends
+# a zero-arg fn() -> T as the call's last argument.
+let taskCount = registerTasks() {
+	task("cleanup") => {
+		return "done"
+	}
+	task("ping") => "pong"
+}
+
+return count + taskCount

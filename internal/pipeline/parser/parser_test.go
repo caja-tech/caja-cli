@@ -1553,6 +1553,31 @@ func TestTrailingLambdaParsing(t *testing.T) {
 			input:    "foo() {\nbar()\n}",
 			expected: "foo([bar()])",
 		},
+		{
+			name:     "Zero-param trailing lambda with block body",
+			input:    "foo() => {\nbar()\n}",
+			expected: "foo(=>() { ... })",
+		},
+		{
+			name:     "Zero-param trailing lambda with single-expression body",
+			input:    "foo() => bar()",
+			expected: "foo(=>() { ... })",
+		},
+		{
+			name:     "Zero-param trailing lambda on a call with existing args",
+			input:    "foo(1, 2) => {\nbar()\n}",
+			expected: "foo(1, 2, =>() { ... })",
+		},
+		{
+			name:     "Zero-param trailing lambda attaches to the pipe-desugared call, not the bare call",
+			input:    "x |> foo() => {\nbar()\n}",
+			expected: "foo(x, =>() { ... })",
+		},
+		{
+			name:     "Zero-param trailing lambda nested inside a trailing block",
+			input:    "registerRoutes(server) {\nfoo() => {\nbar()\n}\n}",
+			expected: "registerRoutes(server, [foo(=>() { ... })])",
+		},
 	}
 
 	runTestScenarios(t, tests)
@@ -1565,9 +1590,11 @@ func TestTrailingLambdaParsing(t *testing.T) {
 // instead of a panic.
 func TestTrailingLambdaErrors(t *testing.T) {
 	tests := []string{
-		"foo() bar",     // IDENT with no FAT_ARROW after a call, same line: falls through to the ordinary "one statement per line" error, not a silent no-op
-		"foo() req =>",  // FAT_ARROW with nothing after it (EOF)
+		"foo() bar",      // IDENT with no FAT_ARROW after a call, same line: falls through to the ordinary "one statement per line" error, not a silent no-op
+		"foo() req =>",   // FAT_ARROW with nothing after it (EOF)
 		"foo() req => }", // invalid single-expression body (a bare '}' has no prefix parse function)
+		"foo() =>",       // zero-param form: FAT_ARROW with nothing after it (EOF)
+		"foo() => }",     // zero-param form: invalid single-expression body
 	}
 
 	for _, input := range tests {

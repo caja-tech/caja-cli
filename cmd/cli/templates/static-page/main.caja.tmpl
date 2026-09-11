@@ -1,32 +1,260 @@
-import "@caja/siriguela" as siriguela
-import "string" as string
-import page
+import "@caja/siriguela" as ui
+import doc
+import array
+import "pages/index" as home
+import "pages/about" as about
 
-# This scaffold builds the page as a siriguela View tree instead of a raw
-# HTML string — renderToString() walks it into the HTML page.write below
-# writes to dist/. See https://www.cajalang.com for more on siriguela.
+# main.caja is the site builder — the one file in this project that writes
+# anything. Each page under pages/ is a module exporting `page` (a ui.Page:
+# title, output path, content View); this file lists them, wraps each in
+# the shared layout below, and writes them to dist/ with doc.write.
+#
+# `caja build` compiles this file to a native binary and runs it once from
+# the project folder — which is why every path below is relative
+# ("dist/...") — and then copies assets/ into dist/assets/. `caja serve`
+# does the same and serves dist/.
+#
+# To add a page: create pages/name.caja exporting `page`, import it here,
+# and append it to `site`. The navigation, the layout and the writer all
+# pick it up from that one list.
+#
+# Spell the "@caja/siriguela" import identically in every file (here and
+# in each page). The specifier is the module cache key; two spellings
+# would compile the library twice, with two incompatible Page types.
 
-let titleEl = siriguela.el("title")
-titleEl.text = "{{.Name}}"
+let site: [ui.Page] = [home.page, about.page]
 
-let styleLink = siriguela.el("link")
-styleLink.void = true
-let styleLink2 = styleLink |> siriguela.attr("rel", "stylesheet") |> siriguela.attr("href", "style.css")
+# Classes the pages define in Caja, collected here so their rules are
+# emitted once into dist/style.css next to the hand-written stylesheet.
+let siteClasses: [ui.Class] = [about.heroClass]
 
-let head = siriguela.el("head")
-	|> siriguela.addChild(titleEl)
-	|> siriguela.addChild(styleLink2)
+# layout wraps a page's content in what every page shares: the navigation
+# with the current page marked, and a footer. It is a const fn, so it may
+# read the ui module and its own parameters but never a module-level let —
+# which is why `site` is passed in as `all` rather than read directly.
+const layout = fn(current: ui.Page, all: [ui.Page]) -> [ui.View] {
+	let siteHeader = ui.header() {
+		ui.navLinks(all, current.path) |> ui.className("site-nav")
+	}
+	let siteFooter = ui.footer() {
+		ui.separator()
+		ui.muted("Built with siriguela. Every page under pages/ in {{.Name}} is written by the same loop in main.caja.")
+		ui.themedLink("https://www.cajalang.com", "cajalang.com")
+	} |> ui.className("colophon")
+	let shell: [ui.View] = [siteHeader, current.content, siteFooter]
+	let wrapper = ui.mainEl(shell) |> ui.className("page")
+	let body: [ui.View] = [wrapper]
+	return body
+}
 
-let body = siriguela.el("body")
-	|> siriguela.addChild(siriguela.pageHeading(1, "{{.Name}}"))
-	|> siriguela.addChild(siriguela.text("Welcome to your new Caja static-page project. Edit main.caja and run 'caja build' to regenerate dist/."))
+# writeSite writes every page: one doc.write per Page, each wrapped in a
+# full HTML document by ui.htmlDocument. Recursion is how Caja loops; this
+# tail call compiles to a plain loop.
+const writeSite = fn(remaining: [ui.Page], all: [ui.Page]) -> Nothing {
+	if (array.len(remaining) == 0) {
+		return
+	}
+	let current = array.head(remaining)
+	doc.write("dist/${current.path}", ui.htmlDocument(current.title, "style.css", layout(current, all)))
+	return writeSite(array.tail(remaining), all)
+}
 
-let doc = siriguela.el("html")
-	|> siriguela.addChild(head)
-	|> siriguela.addChild(body)
+# ---------------------------------------------------------------------
+# The stylesheet
+#
+# siriguela emits inline styles; everything selector-based lives here, in
+# pure Caja rather than a hand-written CSS string. Three groups of
+# ui.Rule (presentation for the site, then the rules the CSS-only
+# components expect a stylesheet to supply — hiding tabs' radio inputs,
+# styling a checked toggle's label), one ui.MediaQuery for the responsive
+# tweaks, and the classes the pages defined in Caja (siteClasses). Only a
+# Rule's declarations go through the modifier chain and the closed
+# CSSProperty enum — its selector is arbitrary CSS selector syntax, taken
+# as plain text, the same as it would be in any CSS-in-<language> library.
+# ui.stylesheet renders and joins all three groups, in that order, into
+# the text written to dist/style.css.
+# ---------------------------------------------------------------------
 
-let html = "<!doctype html>" |> string.concat(siriguela.renderToString(doc))
-let css = "body { font-family: sans-serif; margin: 0; background: " |> string.concat(siriguela.siriguelaCream) |> string.concat("; } h1, p { margin: 1rem 2rem; }")
+let siteRules: [ui.Rule] = [
+	ui.rule("*, *::before, *::after", ui.styles() |> ui.boxSizing("border-box")),
+	ui.rule("body", ui.styles()
+		|> ui.margin("0")
+		|> ui.background("#FFFDF8")
+		|> ui.color("#2B1710")
+		|> ui.fontFamily("system-ui, -apple-system, Segoe UI, sans-serif")
+		|> ui.lineHeight("1.6")),
+	ui.rule(".page", ui.styles()
+		|> ui.display("flex")
+		|> ui.flexDirection("column")
+		|> ui.gap("40px")
+		|> ui.maxWidth("860px")
+		|> ui.margin("0 auto")
+		|> ui.padding("32px 20px 96px")),
+	ui.rule("h1, h2, h3", ui.styles() |> ui.lineHeight("1.25") |> ui.margin("0")),
+	ui.rule("h2", ui.styles()
+		|> ui.fontSize("1.6rem")
+		|> ui.paddingBottom("8px")
+		|> ui.borderBottom("2px solid #F0E6D6")),
+	ui.rule("h3", ui.styles() |> ui.fontSize("1.05rem") |> ui.marginTop("8px")),
+	ui.rule("p", ui.styles() |> ui.margin("0")),
+	ui.rule("a", ui.styles() |> ui.color("#6E8B3D")),
+	ui.rule("hr", ui.styles()
+		|> ui.border("0")
+		|> ui.borderTop("1px solid #F0E6D6")
+		|> ui.width("100%")
+		|> ui.margin("8px 0")),
+	ui.rule("code", ui.styles()
+		|> ui.fontFamily("ui-monospace, SFMono-Regular, Menlo, monospace")
+		|> ui.fontSize("0.875em")
+		|> ui.background("#F6EFE3")
+		|> ui.padding("2px 6px")
+		|> ui.rounded("4px")),
+	ui.rule("pre", ui.styles()
+		|> ui.margin("0")
+		|> ui.background("#2B1710")
+		|> ui.color("#FBF3E6")
+		|> ui.padding("14px 16px")
+		|> ui.rounded("8px")
+		|> ui.overflowX("auto")),
+	ui.rule("pre code", ui.styles()
+		|> ui.background("none")
+		|> ui.color("inherit")
+		|> ui.padding("0")
+		|> ui.fontSize("0.85rem")
+		|> ui.lineHeight("1.55")),
+	ui.rule(".sig", ui.styles()
+		|> ui.display("inline-block")
+		|> ui.background("#7A2048")
+		|> ui.color("#FBF3E6")
+		|> ui.fontSize("0.85rem")),
+	ui.rule("table", ui.styles() |> ui.borderCollapse("collapse") |> ui.width("100%")),
+	ui.rule("th, td", ui.styles()
+		|> ui.textAlign("left")
+		|> ui.padding("8px 10px")
+		|> ui.borderBottom("1px solid #F0E6D6")
+		|> ui.verticalAlign("middle")),
+	ui.rule("th", ui.styles()
+		|> ui.fontSize("0.8rem")
+		|> ui.textTransform("uppercase")
+		|> ui.letterSpacing("0.04em")
+		|> ui.color("#8A7A6D")),
+	ui.rule(".swatch", ui.styles()
+		|> ui.display("block")
+		|> ui.width("22px")
+		|> ui.height("22px")
+		|> ui.rounded("6px")
+		|> ui.border("1px solid #00000018")),
+	ui.rule(".site-nav", ui.styles()
+		|> ui.display("flex")
+		|> ui.gap("18px")
+		|> ui.flexWrap("wrap")
+		|> ui.paddingBottom("12px")
+		|> ui.borderBottom("1px solid #F0E6D6")),
+	ui.rule(".site-nav a", ui.styles()
+		|> ui.color("#8A7A6D")
+		|> ui.textDecoration("none")
+		|> ui.fontWeight("600")
+		|> ui.padding("4px 0")),
+	ui.rule(".site-nav a[aria-current=page]", ui.styles()
+		|> ui.color("#7A2048")
+		|> ui.borderBottom("2px solid #7A2048")),
+	ui.rule(".masthead", ui.styles() |> ui.gap("10px")),
+	ui.rule(".toc ul", ui.styles() |> ui.margin("0") |> ui.padding("0 0 0 18px")),
+	ui.rule(".toc", ui.styles()
+		|> ui.background("#FBF3E6")
+		|> ui.rounded("10px")
+		|> ui.padding("16px 18px")),
+	ui.rule(".colophon", ui.styles() |> ui.gap("8px") |> ui.marginTop("16px")),
+	ui.rule(".doc-section", ui.styles()
+		|> ui.display("flex")
+		|> ui.flexDirection("column")
+		|> ui.gap("16px")),
+	ui.rule(".component", ui.styles()
+		|> ui.border("1px solid #F0E6D6")
+		|> ui.rounded("10px")
+		|> ui.padding("18px")
+		|> ui.background("#FFFFFF")),
+	ui.rule(".demo", ui.styles()
+		|> ui.marginTop("4px")
+		|> ui.border("1px dashed #E0D3C0")
+		|> ui.rounded("8px")
+		|> ui.padding("16px")
+		|> ui.background("#FFFDF8")),
+	ui.rule(".pill", ui.styles()
+		|> ui.background("#6E8B3D")
+		|> ui.color("#FBF3E6")
+		|> ui.padding("2px 10px")
+		|> ui.rounded("999px")
+		|> ui.fontSize("0.75rem")),
+	ui.rule("[popover]", ui.styles()
+		|> ui.border("1px solid #E0D3C0")
+		|> ui.rounded("10px")
+		|> ui.padding("16px")
+		|> ui.boxShadow("0 12px 32px #2b171022")),
+	ui.rule("summary", ui.styles() |> ui.cursor("pointer") |> ui.fontWeight("600") |> ui.padding("8px 0")),
+	ui.rule("details", ui.styles() |> ui.borderBottom("1px solid #F0E6D6"))
+]
 
-page.write("dist/index.html", html)
-page.write("dist/style.css", css)
+# The rules the CSS-only components expect a stylesheet to provide.
+# tabs() generates its own show/hide rules inline, so all that is left
+# here is hiding its radio inputs and styling its labels; toggle() ships
+# the markup and leaves the checked appearance to this rule.
+#
+# Every selector below uses the child combinator deliberately. tabs()
+# puts its radios, labels and panel wrapper as DIRECT children of its own
+# root, so ".tabs > input" hits exactly those and nothing else — with a
+# descendant selector, the radio, label and checkbox demos living inside
+# a tab panel would be caught by these rules too and rendered invisible.
+# The child combinator is safe here because ui.stylesheet's output is
+# written straight to a .css file; only CSS passed through renderToString
+# (a style element's text, e.g. ui.rulesStylesheet) has to avoid ">".
+let interactiveRules: [ui.Rule] = [
+	ui.rule(".tabs > input[type=radio]", ui.styles()
+		|> ui.position("absolute")
+		|> ui.opacity("0")
+		|> ui.pointerEvents("none")),
+	ui.rule(".tabs > label", ui.styles()
+		|> ui.display("inline-block")
+		|> ui.cursor("pointer")
+		|> ui.padding("8px 14px")
+		|> ui.rounded("8px 8px 0 0")
+		|> ui.fontSize("0.9rem")
+		|> ui.color("#8A7A6D")),
+	ui.rule(".tabs > input[type=radio]:checked + label", ui.styles()
+		|> ui.background("#7A2048")
+		|> ui.color("#FBF3E6")),
+	ui.rule(".tabs > div[id^=panels-]", ui.styles()
+		|> ui.borderTop("2px solid #7A2048")
+		|> ui.paddingTop("20px")
+		|> ui.marginTop("-1px")),
+	ui.rule("span > input[type=checkbox]", ui.styles()
+		|> ui.position("absolute")
+		|> ui.opacity("0")
+		|> ui.pointerEvents("none")),
+	ui.rule("span > input[type=checkbox] + label", ui.styles()
+		|> ui.display("inline-block")
+		|> ui.cursor("pointer")
+		|> ui.border("1px solid #E0D3C0")
+		|> ui.rounded("6px")
+		|> ui.padding("6px 12px")
+		|> ui.fontSize("0.9rem")),
+	ui.rule("span > input[type=checkbox]:checked + label", ui.styles()
+		|> ui.background("#7A2048")
+		|> ui.color("#FBF3E6")
+		|> ui.borderColor("#7A2048"))
+]
+
+let allRules: [ui.Rule] = array.join(siteRules, interactiveRules)
+
+let responsiveMedia: [ui.MediaQuery] = [
+	ui.media("(max-width: 640px)", [
+		ui.rule(".page", ui.styles() |> ui.padding("24px 16px 64px") |> ui.gap("28px")),
+		ui.rule("pre", ui.styles() |> ui.fontSize("0.8rem")),
+		ui.rule(".component", ui.styles() |> ui.padding("14px"))
+	])
+]
+
+let css = ui.stylesheet(allRules, siteClasses, responsiveMedia)
+
+writeSite(site, site)
+doc.write("dist/style.css", css)

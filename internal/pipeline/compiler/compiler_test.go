@@ -362,15 +362,15 @@ func TestCompileCrossCompiles(t *testing.T) {
 	}
 }
 
-// TestPageWriteProducesFileOnDisk is an end-to-end check that a static-page
-// project's `page.write` call really does produce a file on disk when the
+// TestDocWriteProducesFileOnDisk is an end-to-end check that a static-page
+// project's `doc.write` call really does produce a file on disk when the
 // compiled binary runs — compiling natively (no GOOS/GOARCH override, unlike
 // the browser-module tests below) and executing the resulting binary with
 // its working directory set to a temp dir, then reading back what it wrote.
-func TestPageWriteProducesFileOnDisk(t *testing.T) {
+func TestDocWriteProducesFileOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "main.caja")
-	source := "import page\npage.write(\"out/index.html\", \"hello\")\n"
+	source := "import doc\ndoc.write(\"out/index.html\", \"hello\")\n"
 	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
 		t.Fatalf("failed to write test script: %v", err)
 	}
@@ -386,8 +386,8 @@ func TestPageWriteProducesFileOnDisk(t *testing.T) {
 	if formatted, err := format.Source([]byte(goCode)); err == nil {
 		goCode = string(formatted)
 	}
-	if !strings.Contains(goCode, "caja_page_write(") {
-		t.Fatalf("expected generated Go source to call caja_page_write, got:\n%s", goCode)
+	if !strings.Contains(goCode, "caja_doc_write(") {
+		t.Fatalf("expected generated Go source to call caja_doc_write, got:\n%s", goCode)
 	}
 
 	outBin := filepath.Join(dir, "main")
@@ -406,7 +406,7 @@ func TestPageWriteProducesFileOnDisk(t *testing.T) {
 
 	got, err := os.ReadFile(filepath.Join(runDir, "out", "index.html"))
 	if err != nil {
-		t.Fatalf("expected page.write to have created out/index.html: %v", err)
+		t.Fatalf("expected doc.write to have created out/index.html: %v", err)
 	}
 	if string(got) != "hello" {
 		t.Errorf("out/index.html = %q, want %q", got, "hello")
