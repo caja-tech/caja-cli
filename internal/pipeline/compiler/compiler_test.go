@@ -24,7 +24,7 @@ import (
 
 func TestSamplesCompilation(t *testing.T) {
 	samplesDir := "samples"
-	
+
 	entries, err := os.ReadDir(samplesDir)
 	if err != nil {
 		t.Fatalf("failed to read samples directory: %v", err)
@@ -38,7 +38,7 @@ func TestSamplesCompilation(t *testing.T) {
 		dirName := entry.Name()
 		t.Run(dirName, func(t *testing.T) {
 			filePath := filepath.Join(samplesDir, dirName, dirName+".caja")
-			
+
 			sourceCode, err := os.ReadFile(filePath)
 			if err != nil {
 				t.Fatalf("failed to read file '%s': %v", filePath, err)
@@ -1163,6 +1163,140 @@ func runCajaSource(t *testing.T, source string) string {
 		t.Fatalf("run failed: %v\nstderr:\n%s", err, stderr.String())
 	}
 	return stdout.String()
+}
+
+// TestTimeParseReturnsNilOnFailureAtRuntime verifies time.parse's nil/non-nil
+// Nullable behavior for real, not just at the codegen-substring level: a
+// value matching layout must round-trip to a non-nil *time.Time.
+func TestTimeParseReturnsNilOnFailureAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet ok = time.parse(\"2006-01-02\", \"2024-03-05\")\nreturn ok != nil\n")
+	if strings.TrimSpace(got) != "true" {
+		t.Errorf("time.parse of a valid date: got %q, want %q", got, "true")
+	}
+}
+
+// TestTimeParseReturnsNilOnInvalidInputAtRuntime is
+// TestTimeParseReturnsNilOnFailureAtRuntime's counterpart: a value that
+// doesn't match layout must round-trip to nil, not a zero-value time.Time.
+func TestTimeParseReturnsNilOnInvalidInputAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet bad = time.parse(\"2006-01-02\", \"not-a-date\")\nreturn bad != nil\n")
+	if strings.TrimSpace(got) != "false" {
+		t.Errorf("time.parse of an invalid date: got %q, want %q", got, "false")
+	}
+}
+
+// TestTimeParseDurationReturnsNilOnFailureAtRuntime is
+// TestTimeParseReturnsNilOnFailureAtRuntime's counterpart for
+// time.parseDuration: a well-formed duration string must round-trip to a
+// non-nil *time.Duration.
+func TestTimeParseDurationReturnsNilOnFailureAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet ok = time.parseDuration(\"1h30m\")\nreturn ok != nil\n")
+	if strings.TrimSpace(got) != "true" {
+		t.Errorf("time.parseDuration of a valid duration: got %q, want %q", got, "true")
+	}
+}
+
+// TestTimeParseDurationReturnsNilOnInvalidInputAtRuntime verifies
+// time.parseDuration returns nil (not a zero-value time.Duration) for a
+// string Go's time.ParseDuration can't parse.
+func TestTimeParseDurationReturnsNilOnInvalidInputAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet bad = time.parseDuration(\"not-a-duration\")\nreturn bad != nil\n")
+	if strings.TrimSpace(got) != "false" {
+		t.Errorf("time.parseDuration of an invalid duration: got %q, want %q", got, "false")
+	}
+}
+
+// TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond verifies
+// time.unix's actual epoch round-tripping at runtime, not just its codegen
+// substring: unixSeconds/unixMilli must recover the same second/millisecond
+// count that was passed in. nanosecond (unlike hour/minute/second) is
+// checked because it's location-independent — Go's time.Unix returns a
+// Local-zone Time, so hour/minute/second's real values would depend on the
+// test machine's timezone. Each assertion is its own subtest/program
+// (rather than combined with "and") because the compiler doesn't currently
+// lower the "and"/"or"/"xor" keyword operators to valid Go syntax — an
+// unrelated, pre-existing gap outside this diff's scope.
+func TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond(t *testing.T) {
+	for name, source := range map[string]string{
+		"unixSeconds recovers the seconds passed to unix": `import "time" as time
+let t = time.unix(1700000000, 123456789)
+return time.unixSeconds(t) == 1700000000
+`,
+		"unixMilli recovers seconds*1000 + nsec/1e6": `import "time" as time
+let t = time.unix(1700000000, 123456789)
+return time.unixMilli(t) == 1700000000123
+`,
+		"nanosecond recovers the nsec passed to unix": `import "time" as time
+let t = time.unix(1700000000, 123456789)
+return time.nanosecond(t) == 123456789
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runCajaSource(t, source)
+			if strings.TrimSpace(got) != "true" {
+				t.Errorf("got %q, want %q", got, "true")
+			}
+		})
+	}
+}
+
+// TestTimeBeforeAfterEqualComparisonSemantics verifies before/after/equal's
+// actual boolean comparison semantics at runtime, not just that they
+// transpile to the right Go method call: an earlier Instant must compare as
+// before a later one (and not after or equal to it), and an Instant must
+// compare equal to itself. See the "and"/"or"/"xor" codegen note on
+// TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond for why
+// each assertion is its own subtest/program.
+func TestTimeBeforeAfterEqualComparisonSemantics(t *testing.T) {
+	const setup = `import "time" as time
+let earlier = time.unix(0, 0)
+let later = time.unix(100, 0)
+`
+	for name, expr := range map[string]string{
+		"earlier is before later":         "time.before(earlier, later) == true",
+		"later is not before earlier":     "time.before(later, earlier) == false",
+		"later is after earlier":          "time.after(later, earlier) == true",
+		"earlier is not after later":      "time.after(earlier, later) == false",
+		"an Instant is equal to itself":   "time.equal(earlier, earlier) == true",
+		"distinct Instants are not equal": "time.equal(earlier, later) == false",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runCajaSource(t, setup+"return "+expr+"\n")
+			if strings.TrimSpace(got) != "true" {
+				t.Errorf("got %q, want %q", got, "true")
+			}
+		})
+	}
+}
+
+// TestTimeDurationConstructorsAndAccessorsRoundTrip verifies the
+// minutes/hours constructors and the toMilliseconds/toSeconds/toMinutes/
+// toHours accessors against each other's actual numeric output at runtime,
+// not just their codegen substrings. See the "and"/"or"/"xor" codegen note
+// on TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond for why
+// each assertion is its own subtest/program.
+func TestTimeDurationConstructorsAndAccessorsRoundTrip(t *testing.T) {
+	for name, source := range map[string]string{
+		"toMilliseconds(minutes(2)) == 120000": `import "time" as time
+return time.toMilliseconds(time.minutes(2)) == 120000
+`,
+		"toSeconds(minutes(2)) == 120": `import "time" as time
+return time.toSeconds(time.minutes(2)) == 120
+`,
+		"toMinutes(hours(1)) == 60": `import "time" as time
+return time.toMinutes(time.hours(1)) == 60
+`,
+		"toHours(hours(1)) == 1": `import "time" as time
+return time.toHours(time.hours(1)) == 1
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runCajaSource(t, source)
+			if strings.TrimSpace(got) != "true" {
+				t.Errorf("got %q, want %q", got, "true")
+			}
+		})
+	}
 }
 
 // TestCOWStructAssignmentDoesNotAlias is the core behavior this whole change

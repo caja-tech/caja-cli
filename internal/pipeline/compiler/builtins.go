@@ -11,6 +11,7 @@ import (
 var builtinModules = map[string]bool{
 	"array":   true,
 	"date":    true,
+	"time":    true,
 	"string":  true,
 	"math":    true,
 	"log":     true,
@@ -239,6 +240,71 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			return fmt.Sprintf("float64(%s.Day())", argStrs[0]), nil
 		case "weekday":
 			return fmt.Sprintf("float64(%s.Weekday())", argStrs[0]), nil
+		}
+
+	case "time":
+		// Not every codegen case below produces Go source containing the
+		// literal substring "time." (e.g. "before"/"hour"/"toSeconds" are
+		// plain method calls), so the import "time" gate can't rely on that
+		// fallback detection for this module the way it can for the
+		// functions above — set the flag explicitly instead, matching how
+		// "date" already does this unconditionally.
+		ctx.usedModules["time"] = true
+		switch fn {
+		case "now":
+			return "time.Now()", nil
+		case "sleep":
+			return fmt.Sprintf("time.Sleep(%s)", argStrs[0]), nil
+		case "since":
+			return fmt.Sprintf("time.Since(%s)", argStrs[0]), nil
+		case "format":
+			return fmt.Sprintf("%s.Format(%s)", argStrs[0], argStrs[1]), nil
+		case "add":
+			return fmt.Sprintf("%s.Add(%s)", argStrs[0], argStrs[1]), nil
+		case "sub":
+			return fmt.Sprintf("%s.Sub(%s)", argStrs[0], argStrs[1]), nil
+		case "milliseconds":
+			return fmt.Sprintf("time.Duration(%s * float64(time.Millisecond))", argStrs[0]), nil
+		case "seconds":
+			return fmt.Sprintf("time.Duration(%s * float64(time.Second))", argStrs[0]), nil
+		case "minutes":
+			return fmt.Sprintf("time.Duration(%s * float64(time.Minute))", argStrs[0]), nil
+		case "hours":
+			return fmt.Sprintf("time.Duration(%s * float64(time.Hour))", argStrs[0]), nil
+		case "parse":
+			ctx.usedModules["time_parse"] = true
+			return fmt.Sprintf("caja_time_parse(%s, %s)", argStrs[0], argStrs[1]), nil
+		case "parseDuration":
+			ctx.usedModules["time_parse_duration"] = true
+			return fmt.Sprintf("caja_time_parse_duration(%s)", argStrs[0]), nil
+		case "unix":
+			return fmt.Sprintf("time.Unix(int64(%s), int64(%s))", argStrs[0], argStrs[1]), nil
+		case "unixSeconds":
+			return fmt.Sprintf("float64(%s.Unix())", argStrs[0]), nil
+		case "unixMilli":
+			return fmt.Sprintf("float64(%s.UnixMilli())", argStrs[0]), nil
+		case "before":
+			return fmt.Sprintf("%s.Before(%s)", argStrs[0], argStrs[1]), nil
+		case "after":
+			return fmt.Sprintf("%s.After(%s)", argStrs[0], argStrs[1]), nil
+		case "equal":
+			return fmt.Sprintf("%s.Equal(%s)", argStrs[0], argStrs[1]), nil
+		case "hour":
+			return fmt.Sprintf("float64(%s.Hour())", argStrs[0]), nil
+		case "minute":
+			return fmt.Sprintf("float64(%s.Minute())", argStrs[0]), nil
+		case "second":
+			return fmt.Sprintf("float64(%s.Second())", argStrs[0]), nil
+		case "nanosecond":
+			return fmt.Sprintf("float64(%s.Nanosecond())", argStrs[0]), nil
+		case "toMilliseconds":
+			return fmt.Sprintf("float64(%s.Milliseconds())", argStrs[0]), nil
+		case "toSeconds":
+			return fmt.Sprintf("%s.Seconds()", argStrs[0]), nil
+		case "toMinutes":
+			return fmt.Sprintf("%s.Minutes()", argStrs[0]), nil
+		case "toHours":
+			return fmt.Sprintf("%s.Hours()", argStrs[0]), nil
 		}
 
 	case "map":
@@ -2197,6 +2263,38 @@ func caja_date_today() time.Time {
 `)
 	}
 
+	if ctx.usedModules["time_parse"] {
+		buf.WriteString(`
+// caja_time_parse wraps time.Parse, returning nil (Instant?'s Go type is
+// *time.Time) for a value that doesn't match layout, mirroring
+// caja_browser_query_selector's "nil on failure" Nullable convention rather
+// than surfacing Go's error value (Caja has no error type here).
+func caja_time_parse(layout string, value string) *time.Time {
+	t, err := time.Parse(layout, value)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+`)
+	}
+
+	if ctx.usedModules["time_parse_duration"] {
+		buf.WriteString(`
+// caja_time_parse_duration wraps time.ParseDuration, returning nil
+// (Duration?'s Go type is *time.Duration) for a string that doesn't parse
+// (bad unit, malformed number, ...), mirroring caja_time_parse's "nil on
+// failure" Nullable convention rather than surfacing Go's error value.
+func caja_time_parse_duration(s string) *time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return nil
+	}
+	return &d
+}
+`)
+	}
+
 	if ctx.usedModules["log_export"] {
 		buf.WriteString(`
 var cajaExportedValues []any
@@ -2297,7 +2395,7 @@ func caja_format_value(v any) string {
 		return caja_format_value(rv.Elem().Interface())
 	case reflect.Struct:
 		if t, ok := v.(time.Time); ok {
-			return t.Format("2006-01-02")
+			return t.Format("2006-01-02 15:04:05")
 		}
 		rt := rv.Type()
 		var parts []string

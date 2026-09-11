@@ -805,6 +805,10 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		return "bool"
 	case environment.DATE_OBJ:
 		return "time.Time"
+	case environment.INSTANT_OBJ:
+		return "time.Time"
+	case environment.DURATION_OBJ:
+		return "time.Duration"
 	case environment.ELEMENT_OBJ:
 		ctx.usedModules["syscall/js"] = true
 		return "js.Value"

@@ -592,6 +592,73 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Time builtins",
+			input: `
+				import "time" as time
+				let n = time.now()
+				time.sleep(time.seconds(2))
+				let d = time.since(n)
+				let s = time.format(n, "2006-01-02 15:04:05")
+				let n2 = time.add(n, time.milliseconds(500))
+				let d2 = time.sub(n2, n)
+			`,
+			expected: []string{
+				"var n time.Time = time.Now()",
+				"time.Sleep(time.Duration(2.0 * float64(time.Second)))",
+				"var d time.Duration = time.Since(n)",
+				`var s string = n.Format("2006-01-02 15:04:05")`,
+				"var n2 time.Time = n.Add(time.Duration(500.0 * float64(time.Millisecond)))",
+				"var d2 time.Duration = n2.Sub(n)",
+				"import \"time\"",
+			},
+		},
+		{
+			name: "Time builtins (new functions)",
+			input: `
+				import "time" as time
+				let start = time.now()
+				let parsed = time.parse("2006-01-02", "2024-01-01")
+				let parsedDur = time.parseDuration("1h30m")
+				let epoch = time.unix(0, 0)
+				let us = time.unixSeconds(start)
+				let um = time.unixMilli(start)
+				let b = time.before(epoch, start)
+				let af = time.after(start, epoch)
+				let eq = time.equal(start, start)
+				let h = time.hour(start)
+				let mi = time.minute(start)
+				let se = time.second(start)
+				let ns = time.nanosecond(start)
+				let mins = time.minutes(2)
+				let hrs = time.hours(1)
+				let d = time.since(start)
+				let dms = time.toMilliseconds(d)
+				let ds = time.toSeconds(d)
+				let dm = time.toMinutes(d)
+				let dh = time.toHours(d)
+			`,
+			expected: []string{
+				`caja_time_parse("2006-01-02", "2024-01-01")`,
+				`caja_time_parse_duration("1h30m")`,
+				"time.Unix(int64(0.0), int64(0.0))",
+				"float64(start.Unix())",
+				"float64(start.UnixMilli())",
+				"epoch.Before(start)",
+				"start.After(epoch)",
+				"start.Equal(start)",
+				"float64(start.Hour())",
+				"float64(start.Minute())",
+				"float64(start.Second())",
+				"float64(start.Nanosecond())",
+				"time.Duration(2.0 * float64(time.Minute))",
+				"time.Duration(1.0 * float64(time.Hour))",
+				"float64(d.Milliseconds())",
+				"d.Seconds()",
+				"d.Minutes()",
+				"d.Hours()",
+			},
+		},
+		{
 			name: "Browser builtins",
 			input: `
 				import browser
