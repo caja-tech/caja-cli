@@ -16,7 +16,7 @@ let applyTo = fn(factor: Number, f: fn(Number) -> Number) -> Number {
 
 let onlyNamed = makeGreeting(name: "Ana", greeting: "Hello")
 let mixed = makeGreeting("Bob", greeting: "Hi")
-let reordered = makeGreeting(greeting: "Hey", name: "Carl")
+let allNamed = makeGreeting(name: "Carl", greeting: "Hey")
 let piped = "Dee" |> makeGreeting(greeting: "Yo")
 let generic = identity(value: 42)
 
@@ -36,7 +36,7 @@ if (mixed != "Hi, Bob") {
 	return 1
 }
 
-if (reordered != "Hey, Carl") {
+if (allNamed != "Hey, Carl") {
 	return 1
 }
 

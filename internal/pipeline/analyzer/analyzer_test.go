@@ -4249,11 +4249,18 @@ return createUser(name: "Ana", age: 30)
 `,
 		},
 		{
-			name: "Valid call with named arguments in a different order",
+			// Naming an argument documents it; it does not license reordering
+			// the call. A call site must read in the order the function was
+			// declared.
+			name: "Named arguments out of declaration order are rejected",
 			input: `
 let createUser = fn(name: String, age: Number) -> String { return name }
 return createUser(age: 30, name: "Ana")
 `,
+			expectedErrors: []string{
+				"type error: named argument 'name' is out of order: it must come before 'age' to match the parameter order of 'createUser'",
+				"arity error: missing argument for parameter 'name'",
+			},
 		},
 		{
 			name: "Valid call mixing positional and named arguments",
@@ -4373,7 +4380,39 @@ let r = 1 |> add3(a: 10, c: 3)
 			name: "Piped value fills the first parameter and named arguments the rest",
 			input: `
 let add3 = fn(a: Number, b: Number, c: Number) -> Number { return a + b + c }
-let r = 1 |> add3(c: 3, b: 2)
+let r = 1 |> add3(b: 2, c: 3)
+`,
+		},
+		{
+			// Every pipe variant threads its value in as the first positional
+			// argument, so named arguments must cover the remaining ones.
+			name: "Stream pipe stage accepts named arguments",
+			input: `
+type Sale struct { amount Number }
+let discount = fn(s: Sale, pct: Number) -> Sale { return Sale { amount: s.amount - pct } }
+let sales = [Sale { amount: 100 }]
+let out = sales |>> discount(pct: 10)
+`,
+		},
+		{
+			name: "Safe pipe stage accepts named arguments",
+			input: `
+type Customer struct { age Number }
+define Major constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
+let bump = fn(m: Major, by: Number) -> Major { return m }
+let m1: Major? = Customer { age: 20 }
+let r: Major? = m1 ?> bump(by: 5)
+`,
+		},
+		{
+			name: "Join pipeline stage accepts named arguments",
+			input: `
+type Loan struct { principal Number }
+let rate = fn(l: Loan, mult: Number) -> Number { return l.principal * mult }
+let fees = fn(l: Loan) -> Number { return 10 }
+let pnl = fn(r: Number, f: Number) -> Number { return r + f }
+let loans = [Loan { principal: 100 }]
+let out = loans |>> (rate(mult: 2) & fees) |>> pnl
 `,
 		},
 		{

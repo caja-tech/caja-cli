@@ -36,7 +36,7 @@ type Analyzer struct {
 	streamStageTypes    map[*ast.StreamPipeExpression]symbol.Symbol
 	memoBindingAllowed  bool
 	topLevelAwaitAsync map[ast.Node]bool
-	resolvedCallArgs    map[*ast.CallExpression][]ast.Expression
+	resolvedCallArgs    map[*ast.CallExpression][]callArgSource
 	// wildcardTypes is the type-scope mirror of ScopeEntry.WildcardModules:
 	// type name -> the bound module names that wildcard-imported it. A flat
 	// map is safe because imports are rejected inside blocks and forced to the
@@ -67,7 +67,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		expectedTypeStack:   make([]symbol.Symbol, 0),
 		streamStageTypes:    make(map[*ast.StreamPipeExpression]symbol.Symbol),
 		topLevelAwaitAsync:  make(map[ast.Node]bool),
-		resolvedCallArgs:    make(map[*ast.CallExpression][]ast.Expression),
+		resolvedCallArgs:    make(map[*ast.CallExpression][]callArgSource),
 		wildcardTypes:          make(map[string][]string),
 		reportedAmbiguousTypes: make(map[string]bool),
 	}
@@ -167,8 +167,29 @@ func (a *Analyzer) AmbiguousWildcardModules(name string) ([]string, bool) {
 // this instead of the AST's own Arguments/NamedArguments when emitting Go's
 // positional call syntax.
 func (a *Analyzer) GetResolvedCallArguments(n *ast.CallExpression) ([]ast.Expression, bool) {
-	args, ok := a.resolvedCallArgs[n]
-	return args, ok
+	plan, ok := a.resolvedCallArgs[n]
+	if !ok {
+		return nil, false
+	}
+
+	// Rebuilt from the LIVE AST on every call rather than cached as
+	// expressions, because the pipeline transpilers (stream, safe and join)
+	// inject their per-item variable by swapping Call.Arguments[0] in place
+	// and restoring it afterwards. A snapshot taken during analysis would
+	// still hold the pre-substitution expression and silently drop that
+	// variable from the emitted call.
+	args := make([]ast.Expression, len(plan))
+	for slot, src := range plan {
+		switch {
+		case src.namedIndex >= 0 && src.namedIndex < len(n.NamedArguments):
+			args[slot] = n.NamedArguments[src.namedIndex].Value
+		case src.positionalIndex >= 0 && src.positionalIndex < len(n.Arguments):
+			args[slot] = n.Arguments[src.positionalIndex]
+		default:
+			return nil, false
+		}
+	}
+	return args, true
 }
 
 // GetDefinition retrieves the token where the symbol in the given AST node was declared, and the file path.
@@ -1760,12 +1781,15 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 		}
 		argsToCheck = n.Arguments
 	} else {
-		resolved, ok := a.resolveNamedCallArguments(n, fnSymbol)
+		plan, ok := a.resolveNamedCallArguments(n, fnSymbol)
 		if !ok {
 			return symbol.AnySymbol()
 		}
-		a.resolvedCallArgs[n] = resolved
-		argsToCheck = resolved
+		a.resolvedCallArgs[n] = plan
+		argsToCheck, ok = a.GetResolvedCallArguments(n)
+		if !ok {
+			return symbol.AnySymbol()
+		}
 	}
 
 	inferredTypes := make(map[string]symbol.Symbol)
@@ -1837,19 +1861,32 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 	return symbol.AnySymbol()
 }
 
-// resolveNamedCallArguments resolves a call's positional and named arguments
-// against fnSymbol's declared parameter order (ParamNames), for a call that
-// used at least one named argument. Positional arguments fill parameters
-// left-to-right first; named arguments fill the remaining parameters by name
-// and are order-independent among themselves. Reports every applicable
-// error (unknown parameter name, a parameter supplied both positionally and
-// by name, a duplicate named argument, too many positional arguments, or a
-// still-missing parameter after resolution) and returns (nil, false) if any
-// occurred -- the caller must not attempt further type-checking on a
-// partially-resolved argument list.
-func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *symbol.FunctionSymbol) ([]ast.Expression, bool) {
+// callArgSource records where one parameter slot's argument expression lives
+// in the call's AST: either an index into Arguments (positional) or into
+// NamedArguments. Storing indices rather than the expressions themselves is
+// what lets GetResolvedCallArguments read through to the live AST, which the
+// pipeline transpilers mutate in place.
+type callArgSource struct {
+	positionalIndex int // -1 when this slot came from a named argument
+	namedIndex      int // -1 when this slot came from a positional argument
+}
+
+// resolveNamedCallArguments maps a call's positional and named arguments onto
+// fnSymbol's parameter slots, for a call that used at least one named
+// argument. Positional arguments fill parameters left-to-right; named
+// arguments name the remaining ones and must still appear in the function's
+// declared parameter order, so a call always reads in the same order the
+// function was defined. Reports every applicable error (unknown parameter
+// name, out-of-order name, a parameter supplied both positionally and by
+// name, a duplicate, too many positional arguments, or a still-missing
+// parameter) and returns (nil, false) if any occurred -- the caller must not
+// type-check a partially-resolved list.
+func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *symbol.FunctionSymbol) ([]callArgSource, bool) {
 	arity := fnSymbol.Arity()
-	resolved := make([]ast.Expression, arity)
+	plan := make([]callArgSource, arity)
+	for i := range plan {
+		plan[i] = callArgSource{positionalIndex: -1, namedIndex: -1}
+	}
 	filled := make([]bool, arity)
 	ok := true
 
@@ -1858,38 +1895,36 @@ func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *sy
 	// remaining positional slots no longer run contiguously from 0, so the
 	// trailing argument has to be lifted out and placed explicitly -- left in
 	// the positional run it would land in slot 0 instead.
-	positional := n.Arguments
-	var trailing ast.Expression
-	if n.HasTrailingArgument && len(positional) > 0 {
-		trailing = positional[len(positional)-1]
-		positional = positional[:len(positional)-1]
-	}
-
-	if trailing != nil && arity > 0 {
-		resolved[arity-1] = trailing
-		filled[arity-1] = true
-	}
-
-	if len(positional) > arity {
-		a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, len(positional)))
-		ok = false
-	}
-	for i, arg := range positional {
-		if i < arity {
-			if filled[i] {
-				// Only reachable when the trailing argument already claimed
-				// this slot, i.e. the call fills the last parameter twice.
-				a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, len(positional)+1))
-				ok = false
-				continue
-			}
-			resolved[i] = arg
-			filled[i] = true
+	positionalCount := len(n.Arguments)
+	hasTrailing := n.HasTrailingArgument && positionalCount > 0
+	if hasTrailing {
+		positionalCount--
+		if arity > 0 {
+			plan[arity-1] = callArgSource{positionalIndex: len(n.Arguments) - 1, namedIndex: -1}
+			filled[arity-1] = true
 		}
 	}
 
+	if positionalCount > arity {
+		a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, positionalCount))
+		ok = false
+	}
+	for i := 0; i < positionalCount && i < arity; i++ {
+		if filled[i] {
+			// Only reachable when the trailing argument already claimed this
+			// slot, i.e. the call fills the last parameter twice.
+			a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, positionalCount+1))
+			ok = false
+			continue
+		}
+		plan[i] = callArgSource{positionalIndex: i, namedIndex: -1}
+		filled[i] = true
+	}
+
 	seen := make(map[string]bool)
-	for _, na := range n.NamedArguments {
+	lastPos := -1
+	lastName := ""
+	for idx, na := range n.NamedArguments {
 		pos := -1
 		for i, name := range fnSymbol.ParamNames {
 			if name == na.Name.Value {
@@ -1908,12 +1943,22 @@ func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *sy
 			continue
 		}
 		seen[na.Name.Value] = true
+		// Naming an argument documents it; it does not license reordering the
+		// call. Requiring declared order keeps a call site readable in the
+		// same sequence the function was defined in.
+		if pos < lastPos {
+			a.reportError(na.Token, fmt.Sprintf("type error: named argument '%s' is out of order: it must come before '%s' to match the parameter order of '%s'", na.Name.Value, lastName, fnSymbol.Name))
+			ok = false
+			continue
+		}
+		lastPos = pos
+		lastName = na.Name.Value
 		if filled[pos] {
 			a.reportError(na.Token, fmt.Sprintf("type error: parameter '%s' supplied both positionally and by name", na.Name.Value))
 			ok = false
 			continue
 		}
-		resolved[pos] = na.Value
+		plan[pos] = callArgSource{positionalIndex: -1, namedIndex: idx}
 		filled[pos] = true
 	}
 
@@ -1931,7 +1976,7 @@ func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *sy
 	if !ok {
 		return nil, false
 	}
-	return resolved, true
+	return plan, true
 }
 
 // analyzeIndexExpression ensures the left side is an array or map and the index is valid.
