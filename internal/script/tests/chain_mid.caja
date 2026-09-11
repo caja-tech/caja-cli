@@ -1,0 +1,6 @@
+import "chain_leaf" as leaf
+
+# 'leaf' is a local binding here, not part of this module's exports.
+let midValue = fn() -> Number {
+	return leaf.value + 1
+}

@@ -1,0 +1,6 @@
+import * from "reexport_index"
+
+# reexport_index named-imports 'registerRoutes' rather than declaring it, so it
+# is not in that module's export set - and a wildcard binds exactly the export
+# set, so nothing is bound here either.
+return registerRoutes(29)

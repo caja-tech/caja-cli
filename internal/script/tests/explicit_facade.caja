@@ -1,0 +1,5 @@
+import "reexport_router" as router
+
+# The explicit way to forward a name: declare it. Unlike a bare import, this
+# is a real local declaration, so it IS part of this module's exports.
+let registerRoutes = router.registerRoutes

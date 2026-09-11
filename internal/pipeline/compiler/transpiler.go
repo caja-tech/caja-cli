@@ -8,7 +8,6 @@ import (
 	"caja-cli/internal/pipeline/environment"
 
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -874,7 +873,6 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 					bodyBuf.WriteString(fmt.Sprintf("\t_ = %s\n", sanitizeIdentifier(ctx.CurrentModulePath)+"_"+constStmt.Name.Value))
 				}
 			}
-			writeReexportForwards(&bodyBuf, ctx)
 			bodyBuf.WriteString("\n")
 		}
 	}
@@ -2586,76 +2584,6 @@ func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (s
 	// deciding whether to abort.
 	buf.WriteString("\ncaja_check_async_panic()")
 	return buf.String(), nil
-}
-
-// writeReexportForwards closes the gap a facade module leaves when it named-
-// imports a value only to re-export it ("import { X } from sub", never
-// itself calling X) rather than declaring it directly: that ImportStatement
-// transpiles to a no-op comment, so nothing ever declares a Go symbol under
-// this module's own prefix, and a downstream caller who named-imports X
-// from THIS module gets an "undefined: <thisModule>_X" build failure even
-// though semantic analysis accepted the whole chain. For every such
-// re-exported name, emit a forwarding declaration pointing at the name's
-// immediate origin (one hop back — exactly what ScopeEntry.FilePath already
-// holds), so `caja build` sees `var thisModule_X = origin_X` and the
-// origin's own already-emitted declaration backs it. getOrderedModules
-// processes modules dependency-first, so the origin's declaration is
-// guaranteed to already exist by the time this runs — and since each hop
-// only ever needs the PRECEDING hop's name, this chains correctly through
-// arbitrarily many re-export hops with no "walk back to the true declarer"
-// logic required anywhere.
-//
-// Builtin-module re-exports (e.g. "import { max } from math", re-exported
-// rather than called) are deliberately skipped: a builtin has no real named
-// Go value to forward to (it's dispatched per-call-site, not materialized
-// as a symbol), so attempting this would trade today's
-// "undefined: facade_max" for an equally-broken "undefined: math_max"
-// instead of actually fixing anything. Left as a known, separate,
-// still-open limitation.
-//
-// A re-exported GENERIC function (TypeParameters non-empty, e.g. a
-// "fn<T>(...)" imported from a package like @caja/std) is skipped for a
-// different, structural reason, not a punted-on gap: Go has no way to name
-// an unbound generic function's type in a plain "var" declaration (only a
-// func/type declaration can itself introduce type parameters), so
-// "var facade_forEach func(*cajaArray[T], func(T) T) = std_forEach" is
-// invalid Go regardless of how it's derived — T isn't in scope on a var.
-// A module that only *calls* a generic import directly (the common case)
-// never goes through this forwarding path at all — Go's own call-site type
-// inference handles that fine; only re-exporting the generic value itself,
-// unforced to a concrete instantiation, is impossible to forward this way.
-func writeReexportForwards(bodyBuf *bytes.Buffer, ctx *transpileContext) {
-	names := make([]string, 0)
-	for name, entry := range ctx.analyzer.GlobalScope() {
-		if !entry.IsImport {
-			continue
-		}
-		// Names pulled in by `import * from ...` are deliberately not
-		// re-exported (the analyzer keeps them out of this module's export
-		// set), so nothing downstream can ever reference <thisModule>_<name>.
-		// Forwarding them would emit dead code proportional to the imported
-		// module's entire surface area.
-		if len(entry.WildcardModules) > 0 {
-			continue
-		}
-		if _, _, isBuiltin := symbol.GetStandardModule(entry.FilePath); isBuiltin {
-			continue
-		}
-		if fnSym, isFn := entry.Sym.(*symbol.FunctionSymbol); isFn && len(fnSym.TypeParameters) > 0 {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		entry := ctx.analyzer.GlobalScope()[name]
-		goType := ctx.mapSymbolToGoType(entry.Sym)
-		localName := sanitizeIdentifier(ctx.CurrentModulePath) + "_" + name
-		originName := sanitizeIdentifier(entry.FilePath) + "_" + name
-		bodyBuf.WriteString(fmt.Sprintf("\tvar %s %s = %s\n", localName, goType, originName))
-		bodyBuf.WriteString(fmt.Sprintf("\t_ = %s\n", localName))
-	}
 }
 
 func getOrderedModules(p *ast.Program, asts map[string]*ast.Program) []string {

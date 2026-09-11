@@ -42,6 +42,12 @@ type Analyzer struct {
 	// map is safe because imports are rejected inside blocks and forced to the
 	// top of the file, so wildcard types only ever land in a.types[0].
 	wildcardTypes map[string][]string
+	// importedTypes marks type names brought in by a named import
+	// (`import { Point } from "mod"`), so buildModuleSymbol can keep them out
+	// of this module's export set - the type-side counterpart of the IsImport
+	// check on ScopeEntry. Flat rather than a stack for the same reason
+	// wildcardTypes is.
+	importedTypes map[string]bool
 	// reportedAmbiguousTypes dedups the type-side ambiguity error: several
 	// statements resolve the same annotation more than once, and the analyzer
 	// tests assert an exact error count.
@@ -69,6 +75,7 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		topLevelAwaitAsync:  make(map[ast.Node]bool),
 		resolvedCallArgs:    make(map[*ast.CallExpression][]callArgSource),
 		wildcardTypes:          make(map[string][]string),
+		importedTypes:          make(map[string]bool),
 		reportedAmbiguousTypes: make(map[string]bool),
 	}
 
@@ -351,6 +358,13 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 		a.analyze(s)
 	}
 
+	return a.buildModuleSymbol()
+}
+
+// buildModuleSymbol turns this file's top-level value and type scopes into the
+// ModuleSymbol every importer of it sees. Only names the file actually declares
+// get in — see isImportedBinding and isImportedType for what is left out.
+func (a *Analyzer) buildModuleSymbol() symbol.Symbol {
 	exports := make(map[string]symbol.Symbol)
 	types := make(map[string]symbol.Symbol)
 	privates := make(map[string]bool)
@@ -360,11 +374,7 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 	// Assuming top-level declarations are in the first scope (index 0)
 	if len(a.scopes) > 0 {
 		for name, entry := range a.scopes[0] {
-			// Names this module pulled in via `import * from ...` are not
-			// re-exported: a wildcard is a convenience for the importing file,
-			// not a re-export, and letting them through would pollute every
-			// downstream consumer's namespace transitively.
-			if len(entry.WildcardModules) > 0 {
+			if isImportedBinding(entry) {
 				continue
 			}
 			exports[name] = entry.Sym
@@ -378,7 +388,7 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 		}
 	}
 	for name, sym := range a.types[0] {
-		if _, isWildcard := a.wildcardTypes[name]; isWildcard {
+		if a.isImportedType(name) {
 			continue
 		}
 		types[name] = sym
@@ -388,6 +398,45 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 	}
 
 	return symbol.NewModuleSymbol("module", exports, types, privates, constants, definitions, a.globalEnv.FileName)
+}
+
+// isImportedBinding reports whether a top-level name reached this module's
+// scope by being imported rather than declared here.
+//
+// An import is a LOCAL binding, never a re-export: whatever this module pulled
+// in - a named import, a wildcard member, or the module alias itself - stays
+// private to this file, so a downstream consumer sees only what this file
+// actually declares. Without that, `a` importing `b` could reach everything `b`
+// imported from `c` (`b.c.value`, or even `import { c } from b`), chaining to
+// arbitrary depth and making every module's public surface the transitive
+// closure of its dependencies.
+//
+// This matches Go (an import is file-scoped and never part of the package's
+// API) and ES modules (an import creates a local binding that is not an
+// export); Python's implicit re-export, where `import c` inside b makes `b.c`
+// reachable, is the outlier.
+//
+// IsImport covers named and wildcard imports; the module alias is declared via
+// plain declare(), so it is recognized by its symbol type instead. Nothing else
+// can bind a ModuleSymbol to a name, so the type test is an exact
+// identification of the alias.
+func isImportedBinding(entry ScopeEntry) bool {
+	if entry.IsImport {
+		return true
+	}
+	_, isModuleAlias := entry.Sym.(*symbol.ModuleSymbol)
+	return isModuleAlias
+}
+
+// isImportedType is the type-scope half of isImportedBinding: a type that got
+// here by being imported, by name (importedTypes) or by wildcard
+// (wildcardTypes), is not this module's to re-export.
+func (a *Analyzer) isImportedType(name string) bool {
+	if a.importedTypes[name] {
+		return true
+	}
+	_, isWildcard := a.wildcardTypes[name]
+	return isWildcard
 }
 
 // analyzeArrayLiteral ensures all elements in the array match the type of the first element,
@@ -1080,6 +1129,15 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
 			} else if typeSym, ok := modSym.GetType(named.Value); ok {
 				a.declareType(named.Value, typeSym)
+				// Set AFTER declareType, which clears the marker - the same
+				// ordering bindWildcardImport relies on. Unlike the wildcard
+				// case this ordering is defensive rather than load-bearing: a
+				// later `type X struct` reusing a named-imported name does not
+				// override it, it is rejected outright by checkNameAvailable
+				// ("'X' is already declared as a type"), which exempts only
+				// wildcardTypes. Kept consistent with declareType's matching
+				// delete so the two markers behave alike if that ever changes.
+				a.importedTypes[named.Value] = true
 				if defTok, ok := modSym.Definitions[named.Value]; ok {
 					a.nodeDefinitions[named] = defTok
 				}

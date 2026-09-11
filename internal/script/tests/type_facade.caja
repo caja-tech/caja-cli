@@ -1,0 +1,7 @@
+import { Point } from "second_types"
+
+# 'Point' is named-imported here rather than declared, so it is usable inside
+# this module but is deliberately NOT re-exported to anyone importing this one.
+let originX = fn(p: Point) -> Number {
+	return p.x
+}

@@ -1,0 +1,4 @@
+import { MyPoint } from "alias_type_facade"
+
+let p: MyPoint = MyPoint{ x: 1, y: 2 }
+return p.y

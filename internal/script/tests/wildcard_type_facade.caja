@@ -1,0 +1,8 @@
+import * from "second_types"
+
+# 'Point' reaches this module through a wildcard rather than a declaration, so
+# it is usable here but deliberately NOT re-exported to anyone importing this
+# one. Only 'originX', declared below, is this module's to export.
+let originX = fn(p: Point) -> Number {
+	return p.x
+}
