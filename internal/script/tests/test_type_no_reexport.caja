@@ -1,0 +1,6 @@
+import { Point } from "type_facade"
+
+# type_facade imported 'Point' rather than declaring it, so the type is not
+# part of that module's exports and this import must fail.
+let p = Point{ x: 1, y: 2 }
+return p.x

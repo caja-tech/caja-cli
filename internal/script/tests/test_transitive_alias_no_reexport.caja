@@ -1,0 +1,7 @@
+import "transitive_two" as two
+
+# transitive_two imports transitive_three as 't'. That alias is a local
+# binding inside transitive_two, not part of its exports, so this file cannot
+# reach through it to transitive_three. Calling two.get_value() is the
+# supported way to use what transitive_two chooses to expose.
+return two.t.value

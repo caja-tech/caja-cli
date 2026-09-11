@@ -1,0 +1,3 @@
+import { registerRoutes } from "explicit_facade"
+
+return registerRoutes(29)

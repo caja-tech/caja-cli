@@ -1,0 +1,10 @@
+import { Point } from "second_types"
+
+# The type-side counterpart of `let registerRoutes = router.registerRoutes`:
+# 'Point' itself is only a local binding here, but `type MyPoint Point` is a
+# real declaration of this module's own, so MyPoint IS exported.
+type MyPoint Point
+
+let mk = fn() -> MyPoint {
+	return Point{ x: 7, y: 8 }
+}

@@ -1,0 +1,5 @@
+import "chain_top" as top
+
+# Two hops past chain_top. The rejection must land on the FIRST hop ('mid'),
+# proving the chain is cut at every level rather than only at its end.
+return top.mid.leaf.value

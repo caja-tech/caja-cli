@@ -271,10 +271,10 @@ func TestWildcardImportSamplesRun(t *testing.T) {
 	}
 }
 
-// TestWildcardImportDoesNotReexport guards the decision that wildcard-imported
-// names are not re-exported: writeReexportForwards must emit no forwarding var
-// for them. Without the skip, one wildcard would emit dead forwarding code
-// proportional to the imported module's entire surface area.
+// TestWildcardImportDoesNotReexport guards the decision that an import is a
+// local binding and never a re-export — here in its wildcard form: no
+// declaration may be emitted under THIS module's prefix for a name it merely
+// wildcard-imported, since nothing downstream can legally reference it.
 func TestWildcardImportDoesNotReexport(t *testing.T) {
 	goCode := transpileSampleToGo(t, "wildcard_imports_custom", "wildcard_imports_custom")
 

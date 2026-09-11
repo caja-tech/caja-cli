@@ -122,6 +122,12 @@ func (a *Analyzer) declareType(name string, sym symbol.Symbol) {
 	// types — which is why bindWildcardImport must set wildcardTypes AFTER
 	// its own declareType call.
 	delete(a.wildcardTypes, name)
+	// The named-import marker is cleared alongside it for symmetry, but note
+	// this one is defensive, not load-bearing: checkNameAvailable exempts only
+	// wildcardTypes, so redeclaring a named-imported type is an error rather
+	// than an override and this delete is not reached that way. It matters
+	// only if that exemption is ever widened.
+	delete(a.importedTypes, name)
 }
 
 // deleteType removes a type name from the current (innermost) type scope.

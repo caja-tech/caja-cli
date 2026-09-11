@@ -1,0 +1,7 @@
+import "chain_mid" as mid
+
+# Likewise 'mid': the alias stays private to this file, so an importer of
+# chain_top cannot reach chain_mid (let alone chain_leaf) through it.
+let topValue = fn() -> Number {
+	return mid.midValue() + 1
+}

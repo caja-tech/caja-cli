@@ -1,0 +1,12 @@
+import { Point } from "second_types"
+
+# Unlike a wildcard-imported type, a NAMED-imported type is an explicit binding,
+# so redeclaring the name collides rather than silently shadowing.
+type Point struct {
+	x Number
+	y Number
+	z Number
+}
+
+let p = Point{ x: 1, y: 2, z: 3 }
+return p.z

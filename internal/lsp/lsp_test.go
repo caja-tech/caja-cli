@@ -684,6 +684,54 @@ func TestCompletion(t *testing.T) {
 			expectedLabels: []string{"push", "toUpper"},
 			missingLabels:  []string{"len", "join"},
 		},
+		{
+			// An import is a local binding, never a re-export, so a facade's
+			// completion list must show only what the facade itself declares.
+			// Offering 'add' here would suggest a member that the analyzer
+			// then rejects as "no exported member 'add'".
+			name: "Facade Members Exclude Its Named Imports",
+			setupFiles: map[string]string{
+				"leaf_mod.caja": "let add = fn(x: Number, y: Number) -> Number { return x + y }\n",
+				"facade_mod.caja": "import { add } from \"./leaf_mod\"\n" +
+					"let addTwice = fn(x: Number) -> Number { return add(x, x) }\n",
+			},
+			text:           "import \"./facade_mod\"\nfacade_mod.",
+			line:           1,
+			col:            11,
+			expectedLabels: []string{"addTwice"},
+			missingLabels:  []string{"add"},
+		},
+		{
+			// The module-alias half: 'leaf' is bound inside facade_alias_mod
+			// via plain declare(), not declareImport(), so it is excluded by
+			// its *symbol.ModuleSymbol type rather than by IsImport.
+			name: "Facade Members Exclude Its Module Alias",
+			setupFiles: map[string]string{
+				"leaf_mod.caja": "let add = fn(x: Number, y: Number) -> Number { return x + y }\n",
+				"facade_alias_mod.caja": "import \"./leaf_mod\" as leaf\n" +
+					"let addTwice = fn(x: Number) -> Number { return leaf.add(x, x) }\n",
+			},
+			text:           "import \"./facade_alias_mod\"\nfacade_alias_mod.",
+			line:           1,
+			col:            17,
+			expectedLabels: []string{"addTwice"},
+			missingLabels:  []string{"leaf", "add"},
+		},
+		{
+			// A wildcard binds exactly the exporter's export set, so it must
+			// not launder the facade's imports into the bare namespace either.
+			name: "Wildcard Of A Facade Excludes Its Imports",
+			setupFiles: map[string]string{
+				"leaf_mod.caja": "let add = fn(x: Number, y: Number) -> Number { return x + y }\n",
+				"facade_mod.caja": "import { add } from \"./leaf_mod\"\n" +
+					"let addTwice = fn(x: Number) -> Number { return add(x, x) }\n",
+			},
+			text:           "import * from \"./facade_mod\"\n",
+			line:           1,
+			col:            0,
+			expectedLabels: []string{"addTwice"},
+			missingLabels:  []string{"add"},
+		},
 	}
 
 	for _, tt := range tests {

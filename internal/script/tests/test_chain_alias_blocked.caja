@@ -1,0 +1,5 @@
+import "chain_top" as top
+
+# chain_top binds chain_mid as 'mid', but that alias is a local binding, not an
+# export - so reaching one hop past chain_top is rejected.
+return top.mid.midValue()

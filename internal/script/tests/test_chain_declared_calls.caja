@@ -1,0 +1,5 @@
+import "chain_top" as top
+
+# The supported way through a 4-module chain: each hop calls what the previous
+# module actually DECLARED. Blocking alias re-export must not break this.
+return top.topValue()
