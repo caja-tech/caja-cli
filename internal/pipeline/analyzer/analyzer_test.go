@@ -1845,6 +1845,34 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"arity error: expected 2 arguments for 'delete', got 1"},
 		},
 		{
+			name:  "map.keys() works with correct types",
+			input: "import map\nlet m: map[String]Number = {}\nlet ks: [String] = map.keys(m)\nreturn ks",
+		},
+		{
+			name:           "map.keys() rejects mismatched argument type",
+			input:          "import map\nreturn map.keys(\"not a map\")",
+			expectedErrors: []string{"type error: argument to 'keys' must be Map, got String"},
+		},
+		{
+			name:           "map.keys() rejects wrong arity",
+			input:          "import map\nlet m: map[String]Number = {}\nreturn map.keys(m, \"extra\")",
+			expectedErrors: []string{"arity error: expected 1 argument for 'keys', got 2"},
+		},
+		{
+			name:  "map.values() works with correct types",
+			input: "import map\nlet m: map[String]Number = {}\nlet vs: [Number] = map.values(m)\nreturn vs",
+		},
+		{
+			name:           "map.values() rejects mismatched argument type",
+			input:          "import map\nreturn map.values(\"not a map\")",
+			expectedErrors: []string{"type error: argument to 'values' must be Map, got String"},
+		},
+		{
+			name:           "map.values() rejects wrong arity",
+			input:          "import map\nlet m: map[String]Number = {}\nreturn map.values(m, \"extra\")",
+			expectedErrors: []string{"arity error: expected 1 argument for 'values', got 2"},
+		},
+		{
 			name:  "browser.log() works with a string argument",
 			input: "import browser\nreturn browser.log(\"hello\")",
 		},
@@ -3778,6 +3806,26 @@ import { max } from "math"
 `,
 			expectedError: "semantic error: module 'math' has no exported member 'notExists'",
 		},
+		{
+			name: "Valid named type import from http",
+			input: `import { Client } from "http"
+let useClient = fn(c: Client) -> Client { return c }
+`,
+			expectedError: "",
+		},
+		{
+			name: "Named type import missing from module",
+			input: `import { NotAType } from "http"
+`,
+			expectedError: "semantic error: module 'http' has no exported member 'NotAType'",
+		},
+		{
+			name: "Mixed value and type named imports from the same module",
+			input: `import { newClient, Client } from "http"
+let c: Client = newClient("http://example.com", {})
+`,
+			expectedError: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -3796,6 +3844,172 @@ import { max } from "math"
 
 			a.Run(program)
 			
+			if tt.expectedError != "" {
+				if len(a.DiagnosticErrors()) == 0 {
+					t.Fatalf("expected error '%s', got none", tt.expectedError)
+				}
+				if a.DiagnosticErrors()[0].Message != tt.expectedError {
+					t.Errorf("expected error '%s', got '%s'", tt.expectedError, a.DiagnosticErrors()[0].Message)
+				}
+			} else if len(a.DiagnosticErrors()) > 0 {
+				t.Fatalf("expected no errors, got: %v", a.DiagnosticErrors())
+			}
+		})
+	}
+}
+
+// TestSemanticAnalysisWildcardImports verifies `import * from mod`: every
+// exported member becomes usable bare, explicit declarations and named imports
+// silently win over a wildcard in both orders, and a name offered by two
+// wildcards is an error only where it is actually used — never at import time,
+// with the qualified form always available as the fallback.
+//
+// The builtin 'array' and 'string' modules both export 'len' and 'join', which
+// gives fixture-free collision cases.
+func TestSemanticAnalysisWildcardImports(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{
+			name: "Wildcard members are usable bare",
+			input: `import * from "array"
+let n = len([1, 2])
+let xs = push([1, 2], 3)
+`,
+		},
+		{
+			name: "Unquoted module specifier",
+			input: `import * from array
+let n = len([1, 2])
+`,
+		},
+		{
+			name: "Colliding name is fine while it is never used",
+			input: `import * from "array"
+import * from "string"
+let xs = push([1, 2], 3)
+let s = toUpper("hi")
+`,
+		},
+		{
+			name: "Colliding name errors only where it is used",
+			input: `import * from "array"
+import * from "string"
+let n = len([1, 2])
+`,
+			expectedError: "semantic error: ambiguous reference to 'len': wildcard-imported from 'array' and 'string'. Suggestion: qualify it (array.len or string.len)",
+		},
+		{
+			name: "Qualified form resolves an ambiguity",
+			input: `import * from "array"
+import * from "string"
+let n = array.len([1, 2])
+`,
+		},
+		{
+			name: "Explicit named import before a wildcard wins silently",
+			input: `import { len } from "string"
+import * from "array"
+let n = len("ab")
+`,
+		},
+		{
+			name: "Explicit named import after a wildcard wins silently",
+			input: `import * from "array"
+import { len } from "string"
+let n = len("ab")
+`,
+		},
+		{
+			name: "Local declaration shadows a wildcard import silently",
+			input: `import * from "array"
+let push = 10
+let n = push
+`,
+		},
+		{
+			name: "Local declaration inside a function shadows an ambiguous wildcard",
+			input: `import * from "array"
+import * from "string"
+let f = fn() -> Number {
+	let len = 5
+	return len
+}
+`,
+		},
+		{
+			name: "Wildcard combined with an alias keeps the qualified form",
+			input: `import * from "array" as a
+let xs = push([1, 2], 3)
+let n = a.len([1, 2])
+`,
+		},
+		{
+			name: "Module alias wins over a member of the same name",
+			input: `import * from "array" as len
+let n = len.len([1, 2])
+`,
+		},
+		{
+			name: "Wildcard imports type-level exports",
+			input: `import * from "http"
+let handle = fn(req: Request) -> Response {
+	return ok("hi")
+}
+`,
+		},
+		{
+			// The time module exports Instant/Duration types alongside its
+			// functions, so a wildcard of it must bind both halves.
+			name: "Wildcard imports the time module's values and types",
+			input: `import * from "time"
+let wait: Duration = seconds(2)
+let at: Instant = now()
+let secs = toSeconds(wait)
+`,
+		},
+		{
+			// 'format' is exported by both time and string — a real collision
+			// between two builtin modules, not a contrived one.
+			name: "Colliding name across time and string errors at the use site",
+			input: `import * from "time"
+import * from "string"
+let s = format(now(), "2006")
+`,
+			expectedError: "semantic error: ambiguous reference to 'format': wildcard-imported from 'time' and 'string'. Suggestion: qualify it (time.format or string.format)",
+		},
+		{
+			name: "Colliding time/string name stays legal while unused",
+			input: `import * from "time"
+import * from "string"
+let shouted = toUpper("caja")
+let wait = seconds(2)
+`,
+		},
+		{
+			name:          "Wildcard from an unknown module still reports the import failure",
+			input:         `import * from "does_not_exist"`,
+			expectedError: "semantic error: failed to import 'does_not_exist': module 'does_not_exist' not found in local paths or node_modules",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := environment.NewEnvironment("", "", false)
+			a := New(env)
+
+			lexerInstance := lexer.New(tt.input)
+			p := parser.New(lexerInstance)
+			program := p.Parse()
+
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+
+			a.Run(program)
+
 			if tt.expectedError != "" {
 				if len(a.DiagnosticErrors()) == 0 {
 					t.Fatalf("expected error '%s', got none", tt.expectedError)
@@ -4013,6 +4227,200 @@ let reactFn = memo fn(c: Number) -> String { return cast.to(c, "") }
 let active counter = 0
 let active result = reactFn(react counter)
 return result
+`,
+		},
+	}
+	runTestScenarios(t, tests)
+}
+
+// TestSemanticAnalysisNamedArguments verifies named-parameter call resolution:
+// positional arguments fill parameters left-to-right first, named arguments
+// fill the rest by name and are order-independent among themselves, and
+// every mismatch (unknown name, duplicate, supplied both ways, missing
+// parameter, too many positional arguments, named args on a builtin) is
+// rejected with a clear error.
+func TestSemanticAnalysisNamedArguments(t *testing.T) {
+	tests := []testScenario{
+		{
+			name: "Valid call with only named arguments",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+return createUser(name: "Ana", age: 30)
+`,
+		},
+		{
+			// Naming an argument documents it; it does not license reordering
+			// the call. A call site must read in the order the function was
+			// declared.
+			name: "Named arguments out of declaration order are rejected",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+return createUser(age: 30, name: "Ana")
+`,
+			expectedErrors: []string{
+				"type error: named argument 'name' is out of order: it must come before 'age' to match the parameter order of 'createUser'",
+				"arity error: missing argument for parameter 'name'",
+			},
+		},
+		{
+			name: "Valid call mixing positional and named arguments",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+return createUser("Ana", age: 30)
+`,
+		},
+		{
+			name: "Unknown named argument is rejected",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+createUser(name: "Ana", age: 30, nickname: "Foo")
+`,
+			expectedErrors: []string{
+				"type error: function 'createUser' has no parameter 'nickname'",
+			},
+		},
+		{
+			name: "Duplicate named argument is rejected",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+createUser(name: "Ana", name: "Bob", age: 30)
+`,
+			expectedErrors: []string{
+				"type error: duplicate named argument 'name'",
+			},
+		},
+		{
+			name: "Parameter supplied both positionally and by name is rejected",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+createUser("Ana", name: "Bob", age: 30)
+`,
+			expectedErrors: []string{
+				"type error: parameter 'name' supplied both positionally and by name",
+			},
+		},
+		{
+			name: "Missing required parameter after named resolution is rejected",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+createUser(name: "Ana")
+`,
+			expectedErrors: []string{
+				"arity error: missing argument for parameter 'age'",
+			},
+		},
+		{
+			name: "Too many positional arguments alongside a named argument is rejected",
+			input: `
+let createUser = fn(name: String, age: Number) -> String { return name }
+createUser("Ana", 30, "extra", age: 40)
+`,
+			expectedErrors: []string{
+				"arity error: too many positional arguments: expected at most 2, got 3",
+				"type error: parameter 'age' supplied both positionally and by name",
+			},
+		},
+		{
+			name: "Named arguments are rejected on a builtin module function",
+			input: `
+import map
+let m: map[String]Number = {}
+map.containsKey(map: m, key: "x")
+`,
+			expectedErrors: []string{
+				"type error: named arguments are not supported for builtin module function 'map.containsKey'",
+			},
+		},
+		{
+			// Trailing-block sugar appends its array positionally but means
+			// "last parameter". With named arguments filling the earlier
+			// slots it must still land last, not in slot 0.
+			name: "Trailing block combines with a named argument",
+			input: `
+let section = fn(title: String, items: [Number]) -> Number { return items[0] }
+let r = section(title: "x") {
+	10
+	20
+}
+`,
+		},
+		{
+			name: "Trailing lambda combines with a named argument",
+			input: `
+let apply = fn(factor: Number, f: fn(Number) -> Number) -> Number { return f(factor) }
+let r = apply(factor: 5) n => n * 2
+`,
+		},
+		{
+			name: "Trailing block conflicting with a named argument is rejected",
+			input: `
+let section = fn(title: String, items: [Number]) -> Number { return items[0] }
+let r = section(title: "x", items: [9]) {
+	10
+}
+`,
+			expectedErrors: []string{
+				"type error: parameter 'items' supplied both positionally and by name",
+			},
+		},
+		{
+			// The piped value occupies the first parameter, so naming it too
+			// is a genuine conflict.
+			name: "Piped value plus a named argument for the same parameter is rejected",
+			input: `
+let add3 = fn(a: Number, b: Number, c: Number) -> Number { return a + b + c }
+let r = 1 |> add3(a: 10, c: 3)
+`,
+			expectedErrors: []string{
+				"type error: parameter 'a' supplied both positionally and by name",
+				"arity error: missing argument for parameter 'b'",
+			},
+		},
+		{
+			name: "Piped value fills the first parameter and named arguments the rest",
+			input: `
+let add3 = fn(a: Number, b: Number, c: Number) -> Number { return a + b + c }
+let r = 1 |> add3(b: 2, c: 3)
+`,
+		},
+		{
+			// Every pipe variant threads its value in as the first positional
+			// argument, so named arguments must cover the remaining ones.
+			name: "Stream pipe stage accepts named arguments",
+			input: `
+type Sale struct { amount Number }
+let discount = fn(s: Sale, pct: Number) -> Sale { return Sale { amount: s.amount - pct } }
+let sales = [Sale { amount: 100 }]
+let out = sales |>> discount(pct: 10)
+`,
+		},
+		{
+			name: "Safe pipe stage accepts named arguments",
+			input: `
+type Customer struct { age Number }
+define Major constraints Customer with: fn(c: Customer) -> Boolean { return c.age > 18 }
+let bump = fn(m: Major, by: Number) -> Major { return m }
+let m1: Major? = Customer { age: 20 }
+let r: Major? = m1 ?> bump(by: 5)
+`,
+		},
+		{
+			name: "Join pipeline stage accepts named arguments",
+			input: `
+type Loan struct { principal Number }
+let rate = fn(l: Loan, mult: Number) -> Number { return l.principal * mult }
+let fees = fn(l: Loan) -> Number { return 10 }
+let pnl = fn(r: Number, f: Number) -> Number { return r + f }
+let loans = [Loan { principal: 100 }]
+let out = loans |>> (rate(mult: 2) & fees) |>> pnl
+`,
+		},
+		{
+			name: "Named argument on a generic function still infers correctly",
+			input: `
+let identity = fn<T>(value: T) -> T { return value }
+let n: Number = identity(value: 5)
+return n
 `,
 		},
 	}

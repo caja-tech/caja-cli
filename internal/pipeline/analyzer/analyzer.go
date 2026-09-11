@@ -9,7 +9,8 @@ import (
 	"context"
 
 	"fmt"
-
+	"sort"
+	"strings"
 )
 
 // Analyzer performs semantic analysis on an AST.
@@ -35,6 +36,16 @@ type Analyzer struct {
 	streamStageTypes    map[*ast.StreamPipeExpression]symbol.Symbol
 	memoBindingAllowed  bool
 	topLevelAwaitAsync map[ast.Node]bool
+	resolvedCallArgs    map[*ast.CallExpression][]callArgSource
+	// wildcardTypes is the type-scope mirror of ScopeEntry.WildcardModules:
+	// type name -> the bound module names that wildcard-imported it. A flat
+	// map is safe because imports are rejected inside blocks and forced to the
+	// top of the file, so wildcard types only ever land in a.types[0].
+	wildcardTypes map[string][]string
+	// reportedAmbiguousTypes dedups the type-side ambiguity error: several
+	// statements resolve the same annotation more than once, and the analyzer
+	// tests assert an exact error count.
+	reportedAmbiguousTypes map[string]bool
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -56,6 +67,9 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		expectedTypeStack:   make([]symbol.Symbol, 0),
 		streamStageTypes:    make(map[*ast.StreamPipeExpression]symbol.Symbol),
 		topLevelAwaitAsync:  make(map[ast.Node]bool),
+		resolvedCallArgs:    make(map[*ast.CallExpression][]callArgSource),
+		wildcardTypes:          make(map[string][]string),
+		reportedAmbiguousTypes: make(map[string]bool),
 	}
 
 	// Inject Nothing as a global builtin type
@@ -131,6 +145,51 @@ func (a *Analyzer) GetSymbol(node ast.Node) (symbol.Symbol, bool) {
 func (a *Analyzer) GetStreamStageType(node *ast.StreamPipeExpression) (symbol.Symbol, bool) {
 	sym, ok := a.streamStageTypes[node]
 	return sym, ok
+}
+
+// AmbiguousWildcardModules reports the modules that wildcard-imported name
+// when more than one did, making the bare form unusable until it is qualified.
+// The LSP uses this to keep such names out of completions.
+func (a *Analyzer) AmbiguousWildcardModules(name string) ([]string, bool) {
+	if entry, ok := a.findVarSymbolInScope(name); ok && len(entry.WildcardModules) > 1 {
+		return entry.WildcardModules, true
+	}
+	if origins, ok := a.wildcardTypes[name]; ok && len(origins) > 1 {
+		return origins, true
+	}
+	return nil, false
+}
+
+// GetResolvedCallArguments retrieves the positionally-resolved argument list
+// for a CallExpression that used named arguments (analyzeCallExpression
+// resolves name: value pairs against the callee's declared parameter order
+// and stores the result here only on full success) -- the compiler consumes
+// this instead of the AST's own Arguments/NamedArguments when emitting Go's
+// positional call syntax.
+func (a *Analyzer) GetResolvedCallArguments(n *ast.CallExpression) ([]ast.Expression, bool) {
+	plan, ok := a.resolvedCallArgs[n]
+	if !ok {
+		return nil, false
+	}
+
+	// Rebuilt from the LIVE AST on every call rather than cached as
+	// expressions, because the pipeline transpilers (stream, safe and join)
+	// inject their per-item variable by swapping Call.Arguments[0] in place
+	// and restoring it afterwards. A snapshot taken during analysis would
+	// still hold the pre-substitution expression and silently drop that
+	// variable from the emitted call.
+	args := make([]ast.Expression, len(plan))
+	for slot, src := range plan {
+		switch {
+		case src.namedIndex >= 0 && src.namedIndex < len(n.NamedArguments):
+			args[slot] = n.NamedArguments[src.namedIndex].Value
+		case src.positionalIndex >= 0 && src.positionalIndex < len(n.Arguments):
+			args[slot] = n.Arguments[src.positionalIndex]
+		default:
+			return nil, false
+		}
+	}
+	return args, true
 }
 
 // GetDefinition retrieves the token where the symbol in the given AST node was declared, and the file path.
@@ -301,6 +360,13 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 	// Assuming top-level declarations are in the first scope (index 0)
 	if len(a.scopes) > 0 {
 		for name, entry := range a.scopes[0] {
+			// Names this module pulled in via `import * from ...` are not
+			// re-exported: a wildcard is a convenience for the importing file,
+			// not a re-export, and letting them through would pollute every
+			// downstream consumer's namespace transitively.
+			if len(entry.WildcardModules) > 0 {
+				continue
+			}
 			exports[name] = entry.Sym
 			definitions[name] = entry.DefinitionToken
 			if a.privates[name] {
@@ -312,6 +378,9 @@ func (a *Analyzer) analyzeProgram(n *ast.Program) symbol.Symbol {
 		}
 	}
 	for name, sym := range a.types[0] {
+		if _, isWildcard := a.wildcardTypes[name]; isWildcard {
+			continue
+		}
 		types[name] = sym
 		if a.privates[name] {
 			privates[name] = true
@@ -452,7 +521,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 			}
 		} else {
 			var ok bool
-			paramSymbol, ok = a.findTypeSymbolInTypes(param.Type)
+			paramSymbol, ok = a.resolveTypeRef(n.Token, param.Type)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
 				paramSymbol = symbol.AnySymbol()
@@ -471,7 +540,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	// registered into - popScope() also clears that scope's type registry.
 	var expectedReturnSymbol symbol.Symbol
 	if n.ReturnType != "" {
-		resolvedReturn, ok := a.findTypeSymbolInTypes(n.ReturnType)
+		resolvedReturn, ok := a.resolveTypeRef(n.Token, n.ReturnType)
 		if !ok {
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.ReturnType))
 		}
@@ -583,7 +652,7 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 		} else {
 			inferred := make(map[string]symbol.Symbol)
 			for i, typeArg := range n.TypeArguments {
-				resolvedArg, ok := a.findTypeSymbolInTypes(typeArg)
+				resolvedArg, ok := a.resolveTypeRef(n.Token, typeArg)
 				if !ok {
 					a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", typeArg))
 					resolvedArg = symbol.AnySymbol()
@@ -633,10 +702,20 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 // is never actually ambiguous. Returns true if name is free to declare.
 func (a *Analyzer) checkNameAvailable(tok lexer.Token, name string) bool {
 	if a.typeDeclaredInCurrentFunctionScope(name) {
-		a.reportError(tok, fmt.Sprintf("semantic error: '%s' is already declared as a type", name))
-		return false
+		// A wildcard-imported type is silently shadowed by an explicit
+		// declaration rather than colliding with it.
+		if _, isWildcard := a.wildcardTypes[name]; !isWildcard {
+			a.reportError(tok, fmt.Sprintf("semantic error: '%s' is already declared as a type", name))
+			return false
+		}
 	}
 	if entry, exists := a.findVarSymbolInCurrentFunctionScope(name); exists {
+		// Same rule on the value side: `import * from array` followed by a
+		// local `let push` is a deliberate shadow, not a conflict. Explicit
+		// named imports still conflict, preserving today's behavior.
+		if len(entry.WildcardModules) > 0 {
+			return true
+		}
 		if entry.IsImport {
 			a.reportError(tok, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", name))
 		} else {
@@ -677,7 +756,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 	valType = symbol.AnySymbol()
 
 	if n.ValueType != "" {
-		if t, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+		if t, ok := a.resolveTypeRef(n.Token, n.ValueType); !ok {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
 		} else {
 			explicitType = t
@@ -706,7 +785,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 				// Type cannot be inferred from context, handled in function body analysis
 				paramTypes = append(paramTypes, symbol.AnySymbol())
 			} else {
-				typeName, ok := a.findTypeSymbolInTypes(param.Type)
+				typeName, ok := a.resolveTypeRef(n.Token, param.Type)
 				if !ok {
 					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
 				}
@@ -716,7 +795,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 
 		var returnType symbol.Symbol
 		if fnNode.ReturnType != "" {
-			resolvedReturnType, ok := a.findTypeSymbolInTypes(fnNode.ReturnType)
+			resolvedReturnType, ok := a.resolveTypeRef(n.Token, fnNode.ReturnType)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
 			}
@@ -797,7 +876,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 
 	var expectedFnType *symbol.FunctionSymbol
 	if n.ValueType != "" {
-		if explicitType, ok := a.findTypeSymbolInTypes(n.ValueType); ok {
+		if explicitType, ok := a.resolveTypeRef(n.Token, n.ValueType); ok {
 			if fs, ok := explicitType.(*symbol.FunctionSymbol); ok {
 				expectedFnType = fs
 			}
@@ -816,7 +895,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 			} else if param.Type == "" {
 				paramTypes = append(paramTypes, symbol.AnySymbol())
 			} else {
-				typeName, ok := a.findTypeSymbolInTypes(param.Type)
+				typeName, ok := a.resolveTypeRef(n.Token, param.Type)
 				if !ok {
 					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
 				}
@@ -826,7 +905,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 
 		var returnType symbol.Symbol
 		if fnNode.ReturnType != "" {
-			resolvedReturnType, ok := a.findTypeSymbolInTypes(fnNode.ReturnType)
+			resolvedReturnType, ok := a.resolveTypeRef(n.Token, fnNode.ReturnType)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
 			}
@@ -856,7 +935,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	valType = symbol.AnySymbol()
 
 	if n.ValueType != "" {
-		if t, ok := a.findTypeSymbolInTypes(n.ValueType); !ok {
+		if t, ok := a.resolveTypeRef(n.Token, n.ValueType); !ok {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
 		} else {
 			explicitType = t
@@ -960,6 +1039,15 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 
 	a.declare(modName, modSymbol, true, n.Name.Token)
 
+	if n.IsWildcard {
+		modSym, ok := modSymbol.(*symbol.ModuleSymbol)
+		if !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: '%s' is not a module", modPath))
+			return symbol.AnySymbol()
+		}
+		a.bindWildcardImport(n, modSym, modPath, modName)
+	}
+
 	if len(n.NamedImports) > 0 {
 		modSym, ok := modSymbol.(*symbol.ModuleSymbol)
 		if !ok {
@@ -979,10 +1067,27 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 					}
 					a.nodeImportedFiles[named] = modSym.FilePath
 				}
-				if _, alreadyDeclared := a.findVarSymbolInScope(named.Value); alreadyDeclared {
+				// A wildcard-bound name is not a real conflict: an explicit
+				// named import silently wins over `import * from ...`, which
+				// is what lets a user resolve a wildcard ambiguity by naming
+				// the one member they meant.
+				if existing, alreadyDeclared := a.findVarSymbolInScope(named.Value); alreadyDeclared && len(existing.WildcardModules) == 0 {
 					a.reportError(named.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", named.Value))
 				} else {
 					a.declareImport(named.Value, sym, true, named.Token, modPath)
+				}
+			} else if modSym.IsPrivate(named.Value) {
+				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
+			} else if typeSym, ok := modSym.GetType(named.Value); ok {
+				a.declareType(named.Value, typeSym)
+				if defTok, ok := modSym.Definitions[named.Value]; ok {
+					a.nodeDefinitions[named] = defTok
+				}
+				if modSym.FilePath != "" {
+					if a.nodeImportedFiles == nil {
+						a.nodeImportedFiles = make(map[ast.Node]string)
+					}
+					a.nodeImportedFiles[named] = modSym.FilePath
 				}
 			} else {
 				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
@@ -991,6 +1096,119 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 	}
 
 	return modSymbol
+}
+
+// bindWildcardImport binds every exported member of modSym directly into the
+// importing scope, for `import * from mod`. Names already bound explicitly (a
+// local declaration, a named import, or the module's own alias, which is
+// declared just before this runs) are skipped silently — explicit always wins
+// over a wildcard. A name already bound by an *earlier* wildcard is recorded
+// as ambiguous instead, which is reported only if the bare name is ever used.
+//
+// Both loops iterate a sorted key list because GetSymbols/GetTypes hand back
+// live Go maps: unsorted iteration would make which wildcard wins, and the
+// module order inside ambiguity messages, vary between runs.
+func (a *Analyzer) bindWildcardImport(n *ast.ImportStatement, modSym *symbol.ModuleSymbol, modPath, modName string) {
+	symbols := modSym.GetSymbols()
+	valueNames := make([]string, 0, len(symbols))
+	for name := range symbols {
+		valueNames = append(valueNames, name)
+	}
+	sort.Strings(valueNames)
+
+	for _, name := range valueNames {
+		// analyzeProgram copies every top-level scope entry into a module's
+		// exports and records privates separately, so GetSymbols does include
+		// private names and they must be filtered here. (Builtin modules have
+		// an empty privates map, making this a no-op for them.)
+		if modSym.IsPrivate(name) {
+			continue
+		}
+		sym := symbols[name]
+		// A user module's top-level scope also holds its own module aliases;
+		// wildcarding another module's namespace into this one is never right.
+		if _, isModule := sym.(*symbol.ModuleSymbol); isModule {
+			continue
+		}
+
+		existing, found := a.findVarSymbolInScope(name)
+		switch {
+		case found && len(existing.WildcardModules) == 0:
+			continue
+		case found:
+			a.markWildcardAmbiguous(name, modName)
+		default:
+			defTok := n.Name.Token
+			if tok, ok := modSym.Definitions[name]; ok {
+				defTok = tok
+			}
+			a.declareWildcardImport(name, sym, defTok, modPath, modName)
+		}
+	}
+
+	exportedTypes := modSym.GetTypes()
+	typeNames := make([]string, 0, len(exportedTypes))
+	for name := range exportedTypes {
+		typeNames = append(typeNames, name)
+	}
+	sort.Strings(typeNames)
+
+	for _, name := range typeNames {
+		if modSym.IsPrivate(name) {
+			continue
+		}
+		// wildcardTypes must be consulted before lookupType, since a type
+		// bound by an earlier wildcard is itself present in the type scope.
+		if origins, isWildcard := a.wildcardTypes[name]; isWildcard {
+			a.wildcardTypes[name] = appendModuleOrigin(origins, modName)
+			continue
+		}
+		if _, alreadyDeclared := a.lookupType(name); alreadyDeclared {
+			continue
+		}
+		a.declareType(name, exportedTypes[name])
+		// declareType clears the marker, so it has to be set afterwards.
+		a.wildcardTypes[name] = []string{modName}
+	}
+}
+
+// appendModuleOrigin adds moduleName to origins unless already present,
+// returning a fresh slice so no caller writes through a shared backing array.
+func appendModuleOrigin(origins []string, moduleName string) []string {
+	for _, m := range origins {
+		if m == moduleName {
+			return origins
+		}
+	}
+	next := make([]string, 0, len(origins)+1)
+	next = append(next, origins...)
+	return append(next, moduleName)
+}
+
+// formatModuleList renders module names for a diagnostic: "'a'", "'a' and 'b'",
+// or "'a', 'b' and 'c'".
+func formatModuleList(modules []string) string {
+	quoted := make([]string, len(modules))
+	for i, m := range modules {
+		quoted[i] = fmt.Sprintf("'%s'", m)
+	}
+	if len(quoted) < 2 {
+		return strings.Join(quoted, "")
+	}
+	return strings.Join(quoted[:len(quoted)-1], ", ") + " and " + quoted[len(quoted)-1]
+}
+
+// formatQualifiedSuggestions renders the qualified forms that resolve an
+// ambiguity: "array.len or string.len".
+func formatQualifiedSuggestions(modules []string, name string) string {
+	qualified := make([]string, len(modules))
+	for i, m := range modules {
+		qualified[i] = m + "." + name
+	}
+	if len(qualified) < 2 {
+		return strings.Join(qualified, "")
+	}
+	return strings.Join(qualified[:len(qualified)-1], ", ") + " or " + qualified[len(qualified)-1]
 }
 
 // analyzeReturnStatement recursively analyzes the return value expression, if any.
@@ -1060,7 +1278,7 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 	a.requireTopLevel(n.Token, "define")
 	a.checkNameAvailable(n.Token, n.Name.Value)
 
-	baseType, ok := a.findTypeSymbolInTypes(n.BaseType.Value)
+	baseType, ok := a.resolveTypeRef(n.Token, n.BaseType.Value)
 	if !ok {
 		a.reportError(n.BaseType.Token, fmt.Sprintf("semantic error: base type '%s' is not declared", n.BaseType.Value))
 		return symbol.AnySymbol()
@@ -1201,7 +1419,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 		var paramTypes []symbol.Symbol
 
 		for _, pt := range n.Signature.ParamTypes {
-			paramSymbol, ok := a.findTypeSymbolInTypes(pt)
+			paramSymbol, ok := a.resolveTypeRef(n.Token, pt)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", pt))
 			}
@@ -1210,7 +1428,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 
 		var returnType symbol.Symbol
 		if n.Signature.ReturnType != "" {
-			resolvedReturn, ok := a.findTypeSymbolInTypes(n.Signature.ReturnType)
+			resolvedReturn, ok := a.resolveTypeRef(n.Token, n.Signature.ReturnType)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.Signature.ReturnType))
 			}
@@ -1234,7 +1452,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 				a.reportError(n.Token, fmt.Sprintf("semantic error: duplicate field '%s' in struct '%s'", field.Name.Value, n.Name.Value))
 				continue
 			}
-			fieldSym, ok := a.findTypeSymbolInTypes(field.Type)
+			fieldSym, ok := a.resolveTypeRef(n.Token, field.Type)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", field.Type))
 			}
@@ -1244,7 +1462,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 			}
 		}
 	} else if n.TargetType != "" {
-		resolvedSymbol, ok := a.findTypeSymbolInTypes(n.TargetType)
+		resolvedSymbol, ok := a.resolveTypeRef(n.Token, n.TargetType)
 		if !ok {
 			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.TargetType))
 		}
@@ -1281,6 +1499,19 @@ func (a *Analyzer) analyzeExpressionStatement(n *ast.ExpressionStatement) symbol
 // logging an error if it has not been declared.
 func (a *Analyzer) analyzeIdentifier(n *ast.Identifier) symbol.Symbol {
 	if entry, ok := a.findVarSymbolInScope(n.Value); ok {
+		// Two wildcard imports offered this name, so the bare form is
+		// ambiguous. This is the only place the ambiguity is reported —
+		// importing both modules is always legal, and only reaching for the
+		// colliding name is an error. Analysis deliberately continues with the
+		// first origin's symbol rather than bailing to Any, so a single
+		// mistake produces a single error instead of a cascade.
+		if len(entry.WildcardModules) > 1 {
+			a.reportError(n.Token, fmt.Sprintf(
+				"semantic error: ambiguous reference to '%s': wildcard-imported from %s. Suggestion: qualify it (%s)",
+				n.Value,
+				formatModuleList(entry.WildcardModules),
+				formatQualifiedSuggestions(entry.WildcardModules, n.Value)))
+		}
 		if entry.IsMoved {
 			a.reportError(n.Token, fmt.Sprintf("semantic error: use of moved variable '%s'", n.Value))
 		}
@@ -1498,6 +1729,14 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 	if isBuiltin {
 		if ident, ok := n.Function.(*ast.Identifier); ok {
 			modName := a.GetImportedModule(ident)
+			if len(n.NamedArguments) > 0 {
+				fullName := ident.Value
+				if modName != "" {
+					fullName = modName + "." + ident.Value
+				}
+				a.reportError(n.Token, fmt.Sprintf("type error: named arguments are not supported for builtin module function '%s'", fullName))
+				return symbol.AnySymbol()
+			}
 			if builtinSym, handled := a.analyzeBuiltinCall(modName, ident.Value, n); handled {
 				return builtinSym
 			}
@@ -1513,6 +1752,14 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 					modName = objIdent.Value
 				}
 			}
+			if len(n.NamedArguments) > 0 {
+				fullName := prop.Property.Value
+				if modName != "" {
+					fullName = modName + "." + prop.Property.Value
+				}
+				a.reportError(n.Token, fmt.Sprintf("type error: named arguments are not supported for builtin module function '%s'", fullName))
+				return symbol.AnySymbol()
+			}
 			if builtinSym, handled := a.analyzeBuiltinCall(modName, prop.Property.Value, n); handled {
 				return builtinSym
 			}
@@ -1527,14 +1774,28 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 		return symbol.AnySymbol()
 	}
 
-	if fnSymbol.Type() != environment.ANY_OBJ && len(n.Arguments) != fnSymbol.Arity() {
-		a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity(), len(n.Arguments)))
+	var argsToCheck []ast.Expression
+	if len(n.NamedArguments) == 0 {
+		if fnSymbol.Type() != environment.ANY_OBJ && len(n.Arguments) != fnSymbol.Arity() {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity(), len(n.Arguments)))
+		}
+		argsToCheck = n.Arguments
+	} else {
+		plan, ok := a.resolveNamedCallArguments(n, fnSymbol)
+		if !ok {
+			return symbol.AnySymbol()
+		}
+		a.resolvedCallArgs[n] = plan
+		argsToCheck, ok = a.GetResolvedCallArguments(n)
+		if !ok {
+			return symbol.AnySymbol()
+		}
 	}
 
 	inferredTypes := make(map[string]symbol.Symbol)
-	argSymbols := make([]symbol.Symbol, len(n.Arguments))
+	argSymbols := make([]symbol.Symbol, len(argsToCheck))
 
-	for i, arg := range n.Arguments {
+	for i, arg := range argsToCheck {
 		var expectedArgType symbol.Symbol
 		if fnSymbol != nil && i < len(fnSymbol.ParamTypes()) {
 			expectedArgType = fnSymbol.ParamTypes()[i]
@@ -1555,7 +1816,7 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 				a.reportError(n.Token, fmt.Sprintf("arity error: expected %d generic type arguments, got %d", len(fnSymbol.TypeParameters), len(n.TypeArguments)))
 			} else {
 				for i, typeArgName := range n.TypeArguments {
-					resolvedArg, ok := a.findTypeSymbolInTypes(typeArgName)
+					resolvedArg, ok := a.resolveTypeRef(n.Token, typeArgName)
 					if !ok {
 						a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", typeArgName))
 						resolvedArg = symbol.AnySymbol()
@@ -1565,7 +1826,7 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 				}
 			}
 		} else {
-			for i := range n.Arguments {
+			for i := range argsToCheck {
 				if i < len(fnSymbol.ParamTypes()) {
 					expectedType := fnSymbol.ParamTypes()[i]
 					err := inferTypes(expectedType, argSymbols[i], inferredTypes)
@@ -1579,7 +1840,7 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected 0 generic type arguments, got %d", len(n.TypeArguments)))
 	}
 
-	for i := range n.Arguments {
+	for i := range argsToCheck {
 		argSymbol := argSymbols[i]
 
 		if i < len(fnSymbol.ParamTypes()) {
@@ -1598,6 +1859,124 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 	}
 
 	return symbol.AnySymbol()
+}
+
+// callArgSource records where one parameter slot's argument expression lives
+// in the call's AST: either an index into Arguments (positional) or into
+// NamedArguments. Storing indices rather than the expressions themselves is
+// what lets GetResolvedCallArguments read through to the live AST, which the
+// pipeline transpilers mutate in place.
+type callArgSource struct {
+	positionalIndex int // -1 when this slot came from a named argument
+	namedIndex      int // -1 when this slot came from a positional argument
+}
+
+// resolveNamedCallArguments maps a call's positional and named arguments onto
+// fnSymbol's parameter slots, for a call that used at least one named
+// argument. Positional arguments fill parameters left-to-right; named
+// arguments name the remaining ones and must still appear in the function's
+// declared parameter order, so a call always reads in the same order the
+// function was defined. Reports every applicable error (unknown parameter
+// name, out-of-order name, a parameter supplied both positionally and by
+// name, a duplicate, too many positional arguments, or a still-missing
+// parameter) and returns (nil, false) if any occurred -- the caller must not
+// type-check a partially-resolved list.
+func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *symbol.FunctionSymbol) ([]callArgSource, bool) {
+	arity := fnSymbol.Arity()
+	plan := make([]callArgSource, arity)
+	for i := range plan {
+		plan[i] = callArgSource{positionalIndex: -1, namedIndex: -1}
+	}
+	filled := make([]bool, arity)
+	ok := true
+
+	// Trailing-block/lambda sugar appends its argument positionally but means
+	// "bind this to the LAST parameter". With named arguments in play the
+	// remaining positional slots no longer run contiguously from 0, so the
+	// trailing argument has to be lifted out and placed explicitly -- left in
+	// the positional run it would land in slot 0 instead.
+	positionalCount := len(n.Arguments)
+	hasTrailing := n.HasTrailingArgument && positionalCount > 0
+	if hasTrailing {
+		positionalCount--
+		if arity > 0 {
+			plan[arity-1] = callArgSource{positionalIndex: len(n.Arguments) - 1, namedIndex: -1}
+			filled[arity-1] = true
+		}
+	}
+
+	if positionalCount > arity {
+		a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, positionalCount))
+		ok = false
+	}
+	for i := 0; i < positionalCount && i < arity; i++ {
+		if filled[i] {
+			// Only reachable when the trailing argument already claimed this
+			// slot, i.e. the call fills the last parameter twice.
+			a.reportError(n.Token, fmt.Sprintf("arity error: too many positional arguments: expected at most %d, got %d", arity, positionalCount+1))
+			ok = false
+			continue
+		}
+		plan[i] = callArgSource{positionalIndex: i, namedIndex: -1}
+		filled[i] = true
+	}
+
+	seen := make(map[string]bool)
+	lastPos := -1
+	lastName := ""
+	for idx, na := range n.NamedArguments {
+		pos := -1
+		for i, name := range fnSymbol.ParamNames {
+			if name == na.Name.Value {
+				pos = i
+				break
+			}
+		}
+		if pos == -1 {
+			a.reportError(na.Token, fmt.Sprintf("type error: function '%s' has no parameter '%s'", fnSymbol.Name, na.Name.Value))
+			ok = false
+			continue
+		}
+		if seen[na.Name.Value] {
+			a.reportError(na.Token, fmt.Sprintf("type error: duplicate named argument '%s'", na.Name.Value))
+			ok = false
+			continue
+		}
+		seen[na.Name.Value] = true
+		// Naming an argument documents it; it does not license reordering the
+		// call. Requiring declared order keeps a call site readable in the
+		// same sequence the function was defined in.
+		if pos < lastPos {
+			a.reportError(na.Token, fmt.Sprintf("type error: named argument '%s' is out of order: it must come before '%s' to match the parameter order of '%s'", na.Name.Value, lastName, fnSymbol.Name))
+			ok = false
+			continue
+		}
+		lastPos = pos
+		lastName = na.Name.Value
+		if filled[pos] {
+			a.reportError(na.Token, fmt.Sprintf("type error: parameter '%s' supplied both positionally and by name", na.Name.Value))
+			ok = false
+			continue
+		}
+		plan[pos] = callArgSource{positionalIndex: -1, namedIndex: idx}
+		filled[pos] = true
+	}
+
+	for i, f := range filled {
+		if !f {
+			name := "?"
+			if i < len(fnSymbol.ParamNames) {
+				name = fnSymbol.ParamNames[i]
+			}
+			a.reportError(n.Token, fmt.Sprintf("arity error: missing argument for parameter '%s'", name))
+			ok = false
+		}
+	}
+
+	if !ok {
+		return nil, false
+	}
+	return plan, true
 }
 
 // analyzeIndexExpression ensures the left side is an array or map and the index is valid.

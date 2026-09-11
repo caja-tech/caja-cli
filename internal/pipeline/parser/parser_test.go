@@ -865,9 +865,39 @@ func TestCallExpressionParsing(t *testing.T) {
 			input:    "add(1 + 2, 3 * 4)",
 			expected: "add((1 + 2), (3 * 4))",
 		},
+		{
+			name:     "Call with only named arguments",
+			input:    "route(method: \"GET\", path: \"/health\")",
+			expected: "route(method: \"GET\", path: \"/health\")",
+		},
+		{
+			name:     "Call with positional then named arguments",
+			input:    "route(\"GET\", path: \"/health\")",
+			expected: "route(\"GET\", path: \"/health\")",
+		},
 	}
 
 	runTestScenarios(t, tests)
+}
+
+// TestCallExpressionNamedArgumentErrors verifies that a positional argument
+// appearing after a named argument is rejected as a syntax error.
+func TestCallExpressionNamedArgumentErrors(t *testing.T) {
+	tests := []string{
+		"route(method: \"GET\", \"/health\")", // positional after named
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			l := lexer.New(input)
+			p := New(l)
+			p.Parse()
+
+			if len(p.Errors()) == 0 {
+				t.Fatalf("expected a syntax error for input %q, got none", input)
+			}
+		})
+	}
 }
 
 // TestTypeAliasParsing verifies that type alias statements parse correctly.
@@ -2442,6 +2472,104 @@ func TestNamedImportStatementErrors(t *testing.T) {
 			if !found {
 				t.Errorf("expected error '%s', but got: %v", tt.expectedError, errors)
 
+			}
+		})
+	}
+}
+
+// TestWildcardImportStatement verifies `import * from mod` parses in every
+// module-specifier form the grammar already supports (unquoted identifier,
+// quoted string, quoted path, and with an `as` alias), sets IsWildcard, leaves
+// NamedImports empty, and round-trips through String().
+func TestWildcardImportStatement(t *testing.T) {
+	tests := []struct {
+		input          string
+		expectedName   string
+		expectedPath   string
+		expectedString string
+	}{
+		{"import * from array", "array", "array", "import * from array"},
+		{"import * from \"array\"", "array", "array", "import * from array"},
+		{"import * from \"utils/array\"", "array", "utils/array", "import * from \"utils/array\""},
+		// String() always quotes the specifier once an alias is present — a
+		// pre-existing quirk shared with named imports, not wildcard-specific.
+		{"import * from array as arr", "arr", "array", "import * from \"array\" as arr"},
+		{"import * from \"@caja/query\"", "query", "@caja/query", "import * from \"@caja/query\""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			program := p.Parse()
+			if len(p.Errors()) > 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+			if len(program.Statements) != 1 {
+				t.Fatalf("expected 1 statement, got %d", len(program.Statements))
+			}
+			stmt, ok := program.Statements[0].(*ast.ImportStatement)
+			if !ok {
+				t.Fatalf("expected ImportStatement, got %T", program.Statements[0])
+			}
+			if !stmt.IsWildcard {
+				t.Errorf("expected IsWildcard to be true")
+			}
+			if len(stmt.NamedImports) != 0 {
+				t.Errorf("expected no named imports, got %d", len(stmt.NamedImports))
+			}
+			if stmt.Name.Value != tt.expectedName {
+				t.Errorf("expected Name %q, got %q", tt.expectedName, stmt.Name.Value)
+			}
+			if stmt.Path != tt.expectedPath {
+				t.Errorf("expected Path %q, got %q", tt.expectedPath, stmt.Path)
+			}
+			if stmt.String() != tt.expectedString {
+				t.Errorf("expected String() %q, got %q", tt.expectedString, stmt.String())
+			}
+		})
+	}
+}
+
+// TestWildcardImportStatementErrors verifies malformed wildcard imports are
+// rejected, including the case where '*' and a named-import block are combined
+// (they are alternatives, never both).
+func TestWildcardImportStatementErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		expectedError string
+	}{
+		{"Missing from", "import *", "expected 'from' after wildcard import"},
+		{"Missing from before specifier", "import * array", "expected 'from' after wildcard import"},
+		{"Wildcard combined with named imports", "import * { a } from math", "expected 'from' after wildcard import"},
+		{"Missing module specifier", "import * from", "expected identifier or string for module name"},
+		// Reserved words lex as their own token type, so they never reach the
+		// IDENT branch's IsKeyword guard — the specifier branch rejects them.
+		{"Keyword as module name", "import * from let", "expected identifier or string for module name"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tknzr := lexer.New(tt.input)
+			p := New(tknzr)
+			p.Parse()
+			errors := p.Errors()
+
+			if len(errors) == 0 {
+				t.Fatalf("expected error '%s', but got none", tt.expectedError)
+			}
+
+			found := false
+			for _, err := range errors {
+				if strings.Contains(err, tt.expectedError) {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("expected error '%s', but got: %v", tt.expectedError, errors)
 			}
 		})
 	}

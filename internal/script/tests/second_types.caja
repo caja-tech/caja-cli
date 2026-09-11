@@ -1,0 +1,10 @@
+type Point struct {
+	x Number
+	y Number
+}
+
+union Shape = Point
+
+private type Hidden struct {
+	value Number
+}

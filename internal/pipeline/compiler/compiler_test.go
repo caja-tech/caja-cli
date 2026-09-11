@@ -136,6 +136,162 @@ func TestRunReportsCajaSourceLocation(t *testing.T) {
 	}
 }
 
+// TestMapKeysAndValuesAreSortedAndCorrespond verifies map.keys/map.values
+// produce deterministic, key-sorted output that stays correspondingly
+// ordered with each other, despite Go's own map iteration being randomized.
+func TestMapKeysAndValuesAreSortedAndCorrespond(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "map_keys_values.caja")
+	source := `import "map" as map
+let m = { "b": 2, "a": 1, "c": 3 }
+let ks = map.keys(m)
+let vs = map.values(m)
+let result = ["${ks}", "${vs}"]
+result
+`
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	want := "[[a, b, c], [1, 2, 3]]\n"
+	if stdout.String() != want {
+		t.Errorf("expected sorted, corresponding keys/values output %q, got %q", want, stdout.String())
+	}
+}
+
+// TestNamedArgumentsSampleRuns runs the named_arguments sample end to end
+// (not just through the compile-only TestSamplesCompilation check) and
+// verifies its self-checks all passed. The sample returns 0 only if
+// named-only calls, positional+named mixes, argument reordering, the
+// pipe operator (which must still fill the first parameter positionally
+// ahead of any named arguments), and a named argument on a generic function
+// all produced the expected values -- see
+// samples/named_arguments/named_arguments.caja.
+func TestNamedArgumentsSampleRuns(t *testing.T) {
+	filePath := filepath.Join("samples", "named_arguments", "named_arguments.caja")
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read sample: %v", err)
+	}
+
+	baseDir, _ := filepath.Abs(filepath.Dir(filePath))
+	program, _, a, err := script.ParseWithDir(string(source), baseDir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	want := "0\n"
+	if stdout.String() != want {
+		t.Errorf("expected the sample's self-checks to all pass (printed %q), got %q", want, stdout.String())
+	}
+}
+
+// transpileSampleToGo compiles a sample to Go source, returning it for
+// inspection, and is the shared setup for the wildcard-import runtime tests.
+func transpileSampleToGo(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	filePath := filepath.Join("samples", dir, name+".caja")
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read sample: %v", err)
+	}
+
+	baseDir, _ := filepath.Abs(filepath.Dir(filePath))
+	program, _, a, err := script.ParseWithDir(string(source), baseDir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+	return goCode
+}
+
+// TestWildcardImportSamplesRun runs both wildcard-import samples end to end
+// (TestSamplesCompilation only compiles them). Each returns 0 only if every
+// self-check passed: bare members of a wildcard-imported module resolving to
+// the right function, the qualified fallback still working for a name two
+// modules both export, and — for the custom-module sample — bare names
+// transpiling to the origin module's flattened Go symbols plus a
+// wildcard-imported type usable unqualified as an annotation.
+func TestWildcardImportSamplesRun(t *testing.T) {
+	samples := []string{"wildcard_imports", "wildcard_imports_custom"}
+
+	for _, name := range samples {
+		t.Run(name, func(t *testing.T) {
+			goCode := transpileSampleToGo(t, name, name)
+
+			var stdout, stderr bytes.Buffer
+			if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+				t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+			}
+
+			want := "0\n"
+			if stdout.String() != want {
+				t.Errorf("expected the sample's self-checks to all pass (printed %q), got %q", want, stdout.String())
+			}
+		})
+	}
+}
+
+// TestWildcardImportDoesNotReexport guards the decision that wildcard-imported
+// names are not re-exported: writeReexportForwards must emit no forwarding var
+// for them. Without the skip, one wildcard would emit dead forwarding code
+// proportional to the imported module's entire surface area.
+func TestWildcardImportDoesNotReexport(t *testing.T) {
+	goCode := transpileSampleToGo(t, "wildcard_imports_custom", "wildcard_imports_custom")
+
+	for _, member := range []string{"add", "double", "hidden"} {
+		forward := "wildcard_imports_custom_" + member
+		if strings.Contains(goCode, forward) {
+			t.Errorf("expected no re-export forwarding var %q for a wildcard-imported member, but found one:\n%s", forward, goCode)
+		}
+	}
+
+	// Sanity check the sample actually exercised the origin-prefixed path,
+	// so this test can't pass vacuously.
+	if !strings.Contains(goCode, "helpers_add") {
+		t.Errorf("expected the bare call to transpile to the origin module's name 'helpers_add', got:\n%s", goCode)
+	}
+}
+
 // assertCleanAsyncPanicReport is the shared assertion for the two tests
 // below: a panic inside a spawned goroutine (stream-pipe stage, join call,
 // or async task) must produce caja run's normal clean "error: ..." message,

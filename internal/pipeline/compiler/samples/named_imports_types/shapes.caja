@@ -1,0 +1,11 @@
+type Circle struct {
+	radius Number
+}
+
+type Square struct {
+	side Number
+}
+
+union Shape = Circle | Square
+
+define BigCircle constraints Circle with: fn(c: Circle) -> Boolean { return c.radius > 10 }

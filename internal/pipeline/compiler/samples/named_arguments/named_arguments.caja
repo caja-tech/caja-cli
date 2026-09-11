@@ -1,0 +1,59 @@
+let makeGreeting = fn(name: String, greeting: String) -> String {
+	return "${greeting}, ${name}"
+}
+
+let identity = fn<T>(value: T) -> T {
+	return value
+}
+
+let section = fn(title: String, items: [Number]) -> Number {
+	return items[0]
+}
+
+let applyTo = fn(factor: Number, f: fn(Number) -> Number) -> Number {
+	return f(factor)
+}
+
+let onlyNamed = makeGreeting(name: "Ana", greeting: "Hello")
+let mixed = makeGreeting("Bob", greeting: "Hi")
+let allNamed = makeGreeting(name: "Carl", greeting: "Hey")
+let piped = "Dee" |> makeGreeting(greeting: "Yo")
+let generic = identity(value: 42)
+
+# Trailing-block and trailing-lambda sugar must still bind to the LAST
+# parameter when named arguments fill the earlier ones.
+let blockResult = section(title: "nums") {
+	7
+	8
+}
+let lambdaResult = applyTo(factor: 5) n => n * 2
+
+if (onlyNamed != "Hello, Ana") {
+	return 1
+}
+
+if (mixed != "Hi, Bob") {
+	return 1
+}
+
+if (allNamed != "Hey, Carl") {
+	return 1
+}
+
+if (piped != "Yo, Dee") {
+	return 1
+}
+
+if (generic != 42) {
+	return 1
+}
+
+if (blockResult != 7) {
+	return 1
+}
+
+if (lambdaResult != 10) {
+	return 1
+}
+
+return 0

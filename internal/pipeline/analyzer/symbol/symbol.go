@@ -104,6 +104,8 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 		return map[string]Symbol{
 				"containsKey": NewBuiltinSymbol(moduleName, 2, "containsKey(map: Map, key: String) -> Boolean", "map: Map", "key: String"),
 				"delete":      NewBuiltinSymbol(moduleName, 2, "delete(map: Map, key: String) -> Nil", "map: Map", "key: String"),
+				"keys":        NewBuiltinSymbol(moduleName, 1, "keys(map: Map) -> Array", "map: Map"),
+				"values":      NewBuiltinSymbol(moduleName, 1, "values(map: Map) -> Array", "map: Map"),
 			}, map[string]Symbol{
 				"KeyFunc": NewFunctionSymbol(moduleName, "KeyFunc", nil, nil, 0, nil, NewBasicSymbol(environment.STRING_OBJ)),
 			}, true

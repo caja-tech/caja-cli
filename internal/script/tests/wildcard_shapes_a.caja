@@ -1,0 +1,7 @@
+type Shape struct {
+	a Number
+}
+
+let fromA = fn(n: Number) -> Number {
+	return n + 1
+}

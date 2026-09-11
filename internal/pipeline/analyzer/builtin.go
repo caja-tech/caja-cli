@@ -88,6 +88,10 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeMapContainsKeyFunction(n), true
 	case "map.delete":
 		return a.analyzeMapDeleteFunction(n), true
+	case "map.keys":
+		return a.analyzeMapKeysFunction(n), true
+	case "map.values":
+		return a.analyzeMapValuesFunction(n), true
 	case "page.write":
 		return a.analyzePageWriteFunction(n), true
 	case "browser.log", "browser.alert":
@@ -833,6 +837,44 @@ func (a *Analyzer) analyzeMapDeleteFunction(n *ast.CallExpression) symbol.Symbol
 	}
 
 	return mapSymbol
+}
+
+// analyzeMapKeysFunction checks the arity and type for map.keys, returning an Array of the map's key type.
+func (a *Analyzer) analyzeMapKeysFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 argument for 'keys', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	mapSymbol := a.analyze(n.Arguments[0])
+
+	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: argument to 'keys' must be Map, got %s", mapSymbol.Type()))
+	}
+
+	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
+		return symbol.NewArraySymbol(mapSym.Key)
+	}
+	return symbol.NewArraySymbol(symbol.AnySymbol())
+}
+
+// analyzeMapValuesFunction checks the arity and type for map.values, returning an Array of the map's value type.
+func (a *Analyzer) analyzeMapValuesFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 argument for 'values', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	mapSymbol := a.analyze(n.Arguments[0])
+
+	if mapSymbol.Type() != environment.MAP_OBJ && mapSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: argument to 'values' must be Map, got %s", mapSymbol.Type()))
+	}
+
+	if mapSym, ok := mapSymbol.(*symbol.MapSymbol); ok {
+		return symbol.NewArraySymbol(mapSym.Value)
+	}
+	return symbol.NewArraySymbol(symbol.AnySymbol())
 }
 
 // checkBrowserArgNotNullable reports a type error and returns true if sym is

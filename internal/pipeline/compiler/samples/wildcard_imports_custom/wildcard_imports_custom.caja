@@ -1,0 +1,24 @@
+import * from "./helpers"
+
+# Bare functions from a user module: these must transpile to the origin
+# module's flattened Go names (helpers_add / helpers_double).
+let sum = add(10, 20)
+let doubled = double(sum)
+
+# Wildcard-imported types are usable unqualified as annotations too.
+let p: Point = Point { x: 3, y: 4 }
+let s: Shape = p
+
+if (sum != 30) {
+	return 1
+}
+
+if (doubled != 60) {
+	return 1
+}
+
+if (p.x != 3) {
+	return 1
+}
+
+return 0
