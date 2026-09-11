@@ -1,0 +1,23 @@
+import "string" as string
+
+let score = fn(cond: Boolean) -> Number {
+    if (cond) {
+        return 1
+    }
+    return 0
+}
+
+let quoted = "she said \"hi\""
+let precise = string.format("%.2f", 3.14159)
+let padded = string.format("%5d", 5)
+let x = "-"
+let nested = "${string.concat("a", x)}"
+let escaped_interp = "${x} \${literal}"
+
+let checks = score(quoted == "she said \"hi\"")
+    + score(precise == "3.14")
+    + score(padded == "    5")
+    + score(nested == "a-")
+    + score(escaped_interp == "- \${literal}")
+
+return checks

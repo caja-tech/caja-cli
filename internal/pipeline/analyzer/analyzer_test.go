@@ -263,6 +263,15 @@ let f = fn() -> Number {
 				"semantic error: variable 'x' is already declared",
 			},
 		},
+		{
+			name: "String interpolation accepts any expression type, not just String",
+			input: `
+let name = "World"
+let count = 5
+let greeting = "Hello, ${name}! count=${count}"
+`,
+			expectedErrors: []string{},
+		},
 	}
 	runTestScenarios(t, tests)
 }
@@ -484,6 +493,19 @@ let delayed_print = fn() {
 `,
 			expectedErrors: []string{
 				"semantic error: pure functions cannot capture global/module variable 'data'",
+			},
+		},
+		{
+			name: "Reading a module variable inside a string interpolation (Purity violation)",
+			input: `
+let counter = 5
+
+let f = fn() -> String {
+    return "count is ${counter}"
+}
+`,
+			expectedErrors: []string{
+				"semantic error: pure functions cannot capture global/module variable 'counter'",
 			},
 		},
 		{
@@ -2178,6 +2200,24 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			name:           "browser.clearTimeout() rejects missing arguments",
 			input:          "import browser\nreturn browser.clearTimeout()",
 			expectedErrors: []string{"arity error: expected 1 arguments for 'clearTimeout', got 0"},
+		},
+		{
+			name:  "string.format() works with a literal format string and a Number value",
+			input: "import string\nreturn string.format(\"%.2f\", 3.14159)",
+		},
+		{
+			name:  "string.format() accepts any type for its second argument",
+			input: "import string\ntype Point struct { x Number }\nreturn string.format(\"%v\", Point{ x: 1 })",
+		},
+		{
+			name:           "string.format() rejects a non-String first argument",
+			input:          "import string\nreturn string.format(5, \"x\")",
+			expectedErrors: []string{"type error: first argument to 'format' must be String, got Number"},
+		},
+		{
+			name:           "string.format() rejects missing arguments",
+			input:          "import string\nreturn string.format(\"%d\")",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'format', got 1"},
 		},
 	}
 

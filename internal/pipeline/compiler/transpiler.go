@@ -8,6 +8,7 @@ import (
 	"caja-cli/internal/pipeline/environment"
 
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -96,6 +97,43 @@ func enableValueFormatting(ctx *transpileContext) {
 	ctx.usedModules["time"] = true
 	ctx.usedModules["fmt"] = true
 	ctx.usedModules["strings"] = true
+}
+
+// transpileInterpolatedStringLiteral emits a "${...}"-containing string
+// literal as a chain of Go "+"-concatenated segments — literal text as a
+// quoted Go string, each embedded expression either passed through as-is
+// (already String-typed, the common case) or wrapped in caja_format_value
+// (any other type), matching Kotlin's automatic toString() semantics via the
+// same runtime helper log.info's args formatting already relies on. Mirrors
+// string.concat's own choice of plain "+" over fmt.Sprintf/strings.Builder.
+func transpileInterpolatedStringLiteral(e *ast.InterpolatedStringLiteral, ctx *transpileContext) (string, error) {
+	a := ctx.analyzer
+	var parts []string
+	for _, seg := range e.Segments {
+		if seg.Expr == nil {
+			if seg.Text == "" {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%q", seg.Text))
+			continue
+		}
+
+		val, err := transpileExpression(seg.Expr, ctx, "")
+		if err != nil {
+			return "", err
+		}
+		if sym, ok := a.GetSymbol(seg.Expr); ok && sym.Type() == environment.STRING_OBJ {
+			parts = append(parts, val)
+			continue
+		}
+		enableValueFormatting(ctx)
+		parts = append(parts, fmt.Sprintf("caja_format_value(%s)", val))
+	}
+
+	if len(parts) == 0 {
+		return `""`, nil
+	}
+	return "(" + strings.Join(parts, " + ") + ")", nil
 }
 
 // statementLine returns the .caja source line a top-level ast.Statement
@@ -370,6 +408,22 @@ func functionBodyHasSelfTailCall(body *ast.BlockStatement, funcName string) bool
 		}
 	}
 	return false
+}
+
+// selfReferenceSurvives reports whether the already-transpiled Go text for a
+// let/const-bound function literal still contains a call to its own name —
+// i.e. whether a self-reference survived past whatever the tail-call
+// rewrite (functionBodyHasSelfTailCall / the ReturnStatement "continue"
+// rewrite) already erased. Checking the transpiled text rather than the raw
+// AST means a function with two self-calls, one in tail position (erased)
+// and one not, is still correctly flagged — walking the AST for "any
+// self-reference at all" would have missed that the tail one no longer
+// exists in the actual generated code, and incorrectly skipped the fix for
+// the surviving one. A false positive here (e.g. another identifier that
+// happens to end in this name, like "myFactorial(" containing "factorial(")
+// only costs an unneeded declare/assign split, never an incorrect one.
+func selfReferenceSurvives(val, goName string) bool {
+	return strings.Contains(val, goName+"(")
 }
 
 // afterPos reports whether (line, col) is strictly after (afterLine, afterCol)
@@ -665,6 +719,25 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		return goFunc
 	}
 	if structDef, ok := sym.(*symbol.StructDefSymbol); ok {
+		// The http builtin module's Client type (getHTTPStandardModule,
+		// analyzer/symbol/symbol.go) is only otherwise flagged as used at an
+		// actual http.newClient(...) call site (compiler/builtins.go) — which
+		// misses a function that merely takes/returns a Client without ever
+		// constructing one itself (e.g. a library's exported "withClient"
+		// helper). Since every reference to the type — a function's param or
+		// return type, a variable's declared type, anywhere — routes through
+		// this same mapSymbolToGoType call, catching it here (mirroring how
+		// ArraySymbol/MapSymbol/ActiveSymbol below set their own usedModules
+		// flags as a side effect of being mapped) covers every such
+		// reference, not just call sites. FilePath=="" matches how
+		// getHTTPStandardModule registers every http struct type (no
+		// user-module origin) — the one false-positive this can't rule out
+		// is a user's own top-level `type Client struct {...}` of the exact
+		// same name, which would already collide on the emitted Go type name
+		// "Client" regardless of this check.
+		if structDef.Name == "Client" && structDef.FilePath == "" {
+			ctx.usedModules["http_client"] = true
+		}
 		baseName := structDef.Name
 		if structDef.FilePath != "" && ctx != nil && structDef.FilePath != ctx.topLevelFileName {
 			baseName = sanitizeIdentifier(structDef.FilePath) + "_" + baseName
@@ -779,6 +852,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 					bodyBuf.WriteString(fmt.Sprintf("\t_ = %s\n", sanitizeIdentifier(ctx.CurrentModulePath)+"_"+constStmt.Name.Value))
 				}
 			}
+			writeReexportForwards(&bodyBuf, ctx)
 			bodyBuf.WriteString("\n")
 		}
 	}
@@ -1228,6 +1302,28 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		}
 		val = maybeShareValue(s.Value, val, ctx)
 
+		// A self-referential function literal ("let f = fn() {...f()...}")
+		// can't be a one-step "var f T = func(){...f...}": Go only brings a
+		// local var's name into scope once its own VarSpec finishes, so the
+		// initializer can't reference it yet. Splitting into declare-then-
+		// assign (mirroring transpileMemoBinding's own two-step wrapper/impl
+		// declarations above) sidesteps that. Checking the already-
+		// transpiled val text (rather than walking the raw AST) means a
+		// self-call the tail-call rewrite already erased into a for{}/
+		// continue loop correctly does NOT trigger this — only a genuinely
+		// surviving self-reference does. Doesn't attempt to fix mutual
+		// recursion between two separate let-bound functions — that's a
+		// distinct, still-open forward-reference issue this narrow check
+		// doesn't touch.
+		if _, isFn := s.Value.(*ast.FunctionLiteral); isFn && selfReferenceSurvives(val, prefixIdentifier(ctx, s.Name.Value)) {
+			declType := varType
+			if declType == "" {
+				declType = "any"
+			}
+			name := prefixIdentifier(ctx, s.Name.Value)
+			return fmt.Sprintf("var %s %s\n%s = %s", name, declType, name, val), nil
+		}
+
 		if varType != "" && varType != "any" {
 			return fmt.Sprintf("var %s %s = %s", prefixIdentifier(ctx, s.Name.Value), varType, val), nil
 		}
@@ -1253,6 +1349,18 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			return "", nil
 		}
 		val = maybeShareValue(s.Value, val, ctx)
+
+		// See the matching LetStatement case above: a self-referential
+		// function literal can't use Go's ":=" short form either, for the
+		// same "name not yet in scope inside its own initializer" reason.
+		if _, isFn := s.Value.(*ast.FunctionLiteral); isFn && selfReferenceSurvives(val, prefixIdentifier(ctx, s.Name.Value)) {
+			declType := varType
+			if declType == "" {
+				declType = "any"
+			}
+			name := prefixIdentifier(ctx, s.Name.Value)
+			return fmt.Sprintf("var %s %s\n%s = %s // const", name, declType, name, val), nil
+		}
 
 		return fmt.Sprintf("%s := %s // const", prefixIdentifier(ctx, s.Name.Value), val), nil
 
@@ -1300,6 +1408,24 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		// transpiled value is evaluated for side effects only and discarded.
 		if !ctx.inFunction || ctx.currentFunctionReturnType == "" {
 			if val != "" {
+				// "return otherFn(...)" where otherFn ALSO returns Nothing
+				// (not the enclosing function calling itself — that's the
+				// tail-call-rewrite case above) transpiles otherFn's call to
+				// a Go call with zero return values, since a "-> Nothing"
+				// Caja function has no Go return value at all (unlike a
+				// value-returning function whose result this branch would
+				// otherwise legitimately need to `_ = `-discard). Wrapping
+				// a zero-value call in "_ = ..." is itself invalid Go
+				// ("(no value) used as value") — confirmed failing for both
+				// a plain two-function case and @caja/std's
+				// forEachIndexed/_forEachIndexed wrapper pair, which is
+				// exactly this shape. Only skip the "_ = " wrap for that
+				// specific case; every other discarded value still needs it.
+				if callExpr, isCall := s.ReturnValue.(*ast.CallExpression); isCall {
+					if retSym, ok := a.GetSymbol(callExpr); ok && isNothingReturnType(retSym) {
+						return fmt.Sprintf("%s\n\treturn", val), nil
+					}
+				}
 				return fmt.Sprintf("_ = %s\n\treturn", val), nil
 			}
 			return "return", nil
@@ -1680,6 +1806,8 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		return formatNumberLiteral(e.Value), nil
 	case *ast.StringLiteral:
 		return fmt.Sprintf("%q", e.Value), nil
+	case *ast.InterpolatedStringLiteral:
+		return transpileInterpolatedStringLiteral(e, ctx)
 	case *ast.BooleanLiteral:
 		return fmt.Sprintf("%v", e.Value), nil
 	case *ast.NilLiteral:
@@ -2431,6 +2559,68 @@ func transpileAwaitStatement(node *ast.AwaitStatement, ctx *transpileContext) (s
 	// deciding whether to abort.
 	buf.WriteString("\ncaja_check_async_panic()")
 	return buf.String(), nil
+}
+
+// writeReexportForwards closes the gap a facade module leaves when it named-
+// imports a value only to re-export it ("import { X } from sub", never
+// itself calling X) rather than declaring it directly: that ImportStatement
+// transpiles to a no-op comment, so nothing ever declares a Go symbol under
+// this module's own prefix, and a downstream caller who named-imports X
+// from THIS module gets an "undefined: <thisModule>_X" build failure even
+// though semantic analysis accepted the whole chain. For every such
+// re-exported name, emit a forwarding declaration pointing at the name's
+// immediate origin (one hop back — exactly what ScopeEntry.FilePath already
+// holds), so `caja build` sees `var thisModule_X = origin_X` and the
+// origin's own already-emitted declaration backs it. getOrderedModules
+// processes modules dependency-first, so the origin's declaration is
+// guaranteed to already exist by the time this runs — and since each hop
+// only ever needs the PRECEDING hop's name, this chains correctly through
+// arbitrarily many re-export hops with no "walk back to the true declarer"
+// logic required anywhere.
+//
+// Builtin-module re-exports (e.g. "import { max } from math", re-exported
+// rather than called) are deliberately skipped: a builtin has no real named
+// Go value to forward to (it's dispatched per-call-site, not materialized
+// as a symbol), so attempting this would trade today's
+// "undefined: facade_max" for an equally-broken "undefined: math_max"
+// instead of actually fixing anything. Left as a known, separate,
+// still-open limitation.
+//
+// A re-exported GENERIC function (TypeParameters non-empty, e.g. a
+// "fn<T>(...)" imported from a package like @caja/std) is skipped for a
+// different, structural reason, not a punted-on gap: Go has no way to name
+// an unbound generic function's type in a plain "var" declaration (only a
+// func/type declaration can itself introduce type parameters), so
+// "var facade_forEach func(*cajaArray[T], func(T) T) = std_forEach" is
+// invalid Go regardless of how it's derived — T isn't in scope on a var.
+// A module that only *calls* a generic import directly (the common case)
+// never goes through this forwarding path at all — Go's own call-site type
+// inference handles that fine; only re-exporting the generic value itself,
+// unforced to a concrete instantiation, is impossible to forward this way.
+func writeReexportForwards(bodyBuf *bytes.Buffer, ctx *transpileContext) {
+	names := make([]string, 0)
+	for name, entry := range ctx.analyzer.GlobalScope() {
+		if !entry.IsImport {
+			continue
+		}
+		if _, _, isBuiltin := symbol.GetStandardModule(entry.FilePath); isBuiltin {
+			continue
+		}
+		if fnSym, isFn := entry.Sym.(*symbol.FunctionSymbol); isFn && len(fnSym.TypeParameters) > 0 {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		entry := ctx.analyzer.GlobalScope()[name]
+		goType := ctx.mapSymbolToGoType(entry.Sym)
+		localName := sanitizeIdentifier(ctx.CurrentModulePath) + "_" + name
+		originName := sanitizeIdentifier(entry.FilePath) + "_" + name
+		bodyBuf.WriteString(fmt.Sprintf("\tvar %s %s = %s\n", localName, goType, originName))
+		bodyBuf.WriteString(fmt.Sprintf("\t_ = %s\n", localName))
+	}
 }
 
 func getOrderedModules(p *ast.Program, asts map[string]*ast.Program) []string {

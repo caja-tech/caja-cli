@@ -34,6 +34,8 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeStringLenFunction(n), true
 	case "string.join":
 		return a.analyzeStringJoinFunction(n), true
+	case "string.format":
+		return a.analyzeStringFormatFunction(n), true
 	case "date.year", "date.month", "date.day", "date.weekday":
 		return a.analyzeDateComponentFunction(functionName, n), true
 	case "date.today":
@@ -185,6 +187,34 @@ func (a *Analyzer) analyzePageWriteFunction(n *ast.CallExpression) symbol.Symbol
 }
 
 // analyzeStringConcatFunction checks the arity and type for the builtin string 'concat' function, returning a STRING.
+// analyzeStringFormatFunction checks arity for the builtin string 'format'
+// function — printf-style formatting via Go's own fmt.Sprintf, mirroring
+// log.info's own "first arg String, second arg Any" shape (the value being
+// formatted can be any type, same as the arg log.info accepts). No
+// compile-time validation of the format string's verbs against the value's
+// type happens here — the compiler special-cases a literal format string to
+// pick the right Go conversion (see transpileStringFormatCall); a
+// runtime-computed format string can't be verb-checked at all, and is
+// documented as a known limitation (Go's own fmt.Sprintf never panics on a
+// verb/type mismatch, it just emits inline error text like "%!d(string=x)").
+func (a *Analyzer) analyzeStringFormatFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'format', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	fmtSymbol := a.analyze(n.Arguments[0])
+	if fmtSymbol.Type() != environment.STRING_OBJ && fmtSymbol.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'format' must be String, got %s", fmtSymbol.Type()))
+	}
+	// The value being formatted can be any type, so it's analyzed (for
+	// purity/move-semantics tracking) without a type restriction — the
+	// same "second argument can be anything" shape as log.info.
+	_ = a.analyze(n.Arguments[1])
+
+	return symbol.NewBasicSymbol(environment.STRING_OBJ)
+}
+
 func (a *Analyzer) analyzeStringConcatFunction(n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 2 {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'concat', got %d", len(n.Arguments)))

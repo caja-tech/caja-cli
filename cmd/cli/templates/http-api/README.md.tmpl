@@ -1,7 +1,13 @@
 # {{.Name}}
 
-A Caja **http-api** project — `main.caja` uses the `http` builtin module to
-declare routes and compiles to a native Go binary.
+A Caja **http-api** project — `main.caja` uses [`@caja/acerola`](https://www.npmjs.com/package/@caja/acerola)
+(route groups, table-driven routes, and middleware presets over the `http`
+builtin module) to declare routes, and compiles to a native Go binary.
+
+`caja init` installed `@caja/acerola` for you via npm/bun when this project
+was created. If that step was skipped (no package manager found, offline, or
+`--skip-install` was passed), run `npm install` (or `bun install`, `yarn install`) here
+first.
 
 ## Running locally
 

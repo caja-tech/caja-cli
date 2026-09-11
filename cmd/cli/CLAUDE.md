@@ -21,7 +21,7 @@ The `caja` binary's entrypoint — a Cobra-based CLI that composes every other p
 - `listen.go`: `NewListenCmd()` — runs an http-api script live via `compiler.Run` (transpile + `go run`, not a saved binary), auto-discovering `main.caja` through `resolveProjectContext` the same way the other commands do. `--port` is threaded through as the `CAJA_HTTP_PORT` env var, which the generated `caja_http_listen` call (compiler/builtins.go) prefers over the port literal baked into the `.caja` source — so the invocation, not the script, controls the actual bind port.
 - `encode.go` / `decode.go`: thin wrappers around `internal/encoder.Encode`/`Decode`.
 - `lsp.go`: `NewLspCmd()` — calls `lsp.Run(Version)`.
-- `templates.go` + `templates/{static-page,web-app,http-api}/`: the `caja init` scaffold content, one `*.tmpl` file per output file (`.tmpl` stripped on render). Caja's lexer has no string-escape support (`\"`, `\n`, ...) — every template's Caja string literals are written as single lines using `'` for any nested quoting, not `\"`.
+- `templates.go` + `templates/{static-page,web-app,http-api}/`: the `caja init` scaffold content, one `*.tmpl` file per output file (`.tmpl` stripped on render). Caja string literals now support real backslash escapes (`\"`, `\n`, `\t`, `\\`, `\'`, `\$`, `\uXXXX`) — these templates predate that and still use `'` for nested HTML-attribute quoting rather than `\"`, which is harmless (HTML accepts either) but no longer required; don't assume `\"` is unavailable if you're touching a template.
 
 ## Gotchas / invariants
 
