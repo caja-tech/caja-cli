@@ -3,6 +3,8 @@ package analyzer
 import (
 	"caja-cli/internal/pipeline/analyzer/symbol"
 	"caja-cli/internal/pipeline/environment"
+	"caja-cli/internal/pipeline/lexer"
+	"fmt"
 	"strings"
 )
 
@@ -16,6 +18,73 @@ func (a *Analyzer) findVarSymbolInScope(varName string) (ScopeEntry, bool) {
 	}
 
 	return ScopeEntry{}, false
+}
+
+// resolveTypeRef is findTypeSymbolInTypes plus wildcard-type ambiguity
+// reporting. The resolution functions themselves carry no source token, so
+// this wrapper is what type-annotation sites call in order to attach the
+// diagnostic to a real position.
+func (a *Analyzer) resolveTypeRef(tok lexer.Token, typeExpr string) (symbol.Symbol, bool) {
+	a.checkAmbiguousTypeUse(tok, typeExpr)
+	return a.findTypeSymbolInTypes(typeExpr)
+}
+
+// checkAmbiguousTypeUse reports any identifier inside a type expression that
+// two different wildcard imports both bound. Like the value side, this fires
+// only where the name is actually used — importing both modules stays legal —
+// and the qualified form (mod.Type) remains the fallback.
+//
+// Reports are deduped per type name because several statements resolve the
+// same annotation more than once, and the analyzer tests assert exact error
+// counts.
+func (a *Analyzer) checkAmbiguousTypeUse(tok lexer.Token, typeExpr string) {
+	if len(a.wildcardTypes) == 0 || typeExpr == "" {
+		return
+	}
+	for _, name := range typeIdentifierFragments(typeExpr) {
+		origins, ok := a.wildcardTypes[name]
+		if !ok || len(origins) < 2 || a.reportedAmbiguousTypes[name] {
+			continue
+		}
+		a.reportedAmbiguousTypes[name] = true
+		a.reportError(tok, fmt.Sprintf(
+			"semantic error: ambiguous type '%s': wildcard-imported from %s. Suggestion: qualify it (%s)",
+			name, formatModuleList(origins), formatQualifiedSuggestions(origins, name)))
+	}
+}
+
+// typeIdentifierFragments splits a type expression into the bare identifier
+// names it references, so every composite form ([Shape], map[String]Shape,
+// fn(Shape) -> Shape, Shape?) is covered by a single scan rather than by
+// hooking each recursive branch of type resolution. Fragments containing a
+// '.' are already module-qualified — the escape hatch — and are dropped.
+func typeIdentifierFragments(typeExpr string) []string {
+	var fragments []string
+	var current strings.Builder
+	qualified := false
+
+	flush := func() {
+		if current.Len() > 0 && !qualified {
+			fragments = append(fragments, current.String())
+		}
+		current.Reset()
+		qualified = false
+	}
+
+	for _, r := range typeExpr {
+		switch {
+		case r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+			current.WriteRune(r)
+		case r == '.':
+			qualified = true
+			current.WriteRune(r)
+		default:
+			flush()
+		}
+	}
+	flush()
+
+	return fragments
 }
 
 // findTypeSymbolInTypes converts a type name string into its corresponding symbol.Symbol representation,

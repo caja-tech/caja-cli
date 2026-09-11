@@ -14,6 +14,19 @@ type ScopeEntry struct {
 	IsImport        bool
 	FilePath        string
 	IsMoved         bool
+	// WildcardModules records the bound module names (the alias when `as` was
+	// used, since that is what the reader must type to qualify) that
+	// wildcard-imported this name. Empty means the binding is explicit — a
+	// local declaration or a named import — and therefore always wins over a
+	// wildcard. len 1 is an unambiguous wildcard binding; len > 1 means two
+	// wildcards brought in the same name, which is an error only at a USE
+	// site, never at import time.
+	//
+	// This lives on the entry rather than in an analyzer-level map so that
+	// shadowing falls out for free: an inner `let len` resolves to its own
+	// entry, whose WildcardModules is empty, and the ambiguity correctly
+	// disappears inside that scope.
+	WildcardModules []string
 }
 
 // GlobalScope returns the top-level scope of this analyzer
@@ -102,6 +115,13 @@ func (a *Analyzer) typeDeclaredInCurrentFunctionScope(name string) bool {
 // declareType registers a type name in the current (innermost) type scope.
 func (a *Analyzer) declareType(name string, sym symbol.Symbol) {
 	a.types[len(a.types)-1][name] = sym
+	// An explicit type declaration (type/define/union, or a named import's
+	// type branch) silently wins over a wildcard-imported type of the same
+	// name. Since declareType is the single funnel for all of those, clearing
+	// the marker here is the whole "explicit beats wildcard" mechanism for
+	// types — which is why bindWildcardImport must set wildcardTypes AFTER
+	// its own declareType call.
+	delete(a.wildcardTypes, name)
 }
 
 // deleteType removes a type name from the current (innermost) type scope.
@@ -136,8 +156,59 @@ func (a *Analyzer) declare(name string, sym symbol.Symbol, isConstant bool, defT
 // declareImport registers an imported variable name in the current scope.
 func (a *Analyzer) declareImport(name string, sym symbol.Symbol, isConstant bool, defToken lexer.Token, filePath string) {
 	last := len(a.scopes) - 1
-    
+
 	a.scopes[last][name] = ScopeEntry{Sym: sym, IsConstant: isConstant, FunctionDepth: a.functionDepth, DefinitionToken: defToken, IsImport: true, FilePath: filePath}
+}
+
+// declareWildcardImport registers a name brought in by `import * from mod`.
+// It writes the same entry declareImport does — IsImport plus FilePath are
+// what make codegen work, since the transpiler derives the emitted Go name as
+// sanitizeIdentifier(FilePath) + "_" + name — and additionally tags the entry
+// with the module it came from, so a second wildcard offering the same name
+// can be detected as ambiguous.
+//
+// filePath must be the import specifier (modPath), matching what the
+// named-import path passes; moduleName is the bound name (the alias when `as`
+// was used), used only in diagnostics.
+func (a *Analyzer) declareWildcardImport(name string, sym symbol.Symbol, defToken lexer.Token, filePath, moduleName string) {
+	last := len(a.scopes) - 1
+
+	a.scopes[last][name] = ScopeEntry{
+		Sym:             sym,
+		IsConstant:      true,
+		FunctionDepth:   a.functionDepth,
+		DefinitionToken: defToken,
+		IsImport:        true,
+		FilePath:        filePath,
+		WildcardModules: []string{moduleName},
+	}
+}
+
+// markWildcardAmbiguous records that moduleName also wildcard-exports an
+// already-bound name, making the bare name ambiguous. The first binding's
+// symbol is deliberately kept: nothing is reported here, only at a use site.
+//
+// A fresh slice is built rather than appending in place because ScopeEntry is
+// copied by value throughout the move-tracking helpers below, so appending
+// could write through a shared backing array into an unrelated copy.
+func (a *Analyzer) markWildcardAmbiguous(name, moduleName string) {
+	for i := len(a.scopes) - 1; i >= 0; i-- {
+		entry, ok := a.scopes[i][name]
+		if !ok {
+			continue
+		}
+		for _, m := range entry.WildcardModules {
+			if m == moduleName {
+				return
+			}
+		}
+		next := make([]string, 0, len(entry.WildcardModules)+1)
+		next = append(next, entry.WildcardModules...)
+		next = append(next, moduleName)
+		entry.WildcardModules = next
+		a.scopes[i][name] = entry
+		return
+	}
 }
 
 // GetGlobalType retrieves a type from the global type registry

@@ -1,0 +1,6 @@
+import * from "wildcard_shapes_a"
+import * from "wildcard_shapes_b"
+
+# 'Shape' collides across both modules but is never referenced, so importing
+# both stays legal and the non-colliding members remain usable bare.
+return fromA(10) + fromB(20)

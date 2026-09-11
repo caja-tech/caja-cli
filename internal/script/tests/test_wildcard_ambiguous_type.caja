@@ -1,0 +1,7 @@
+import * from "wildcard_shapes_a"
+import * from "wildcard_shapes_b"
+
+# Both modules export a type named 'Shape', so the bare annotation is
+# ambiguous and must be qualified.
+let s: Shape = Shape { a: 1 }
+return 1

@@ -1,0 +1,5 @@
+import * from "array"
+import * from "string"
+
+# 'len' is exported by both modules, so the bare form is ambiguous.
+return len([1, 2])

@@ -1,0 +1,10 @@
+import * from "array"
+import * from "string"
+
+# 'len' and 'join' collide across these two modules but are never used bare,
+# so importing both must stay legal. Non-colliding members work unqualified,
+# and the qualified form covers the collisions.
+let xs = push([1, 2], 3)
+let shouted = toUpper("caja")
+
+return array.len(xs)

@@ -771,6 +771,24 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		// "Client" regardless of this check.
 		if structDef.Name == "Client" && structDef.FilePath == "" {
 			ctx.usedModules["http_client"] = true
+			// Client's Go glue (below, gated on http_client) itself embeds
+			// *Response fields and lives inside the shared "http" glue block
+			// (Response/Request/etc.), so a program that references the
+			// Client type without ever calling any http.* function (e.g. a
+			// named import, `import { Client } from "http"`, used only as a
+			// parameter/return type) must still pull that surrounding block
+			// in -- transpileBuiltinCall (builtins.go) is the only other
+			// place "http" gets set, and it never runs when there's no call.
+			ctx.usedModules["http"] = true
+			// The http glue block (Client, and the Request/Response types it
+			// sits alongside) reaches for both *cajaMap[K, V] (headers/query)
+			// and *cajaArray[T] (queryAll/headersAll) fields. Every
+			// call-driven path into http already touches a map or array and
+			// so pulls these in as a side effect, but a bare type reference
+			// with zero calls doesn't, so they must be requested explicitly
+			// here too.
+			ctx.usedModules["cow_map"] = true
+			ctx.usedModules["cow_array"] = true
 		}
 		baseName := structDef.Name
 		if structDef.FilePath != "" && ctx != nil && structDef.FilePath != ctx.topLevelFileName {
@@ -821,6 +839,10 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		return "bool"
 	case environment.DATE_OBJ:
 		return "time.Time"
+	case environment.INSTANT_OBJ:
+		return "time.Time"
+	case environment.DURATION_OBJ:
+		return "time.Duration"
 	case environment.ELEMENT_OBJ:
 		ctx.usedModules["syscall/js"] = true
 		return "js.Value"
@@ -2159,8 +2181,13 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			fn = fmt.Sprintf("%s[%s]", fn, strings.Join(typeArgsGo, ", "))
 		}
 
+		callArgs := e.Arguments
+		if resolved, ok := a.GetResolvedCallArguments(e); ok {
+			callArgs = resolved
+		}
+
 		args := []string{}
-		for _, arg := range e.Arguments {
+		for _, arg := range callArgs {
 			argStr, err := transpileExpression(arg, ctx, "")
 			if err != nil {
 				return "", err
@@ -2649,6 +2676,14 @@ func writeReexportForwards(bodyBuf *bytes.Buffer, ctx *transpileContext) {
 	names := make([]string, 0)
 	for name, entry := range ctx.analyzer.GlobalScope() {
 		if !entry.IsImport {
+			continue
+		}
+		// Names pulled in by `import * from ...` are deliberately not
+		// re-exported (the analyzer keeps them out of this module's export
+		// set), so nothing downstream can ever reference <thisModule>_<name>.
+		// Forwarding them would emit dead code proportional to the imported
+		// module's entire surface area.
+		if len(entry.WildcardModules) > 0 {
 			continue
 		}
 		if _, _, isBuiltin := symbol.GetStandardModule(entry.FilePath); isBuiltin {

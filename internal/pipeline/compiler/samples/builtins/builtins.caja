@@ -60,9 +60,11 @@ let d6 = date.addDays(d, 5)
 let d7 = date.diffDays(d, d6)
 let d8 = date.new(2026, 9, 3)
 
-let myMap = { "key": 10 }
+let myMap = { "key": 10, "other": 20 }
 let ok = map.containsKey(myMap, "key")
 let myMap2 = map.delete(myMap, "key")
+let mkeys = map.keys(myMap)
+let mvalues = map.values(myMap)
 
 log.info("Info msg", arr)
 log.warn("Warn msg", str)

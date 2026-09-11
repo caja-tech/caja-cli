@@ -655,6 +655,35 @@ func TestCompletion(t *testing.T) {
 			col:  9,
 			expectedLabels: []string{"add"},
 		},
+		{
+			// A wildcard import has no per-name AST nodes, so its members come
+			// from the module's symbol table rather than the import statement.
+			name:           "Wildcard Import Members Are Offered Bare",
+			text:           "import * from array\n",
+			line:           1,
+			col:            0,
+			expectedLabels: []string{"push", "head", "tail", "len"},
+		},
+		{
+			name: "Wildcard Import Of A User Module",
+			setupFiles: map[string]string{
+				"helpers_mod.caja": "let add = fn(x: Number, y: Number) -> Number { return x + y }\n",
+			},
+			text:           "import * from \"./helpers_mod\"\n",
+			line:           1,
+			col:            0,
+			expectedLabels: []string{"add"},
+		},
+		{
+			// 'len' is exported by both modules, so accepting it bare would
+			// only produce an ambiguity error — it must not be suggested.
+			name:           "Ambiguous Wildcard Name Is Not Offered",
+			text:           "import * from array\nimport * from string\n",
+			line:           2,
+			col:            0,
+			expectedLabels: []string{"push", "toUpper"},
+			missingLabels:  []string{"len", "join"},
+		},
 	}
 
 	for _, tt := range tests {

@@ -1,0 +1,21 @@
+import { Circle, Square, Shape, BigCircle } from "./shapes"
+import { Client } from "http"
+
+let c: Circle = Circle { radius: 5 }
+let s: Shape = c
+let matched: Circle? = s is Circle
+let big: BigCircle? = Circle { radius: 20 }
+
+let useClient = fn(client: Client) -> Client {
+	return client
+}
+
+if (matched == nil) {
+	return 1
+}
+
+if (big == nil) {
+	return 1
+}
+
+return 0

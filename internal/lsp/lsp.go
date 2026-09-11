@@ -372,6 +372,19 @@ func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelp
 		}
 	}
 
+	// A bare call to a wildcard- or named-imported builtin (`push(...)` rather
+	// than `array.push(...)`) resolves from nodeSymbols once analysis has
+	// completed; this covers the buffer-mid-edit case where it has not.
+	if ident, ok := callExpr.Function.(*ast.Identifier); ok && sym == nil {
+		if modName := a.GetImportedModule(ident); modName != "" {
+			if symbols, _, ok := symbol.GetStandardModule(modName); ok {
+				if symObj, exists := symbols[ident.Value]; exists {
+					sym = symObj
+				}
+			}
+		}
+	}
+
 	var label string
 	var paramsList []string
 

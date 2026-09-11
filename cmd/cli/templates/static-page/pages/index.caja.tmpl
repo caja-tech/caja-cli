@@ -438,9 +438,9 @@ let sitePanel = ui.column() {
 	ui.text("A site is more than one page. You are reading pages/index.caja of {{.Name}}; the About link in the header goes to pages/about.caja. Both are ordinary modules that export a Page, and main.caja is a short loop that wraps each one in the shared layout and writes it. siriguela only builds pages — writing them is the doc module's job, and it stays in main.caja on purpose (a library that wrote files would make every program importing it un-runnable with caja run).")
 	componentDoc(
 		"definePage(title, path, content) / navLinks(pages, currentPath)",
-		"A Page is a title, an output path (also the href other pages use) and a content View. navLinks renders one link per page and marks the current one with aria-current='page' — a stylesheet hook as much as an accessibility one.",
-		"let home = ui.definePage(\"Home\", \"index.html\", homeContent)\nlet about = ui.definePage(\"About\", \"about.html\", aboutContent)\n\nui.navLinks([home, about], \"about.html\")",
-		ui.navLinks([ui.definePage("Home", "index.html", ui.text("")), ui.definePage("About", "about.html", ui.text(""))], "about.html") |> ui.className("site-nav")
+		"A Page is a title, an output path (also the href other pages use) and a content View. Named arguments (title:, path:, content:) disambiguate the two adjacent strings — a plain positional call reads fine once, but a typo swapping title and path is a String-shaped value in the wrong String-typed slot, which the analyzer can't catch positionally. navLinks renders one link per page and marks the current one with aria-current='page' — a stylesheet hook as much as an accessibility one.",
+		"let home = ui.definePage(title: \"Home\", path: \"index.html\", content: homeContent)\nlet about = ui.definePage(title: \"About\", path: \"about.html\", content: aboutContent)\n\nui.navLinks([home, about], \"about.html\")",
+		ui.navLinks([ui.definePage(title: "Home", path: "index.html", content: ui.text("")), ui.definePage(title: "About", path: "about.html", content: ui.text(""))], "about.html") |> ui.className("site-nav")
 	)
 	componentDoc(
 		"htmlDocument(title, stylesheetHref, body)",
@@ -564,4 +564,4 @@ let content = ui.column() {
 	rendering
 } |> ui.gap("48px")
 
-let page = ui.definePage("siriguela", "index.html", content)
+let page = ui.definePage(title: "siriguela", path: "index.html", content: content)

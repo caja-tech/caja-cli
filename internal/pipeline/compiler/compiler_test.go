@@ -24,7 +24,7 @@ import (
 
 func TestSamplesCompilation(t *testing.T) {
 	samplesDir := "samples"
-	
+
 	entries, err := os.ReadDir(samplesDir)
 	if err != nil {
 		t.Fatalf("failed to read samples directory: %v", err)
@@ -38,7 +38,7 @@ func TestSamplesCompilation(t *testing.T) {
 		dirName := entry.Name()
 		t.Run(dirName, func(t *testing.T) {
 			filePath := filepath.Join(samplesDir, dirName, dirName+".caja")
-			
+
 			sourceCode, err := os.ReadFile(filePath)
 			if err != nil {
 				t.Fatalf("failed to read file '%s': %v", filePath, err)
@@ -201,6 +201,162 @@ log.info("result:", lib.escapeHTML("a & b"))
 	want := "result: a &amp; b"
 	if !strings.Contains(stdout.String(), want) {
 		t.Errorf("expected stdout to contain %q, got:\n%s", want, stdout.String())
+	}
+}
+
+// TestMapKeysAndValuesAreSortedAndCorrespond verifies map.keys/map.values
+// produce deterministic, key-sorted output that stays correspondingly
+// ordered with each other, despite Go's own map iteration being randomized.
+func TestMapKeysAndValuesAreSortedAndCorrespond(t *testing.T) {
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "map_keys_values.caja")
+	source := `import "map" as map
+let m = { "b": 2, "a": 1, "c": 3 }
+let ks = map.keys(m)
+let vs = map.values(m)
+let result = ["${ks}", "${vs}"]
+result
+`
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test script: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(source, dir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	want := "[[a, b, c], [1, 2, 3]]\n"
+	if stdout.String() != want {
+		t.Errorf("expected sorted, corresponding keys/values output %q, got %q", want, stdout.String())
+	}
+}
+
+// TestNamedArgumentsSampleRuns runs the named_arguments sample end to end
+// (not just through the compile-only TestSamplesCompilation check) and
+// verifies its self-checks all passed. The sample returns 0 only if
+// named-only calls, positional+named mixes, argument reordering, the
+// pipe operator (which must still fill the first parameter positionally
+// ahead of any named arguments), and a named argument on a generic function
+// all produced the expected values -- see
+// samples/named_arguments/named_arguments.caja.
+func TestNamedArgumentsSampleRuns(t *testing.T) {
+	filePath := filepath.Join("samples", "named_arguments", "named_arguments.caja")
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read sample: %v", err)
+	}
+
+	baseDir, _ := filepath.Abs(filepath.Dir(filePath))
+	program, _, a, err := script.ParseWithDir(string(source), baseDir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	want := "0\n"
+	if stdout.String() != want {
+		t.Errorf("expected the sample's self-checks to all pass (printed %q), got %q", want, stdout.String())
+	}
+}
+
+// transpileSampleToGo compiles a sample to Go source, returning it for
+// inspection, and is the shared setup for the wildcard-import runtime tests.
+func transpileSampleToGo(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	filePath := filepath.Join("samples", dir, name+".caja")
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read sample: %v", err)
+	}
+
+	baseDir, _ := filepath.Abs(filepath.Dir(filePath))
+	program, _, a, err := script.ParseWithDir(string(source), baseDir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{PrintResult: true})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, err := format.Source([]byte(goCode)); err == nil {
+		goCode = string(formatted)
+	}
+	return goCode
+}
+
+// TestWildcardImportSamplesRun runs both wildcard-import samples end to end
+// (TestSamplesCompilation only compiles them). Each returns 0 only if every
+// self-check passed: bare members of a wildcard-imported module resolving to
+// the right function, the qualified fallback still working for a name two
+// modules both export, and — for the custom-module sample — bare names
+// transpiling to the origin module's flattened Go symbols plus a
+// wildcard-imported type usable unqualified as an annotation.
+func TestWildcardImportSamplesRun(t *testing.T) {
+	samples := []string{"wildcard_imports", "wildcard_imports_custom"}
+
+	for _, name := range samples {
+		t.Run(name, func(t *testing.T) {
+			goCode := transpileSampleToGo(t, name, name)
+
+			var stdout, stderr bytes.Buffer
+			if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+				t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+			}
+
+			want := "0\n"
+			if stdout.String() != want {
+				t.Errorf("expected the sample's self-checks to all pass (printed %q), got %q", want, stdout.String())
+			}
+		})
+	}
+}
+
+// TestWildcardImportDoesNotReexport guards the decision that wildcard-imported
+// names are not re-exported: writeReexportForwards must emit no forwarding var
+// for them. Without the skip, one wildcard would emit dead forwarding code
+// proportional to the imported module's entire surface area.
+func TestWildcardImportDoesNotReexport(t *testing.T) {
+	goCode := transpileSampleToGo(t, "wildcard_imports_custom", "wildcard_imports_custom")
+
+	for _, member := range []string{"add", "double", "hidden"} {
+		forward := "wildcard_imports_custom_" + member
+		if strings.Contains(goCode, forward) {
+			t.Errorf("expected no re-export forwarding var %q for a wildcard-imported member, but found one:\n%s", forward, goCode)
+		}
+	}
+
+	// Sanity check the sample actually exercised the origin-prefixed path,
+	// so this test can't pass vacuously.
+	if !strings.Contains(goCode, "helpers_add") {
+		t.Errorf("expected the bare call to transpile to the origin module's name 'helpers_add', got:\n%s", goCode)
 	}
 }
 
@@ -1075,6 +1231,140 @@ func runCajaSource(t *testing.T, source string) string {
 		t.Fatalf("run failed: %v\nstderr:\n%s", err, stderr.String())
 	}
 	return stdout.String()
+}
+
+// TestTimeParseReturnsNilOnFailureAtRuntime verifies time.parse's nil/non-nil
+// Nullable behavior for real, not just at the codegen-substring level: a
+// value matching layout must round-trip to a non-nil *time.Time.
+func TestTimeParseReturnsNilOnFailureAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet ok = time.parse(\"2006-01-02\", \"2024-03-05\")\nreturn ok != nil\n")
+	if strings.TrimSpace(got) != "true" {
+		t.Errorf("time.parse of a valid date: got %q, want %q", got, "true")
+	}
+}
+
+// TestTimeParseReturnsNilOnInvalidInputAtRuntime is
+// TestTimeParseReturnsNilOnFailureAtRuntime's counterpart: a value that
+// doesn't match layout must round-trip to nil, not a zero-value time.Time.
+func TestTimeParseReturnsNilOnInvalidInputAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet bad = time.parse(\"2006-01-02\", \"not-a-date\")\nreturn bad != nil\n")
+	if strings.TrimSpace(got) != "false" {
+		t.Errorf("time.parse of an invalid date: got %q, want %q", got, "false")
+	}
+}
+
+// TestTimeParseDurationReturnsNilOnFailureAtRuntime is
+// TestTimeParseReturnsNilOnFailureAtRuntime's counterpart for
+// time.parseDuration: a well-formed duration string must round-trip to a
+// non-nil *time.Duration.
+func TestTimeParseDurationReturnsNilOnFailureAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet ok = time.parseDuration(\"1h30m\")\nreturn ok != nil\n")
+	if strings.TrimSpace(got) != "true" {
+		t.Errorf("time.parseDuration of a valid duration: got %q, want %q", got, "true")
+	}
+}
+
+// TestTimeParseDurationReturnsNilOnInvalidInputAtRuntime verifies
+// time.parseDuration returns nil (not a zero-value time.Duration) for a
+// string Go's time.ParseDuration can't parse.
+func TestTimeParseDurationReturnsNilOnInvalidInputAtRuntime(t *testing.T) {
+	got := runCajaSource(t, "import \"time\" as time\nlet bad = time.parseDuration(\"not-a-duration\")\nreturn bad != nil\n")
+	if strings.TrimSpace(got) != "false" {
+		t.Errorf("time.parseDuration of an invalid duration: got %q, want %q", got, "false")
+	}
+}
+
+// TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond verifies
+// time.unix's actual epoch round-tripping at runtime, not just its codegen
+// substring: unixSeconds/unixMilli must recover the same second/millisecond
+// count that was passed in. nanosecond (unlike hour/minute/second) is
+// checked because it's location-independent — Go's time.Unix returns a
+// Local-zone Time, so hour/minute/second's real values would depend on the
+// test machine's timezone. Each assertion is its own subtest/program
+// (rather than combined with "and") because the compiler doesn't currently
+// lower the "and"/"or"/"xor" keyword operators to valid Go syntax — an
+// unrelated, pre-existing gap outside this diff's scope.
+func TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond(t *testing.T) {
+	for name, source := range map[string]string{
+		"unixSeconds recovers the seconds passed to unix": `import "time" as time
+let t = time.unix(1700000000, 123456789)
+return time.unixSeconds(t) == 1700000000
+`,
+		"unixMilli recovers seconds*1000 + nsec/1e6": `import "time" as time
+let t = time.unix(1700000000, 123456789)
+return time.unixMilli(t) == 1700000000123
+`,
+		"nanosecond recovers the nsec passed to unix": `import "time" as time
+let t = time.unix(1700000000, 123456789)
+return time.nanosecond(t) == 123456789
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runCajaSource(t, source)
+			if strings.TrimSpace(got) != "true" {
+				t.Errorf("got %q, want %q", got, "true")
+			}
+		})
+	}
+}
+
+// TestTimeBeforeAfterEqualComparisonSemantics verifies before/after/equal's
+// actual boolean comparison semantics at runtime, not just that they
+// transpile to the right Go method call: an earlier Instant must compare as
+// before a later one (and not after or equal to it), and an Instant must
+// compare equal to itself. See the "and"/"or"/"xor" codegen note on
+// TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond for why
+// each assertion is its own subtest/program.
+func TestTimeBeforeAfterEqualComparisonSemantics(t *testing.T) {
+	const setup = `import "time" as time
+let earlier = time.unix(0, 0)
+let later = time.unix(100, 0)
+`
+	for name, expr := range map[string]string{
+		"earlier is before later":         "time.before(earlier, later) == true",
+		"later is not before earlier":     "time.before(later, earlier) == false",
+		"later is after earlier":          "time.after(later, earlier) == true",
+		"earlier is not after later":      "time.after(earlier, later) == false",
+		"an Instant is equal to itself":   "time.equal(earlier, earlier) == true",
+		"distinct Instants are not equal": "time.equal(earlier, later) == false",
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runCajaSource(t, setup+"return "+expr+"\n")
+			if strings.TrimSpace(got) != "true" {
+				t.Errorf("got %q, want %q", got, "true")
+			}
+		})
+	}
+}
+
+// TestTimeDurationConstructorsAndAccessorsRoundTrip verifies the
+// minutes/hours constructors and the toMilliseconds/toSeconds/toMinutes/
+// toHours accessors against each other's actual numeric output at runtime,
+// not just their codegen substrings. See the "and"/"or"/"xor" codegen note
+// on TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond for why
+// each assertion is its own subtest/program.
+func TestTimeDurationConstructorsAndAccessorsRoundTrip(t *testing.T) {
+	for name, source := range map[string]string{
+		"toMilliseconds(minutes(2)) == 120000": `import "time" as time
+return time.toMilliseconds(time.minutes(2)) == 120000
+`,
+		"toSeconds(minutes(2)) == 120": `import "time" as time
+return time.toSeconds(time.minutes(2)) == 120
+`,
+		"toMinutes(hours(1)) == 60": `import "time" as time
+return time.toMinutes(time.hours(1)) == 60
+`,
+		"toHours(hours(1)) == 1": `import "time" as time
+return time.toHours(time.hours(1)) == 1
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := runCajaSource(t, source)
+			if strings.TrimSpace(got) != "true" {
+				t.Errorf("got %q, want %q", got, "true")
+			}
+		})
+	}
 }
 
 // TestCOWStructAssignmentDoesNotAlias is the core behavior this whole change

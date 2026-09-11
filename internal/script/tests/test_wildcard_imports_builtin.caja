@@ -1,0 +1,4 @@
+import * from "array"
+
+let xs = push([1, 2], 3)
+return array.len(xs) * 10

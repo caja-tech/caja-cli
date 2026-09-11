@@ -1,0 +1,7 @@
+import * from "second"
+
+# 'add' is wildcard-imported here, so it is usable inside this module but is
+# deliberately NOT re-exported to anyone importing this one.
+let addTwice = fn(a: Number, b: Number) -> Number {
+	return add(a, b) * 2
+}

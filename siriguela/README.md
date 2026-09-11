@@ -312,6 +312,13 @@ const writeSite = fn(remaining: [ui.Page], all: [ui.Page]) -> Nothing {
 writeSite(site, site)
 ```
 
+A page module's own `definePage` call reads better with named arguments — `title`/`path` are two
+adjacent strings, and only the parameter names tell them apart:
+
+```caja
+let page = ui.definePage(title: "About", path: "about.html", content: content)
+```
+
 `caja init --type static-page` scaffolds exactly this shape (plus an `assets/` folder that
 `caja build`/`serve` copy into `dist/assets/`). Two constraints the module system imposes: spell
 the `"@caja/siriguela"` import identically in every file (the specifier is the module cache key —

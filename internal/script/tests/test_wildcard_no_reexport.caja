@@ -1,0 +1,5 @@
+import { add } from "wildcard_facade"
+
+# wildcard_facade wildcard-imported 'add' rather than declaring it, so it is
+# not part of that module's exports and this import must fail.
+return add(1, 2)

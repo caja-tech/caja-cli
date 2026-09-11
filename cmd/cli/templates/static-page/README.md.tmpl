@@ -19,7 +19,8 @@ dist/            the generated site — never edit it by hand
 ```
 
 **Adding a page:** create `pages/name.caja` exporting
-`let page = ui.definePage("Title", "name.html", content)`, import it in
+`let page = ui.definePage(title: "Title", path: "name.html", content: content)`,
+import it in
 `main.caja` (`import "pages/name" as name`) and append `name.page` to the
 `site` list. The navigation, the layout and the writer all pick it up from
 that one list. A page module only *builds* its page; writing files is

@@ -1,0 +1,30 @@
+import * from array
+import * from string
+
+# Bare members of both modules, none of which collide.
+let xs = push([1, 2], 3)
+let first = head(xs)
+let shouted = toUpper("caja")
+
+# 'len' and 'join' are exported by BOTH modules, so the bare form would be
+# ambiguous — the qualified form is the fallback and always works.
+let count = array.len(xs)
+let letters = string.len("caja")
+
+if (first != 1) {
+	return 1
+}
+
+if (count != 3) {
+	return 1
+}
+
+if (letters != 4) {
+	return 1
+}
+
+if (shouted != "CAJA") {
+	return 1
+}
+
+return 0

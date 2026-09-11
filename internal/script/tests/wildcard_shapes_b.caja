@@ -1,0 +1,7 @@
+type Shape struct {
+	b Number
+}
+
+let fromB = fn(n: Number) -> Number {
+	return n + 2
+}
