@@ -216,6 +216,41 @@ func TestModules(t *testing.T) {
 			expectVal:   220.0,
 		},
 		{
+			// Regression test: reexport_index.caja named-imports
+			// registerRoutes from reexport_router.caja without ever calling
+			// it itself, purely to re-export it — a facade shape that used
+			// to type-check but fail `go build` with
+			// "undefined: reexport_index_registerRoutes", since nothing
+			// declared that Go symbol (only the true origin,
+			// reexport_router_registerRoutes, was ever emitted).
+			name:        "Named Imports Re-export Chain Test",
+			file:        "test_named_imports_reexport.caja",
+			expectError: false,
+			expectVal:   30.0,
+		},
+		{
+			// Confirms both a String-typed and a Number-typed "${...}"
+			// segment interpolate correctly end to end (built, compiled,
+			// and actually run) — and specifically that a whole number
+			// formats as "5", not "5.0", via an exact string comparison
+			// rather than just checking the code compiles.
+			name:        "String Interpolation Test",
+			file:        "test_string_interpolation.caja",
+			expectError: false,
+			expectVal:   1.0,
+		},
+		{
+			// Confirms escapes, string.format, and their interaction with
+			// interpolation (a nested string literal inside "${...}", and
+			// an escaped "\${" alongside a real interpolation in the same
+			// string) all produce the exact expected runtime values, not
+			// just "it compiles" — 5 independent checks summed to 5.0.
+			name:        "String Escapes And Format Test",
+			file:        "test_string_format.caja",
+			expectError: false,
+			expectVal:   5.0,
+		},
+		{
 			name:        "Trailing Block Call Syntax",
 			file:        "test_trailing_block.caja",
 			expectError: false,

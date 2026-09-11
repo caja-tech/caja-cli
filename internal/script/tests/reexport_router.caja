@@ -1,0 +1,3 @@
+let registerRoutes = fn(n: Number) -> Number {
+    return n + 1
+}

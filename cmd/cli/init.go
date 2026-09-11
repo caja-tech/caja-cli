@@ -3,8 +3,10 @@ package main
 import (
 	"caja-cli/internal/project"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -88,6 +90,48 @@ func renderProjectTemplates(projectType project.Type, targetDir string, data tem
 	})
 }
 
+// detectPackageManager returns the first package-manager binary found on
+// PATH, preferring bun (a single fast binary) over npm when both are
+// present. Both accept a bare "install" subcommand that reads dependencies
+// straight from package.json, so no further per-manager branching is
+// needed once one is found.
+func detectPackageManager() (string, bool) {
+	if _, err := exec.LookPath("bun"); err == nil {
+		return "bun", true
+	}
+	if _, err := exec.LookPath("yarn"); err == nil {
+		return "yarn", true
+	}
+	if _, err := exec.LookPath("npm"); err == nil {
+		return "npm", true
+	}
+	return "", false
+}
+
+// installDependencies runs the detected package manager's install command
+// inside dir to fetch whatever package.json there declares (currently just
+// @caja/acerola for a scaffolded http-api project). Failure here — no
+// package manager on PATH, no network, or any other install error — is
+// reported as a warning, not a fatal init error: the scaffolded project is
+// still valid and usable, and the user can retry the install manually once
+// whatever blocked it is resolved.
+func installDependencies(dir string, out io.Writer) {
+	bin, ok := detectPackageManager()
+	if !ok {
+		fmt.Fprintln(out, "Warning: no npm or bun found on PATH — skipping dependency install. Run 'npm install' (or 'bun install') in the project directory once you have one available.")
+		return
+	}
+
+	fmt.Fprintf(out, "Installing dependencies with %s...\n", bin)
+	cmd := exec.Command(bin, "install")
+	cmd.Dir = dir
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(out, "Warning: '%s install' failed: %v\nYou can retry manually by running '%s install' inside %s.\n", bin, err, bin, dir)
+	}
+}
+
 // NewInitCmd creates and returns the 'init' command: scaffolds a new Caja
 // project (a cajaproj.yml manifest plus a per-type main.caja and README) so
 // `caja build`/`run`/`serve` can auto-detect the project's type afterward
@@ -148,6 +192,17 @@ func NewInitCmd() (*cobra.Command, error) {
 				return err
 			}
 
+			skipInstall, err := cmd.Flags().GetBool("skip-install")
+			if err != nil {
+				return fmt.Errorf("failed to retrieve 'skip-install' flag: %w", err)
+			}
+			// http-api is the only project type that depends on a package
+			// today (@caja/acerola, declared in its package.json.tmpl) —
+			// static-page/web-app have nothing to install.
+			if projectType == project.TypeHTTPAPI && !skipInstall {
+				installDependencies(targetDir, cmd.OutOrStdout())
+			}
+
 			fmt.Printf("Created %s project %q in %s\n", projectType, name, targetDir)
 
 			return nil
@@ -157,6 +212,7 @@ func NewInitCmd() (*cobra.Command, error) {
 	cmd.Flags().String("name", "", "Name of the project to create")
 	cmd.Flags().String("type", "", "Project type: static-page, http-api, or web-app")
 	cmd.Flags().String("dir", "", "Directory to create the project in (defaults to ./<name>)")
+	cmd.Flags().Bool("skip-install", false, "Skip automatically installing npm dependencies for http-api projects")
 
 	return cmd, nil
 }
