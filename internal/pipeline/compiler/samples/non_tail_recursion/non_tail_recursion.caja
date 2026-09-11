@@ -1,0 +1,33 @@
+import "log"
+import "array"
+
+# Classic non-tail-call recursion: the recursive call's result feeds into
+# further computation (n * fact(n - 1)) rather than being returned directly,
+# so this is never rewritten into a loop the way a pure tail call is. This
+# is the shape that used to fail actual `go build` compilation ("undefined:
+# fact") even though the analyzer always accepted it as semantically valid
+# recursion — see internal/pipeline/compiler/transpiler.go's
+# selfReferencingFunctionDecl.
+let fact = fn(n: Number) -> Number {
+	if (n <= 1) {
+		return 1
+	}
+	return n * fact(n - 1)
+}
+
+log.info("5! =", fact(5))
+
+# Tree-shaped recursion over an array — combining a rendered head with the
+# recursively-rendered rest, not tail-recursive either, and the general
+# shape a recursive-descent tree walker (like a UI component tree renderer)
+# needs.
+let sumOfSquares = fn(items: [Number]) -> Number {
+	if (array.len(items) == 0) {
+		return 0
+	}
+	let head = array.head(items)
+	let rest = sumOfSquares(array.tail(items))
+	return head * head + rest
+}
+
+log.info("sum of squares [1,2,3,4]:", sumOfSquares([1, 2, 3, 4]))

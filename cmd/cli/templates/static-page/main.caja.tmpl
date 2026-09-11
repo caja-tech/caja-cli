@@ -1,7 +1,32 @@
+import "@caja/siriguela" as siriguela
+import "string" as string
 import page
 
-let html = "<!doctype html><html><head><title>{{.Name}}</title><link rel='stylesheet' href='style.css'></head><body><h1>{{.Name}}</h1><p>Welcome to your new Caja static-page project. Edit main.caja and run 'caja build' to regenerate dist/.</p></body></html>"
-let css = "body { font-family: sans-serif; margin: 2rem; color: #222; } h1 { color: #0b5fff; }"
+# This scaffold builds the page as a siriguela View tree instead of a raw
+# HTML string — renderToString() walks it into the HTML page.write below
+# writes to dist/. See https://www.cajalang.com for more on siriguela.
+
+let titleEl = siriguela.el("title")
+titleEl.text = "{{.Name}}"
+
+let styleLink = siriguela.el("link")
+styleLink.void = true
+let styleLink2 = styleLink |> siriguela.attr("rel", "stylesheet") |> siriguela.attr("href", "style.css")
+
+let head = siriguela.el("head")
+	|> siriguela.addChild(titleEl)
+	|> siriguela.addChild(styleLink2)
+
+let body = siriguela.el("body")
+	|> siriguela.addChild(siriguela.pageHeading(1, "{{.Name}}"))
+	|> siriguela.addChild(siriguela.text("Welcome to your new Caja static-page project. Edit main.caja and run 'caja build' to regenerate dist/."))
+
+let doc = siriguela.el("html")
+	|> siriguela.addChild(head)
+	|> siriguela.addChild(body)
+
+let html = "<!doctype html>" |> string.concat(siriguela.renderToString(doc))
+let css = "body { font-family: sans-serif; margin: 0; background: " |> string.concat(siriguela.siriguelaCream) |> string.concat("; } h1, p { margin: 1rem 2rem; }")
 
 page.write("dist/index.html", html)
 page.write("dist/style.css", css)

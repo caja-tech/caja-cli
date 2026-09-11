@@ -1,7 +1,11 @@
 # {{.Name}}
 
 A Caja **web-app** project — `main.caja` imports the `browser` module and
-compiles to a WebAssembly binary that runs entirely client-side.
+compiles to a WebAssembly binary that runs entirely client-side. The page
+itself is built as a `@caja/siriguela` View tree (`mount()`, from
+`@caja/siriguela-dom`, walks it into live DOM nodes) rather than a
+hand-written HTML string — see `main.caja` for the pattern, and
+https://www.cajalang.com for more.
 
 ## Development
 

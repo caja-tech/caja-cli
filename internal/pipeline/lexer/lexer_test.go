@@ -1223,3 +1223,25 @@ func TestUnwrapKeyword(t *testing.T) {
 
 	runTestsOnTokens(tknzr, tests, t)
 }
+
+// TestEnumKeyword confirms that the "enum" keyword is correctly tokenized
+// as ENUM (not a generic IDENT), and that a full enum declaration's
+// member-list syntax (`Name = "literal"`, comma-separated) tokenizes with
+// accurate line/column information.
+func TestEnumKeyword(t *testing.T) {
+	input := `enum CSSProperty { Padding = "padding" }`
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Enum keyword", Token{ENUM, "enum", 1, 1}},
+		{"Identifier CSSProperty", Token{IDENT, "CSSProperty", 1, 6}},
+		{"Left brace", Token{LBRACE, "{", 1, 18}},
+		{"Identifier Padding", Token{IDENT, "Padding", 1, 20}},
+		{"Assign operator", Token{ASSIGN, "=", 1, 28}},
+		{"String value padding", Token{STRING, "padding", 1, 30}},
+		{"Right brace", Token{RBRACE, "}", 1, 40}},
+		{"End of file", Token{EOF, "", 1, 41}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}

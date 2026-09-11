@@ -227,6 +227,40 @@ define Adult constraints Cat with: fn(c: Cat) -> Boolean { return true }
 			expectedErrors: []string{},
 		},
 		{
+			name: "Enum declaration and member access",
+			input: `
+enum CSSProperty { Padding = "padding", Margin = "margin" }
+let p = CSSProperty.Padding
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Enum value widens implicitly to its backing String type",
+			input: `
+enum CSSProperty { Padding = "padding" }
+let identity = fn(s: String) -> String { return s }
+let result = identity(CSSProperty.Padding)
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Enum value widens as a map[String]String index",
+			input: `
+enum CSSProperty { Padding = "padding" }
+let styles: map[String]String = {}
+styles[CSSProperty.Padding] = "8px"
+`,
+			expectedErrors: []string{},
+		},
+		{
+			name: "Private enum",
+			input: `
+private enum CSSProperty { Padding = "padding" }
+let p = CSSProperty.Padding
+`,
+			expectedErrors: []string{},
+		},
+		{
 			name: "Redeclaration check respects function boundaries: local variable may reuse a global name",
 			input: `
 let foo = 10
@@ -604,6 +638,77 @@ let f = fn() -> Number {
 `,
 			expectedErrors: []string{
 				"'union' can only be declared at the top level of a module",
+			},
+		},
+		{
+			name: "Enum: a bare String literal does not narrow to an enum-typed parameter",
+			input: `
+enum CSSProperty { Padding = "padding" }
+let identity = fn(p: CSSProperty) -> CSSProperty { return p }
+let result = identity("padding")
+`,
+			expectedErrors: []string{
+				"expected CSSProperty, got String",
+			},
+		},
+		{
+			name: "Enum: unknown member rejected",
+			input: `
+enum CSSProperty { Padding = "padding" }
+let x = CSSProperty.Unknown
+`,
+			expectedErrors: []string{
+				"'Unknown' is not a member of enum 'CSSProperty'",
+			},
+		},
+		{
+			name: "Enum: duplicate member rejected",
+			input: `
+enum CSSProperty { Padding = "padding", Padding = "other" }
+`,
+			expectedErrors: []string{
+				"duplicate enum member 'Padding'",
+			},
+		},
+		{
+			name: "Enum: non-literal member rejected",
+			input: `
+let x = "padding"
+enum CSSProperty { Padding = x }
+`,
+			expectedErrors: []string{
+				"enum member 'Padding' must be a literal",
+			},
+		},
+		{
+			name: "Enum: duplicate enum name rejected",
+			input: `
+enum Color { Red = "red" }
+enum Color { Blue = "blue" }
+`,
+			expectedErrors: []string{
+				"is already declared",
+			},
+		},
+		{
+			name: "Enum: empty enum rejected",
+			input: `
+enum Empty { }
+`,
+			expectedErrors: []string{
+				"enum 'Empty' must declare at least one member",
+			},
+		},
+		{
+			name: "Enum: function-scoped declaration rejected",
+			input: `
+let f = fn() -> Number {
+	enum CSSProperty { Padding = "padding" }
+	return 0
+}
+`,
+			expectedErrors: []string{
+				"'enum' can only be declared at the top level of a module",
 			},
 		},
 		{

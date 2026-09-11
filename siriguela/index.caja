@@ -1,0 +1,676 @@
+import array
+import string
+import log
+
+# CSSProperty is the closed set of style property names style()/the
+# modifier functions below accept. Backed by String (inferred from the
+# members' literal values) — this needs the language's `enum` feature
+# rather than a plain String parameter: an enum value widens implicitly to
+# String wherever one is expected, but a bare String does not narrow back
+# to CSSProperty, so a typo'd property name is a real compile-time error at
+# the call site, not a silent no-op.
+#
+# style() and CSSProperty are exported like everything else in this file —
+# unlike an earlier version of this library that split style()/CSSProperty
+# into a separate internal module, everything here lives in one file so a
+# developer building a custom theme (see "Building a custom theme" in the
+# README) has the full base function set available from a single import,
+# with nothing held back behind a package boundary. If a property you need
+# doesn't have a CSSProperty member yet, add one (and a small wrapper
+# function in the modifier chain below) directly here, following the
+# existing pattern.
+enum CSSProperty {
+	Padding = "padding",
+	Margin = "margin",
+	BackgroundColor = "background-color",
+	Color = "color",
+	FontSize = "font-size",
+	FontFamily = "font-family",
+	BorderRadius = "border-radius",
+	Display = "display",
+	FlexDirection = "flex-direction",
+	FlexBasis = "flex-basis",
+	Width = "width",
+	Height = "height",
+	MinWidth = "min-width",
+	MaxWidth = "max-width",
+	MinHeight = "min-height",
+	MaxHeight = "max-height",
+	Gap = "gap",
+	AlignItems = "align-items",
+	JustifyContent = "justify-content",
+	AlignSelf = "align-self",
+	FlexGrow = "flex-grow",
+	FlexShrink = "flex-shrink",
+	FlexWrap = "flex-wrap",
+	GridTemplateColumns = "grid-template-columns",
+	GridTemplateRows = "grid-template-rows",
+	FontWeight = "font-weight",
+	LineHeight = "line-height",
+	TextAlign = "text-align",
+	LetterSpacing = "letter-spacing",
+	TextDecoration = "text-decoration",
+	WhiteSpace = "white-space",
+	TextTransform = "text-transform",
+	Border = "border",
+	BorderWidth = "border-width",
+	BorderColor = "border-color",
+	BorderStyle = "border-style",
+	BoxShadow = "box-shadow",
+	Opacity = "opacity",
+	Cursor = "cursor",
+	Overflow = "overflow",
+	Position = "position",
+	Top = "top",
+	Right = "right",
+	Bottom = "bottom",
+	Left = "left",
+	ZIndex = "z-index",
+	Transition = "transition",
+	BoxSizing = "box-sizing",
+}
+
+# Handler defers event attachment to mount() (in the separate
+# @caja/siriguela-dom package) — merely importing a module that contains
+# any browser-touching code forces the whole compiled binary into
+# wasm-only mode, even if nothing in the program actually calls it, so
+# mount() can't live in this same file; building a View must stay
+# backend-agnostic, so nothing in this package ever calls browser.on
+# directly.
+type Handler struct {
+	event String
+	handler fn() -> Nothing
+}
+
+# Attr/Style are arrays of name/value pairs, not a map[String]String —
+# Caja's "map" standard module has no way to enumerate an arbitrary map's
+# entries (no keys/values/entries/forEach, only containsKey/delete), so a
+# map-typed attrs/styles field could be written to but never walked by
+# mount()/renderToString(). Arrays sidestep that entirely (recursion over
+# array.head/tail already works, same idiom as everywhere else in this
+# file) and, as a real bonus and not just a workaround, give deterministic
+# render order — a Go map's iteration order is randomized, which would have
+# made renderToString's HTML output nondeterministic between runs.
+type Attr struct {
+	name String
+	value String
+}
+
+type Style struct {
+	property String
+	value String
+}
+
+# View is the renderer-agnostic tree every component in this library
+# builds: a tag, its attributes and inline styles, its children, and any
+# deferred event handlers. Building or styling a View never touches a DOM
+# or a string buffer — only the terminals (renderToString here, mount() in
+# @caja/siriguela-dom) do that, by walking this same tree two different
+# ways.
+#
+# children is typed [View] — an array of View's own type. This compiles
+# because the analyzer pre-registers a struct's name into the type registry
+# before resolving its fields (internal/pipeline/analyzer/analyzer.go's
+# struct-definition handling), specifically to support recursive shapes
+# like this one.
+type View struct {
+	tag String
+	text String
+	void Boolean
+	attrs [Attr]
+	styles [Style]
+	children [View]
+	handlers [Handler]
+}
+
+# el is the one constructor every component in this library is sugar over.
+#
+# Every function here is declared as `let name = fn(...) -> T { ... }`, not
+# a bare `fn name(...) { ... }` statement — Caja has no named top-level
+# function declaration form; a function is always an anonymous `fn` literal
+# bound with `let`/`const`, exactly like every real .caja source in this
+# repo (compiler/samples/*, the @caja/query node_modules fixture) already
+# does. A bare `fn name(...)` is a parse error.
+#
+# children/handlers/attrs/styles are all built via explicitly-typed
+# intermediate `let`s rather than bare `[]` literals directly in the struct
+# literal. A struct literal field's value is analyzed with no expected-type
+# context pushed (unlike a call argument or an explicitly-typed `let`'s
+# value), so a bare `[]` there infers as [Any] and fails the field's
+# [Attr]/[Style]/[View]/[Handler] type check. An explicitly-typed `let`
+# DOES get that context pushed, so the empty array infers correctly before
+# it ever reaches the struct literal.
+const el = fn(tag: String) -> View {
+	let noAttrs: [Attr] = []
+	let noStyles: [Style] = []
+	let noChildren: [View] = []
+	let noHandlers: [Handler] = []
+	return View{
+		tag: tag, text: "", void: false,
+		attrs: noAttrs, styles: noStyles, children: noChildren, handlers: noHandlers,
+	}
+}
+
+const attr = fn(view: View, name: String, value: String) -> View {
+	# Function parameters are immutable — mutating `view` directly (rather
+	# than a rebound local) is a semantic error, "cannot mutate property/
+	# index of constant variable". Rebind-then-mutate-then-return is the
+	# established pattern for exactly this (see the compiler's own
+	# maybeShareValue/copy-on-write handling, written specifically to cover
+	# it), not a hand-rolled workaround.
+	let v = view
+	v.attrs = array.push(v.attrs, Attr{name: name, value: value})
+	return v
+}
+
+const style = fn(view: View, property: CSSProperty, value: String) -> View {
+	let v = view
+	v.styles = array.push(v.styles, Style{property: property, value: value})
+	return v
+}
+
+const addChild = fn(view: View, child: View) -> View {
+	let v = view
+	v.children = array.push(v.children, child)
+	return v
+}
+
+# Modifier chain — every function here has the same shape: take a View,
+# merge one entry into its styles array via style(), return it. Piped
+# together (`view |> padding(...) |> color(...)`), that's the whole
+# customization story. None of these need to know which terminal will
+# eventually walk the tree.
+const padding = fn(view: View, value: String) -> View { return style(view, CSSProperty.Padding, value) }
+const margin = fn(view: View, value: String) -> View { return style(view, CSSProperty.Margin, value) }
+const backgroundColor = fn(view: View, value: String) -> View { return style(view, CSSProperty.BackgroundColor, value) }
+const color = fn(view: View, value: String) -> View { return style(view, CSSProperty.Color, value) }
+const fontSize = fn(view: View, value: String) -> View { return style(view, CSSProperty.FontSize, value) }
+const fontFamily = fn(view: View, value: String) -> View { return style(view, CSSProperty.FontFamily, value) }
+const rounded = fn(view: View, radius: String) -> View { return style(view, CSSProperty.BorderRadius, radius) }
+const display = fn(view: View, value: String) -> View { return style(view, CSSProperty.Display, value) }
+const flexDirection = fn(view: View, value: String) -> View { return style(view, CSSProperty.FlexDirection, value) }
+const flexBasis = fn(view: View, value: String) -> View { return style(view, CSSProperty.FlexBasis, value) }
+const width = fn(view: View, value: String) -> View { return style(view, CSSProperty.Width, value) }
+const height = fn(view: View, value: String) -> View { return style(view, CSSProperty.Height, value) }
+const minWidth = fn(view: View, value: String) -> View { return style(view, CSSProperty.MinWidth, value) }
+const maxWidth = fn(view: View, value: String) -> View { return style(view, CSSProperty.MaxWidth, value) }
+const minHeight = fn(view: View, value: String) -> View { return style(view, CSSProperty.MinHeight, value) }
+const maxHeight = fn(view: View, value: String) -> View { return style(view, CSSProperty.MaxHeight, value) }
+const gap = fn(view: View, value: String) -> View { return style(view, CSSProperty.Gap, value) }
+const alignItems = fn(view: View, value: String) -> View { return style(view, CSSProperty.AlignItems, value) }
+const justifyContent = fn(view: View, value: String) -> View { return style(view, CSSProperty.JustifyContent, value) }
+const alignSelf = fn(view: View, value: String) -> View { return style(view, CSSProperty.AlignSelf, value) }
+const flexGrow = fn(view: View, value: String) -> View { return style(view, CSSProperty.FlexGrow, value) }
+const flexShrink = fn(view: View, value: String) -> View { return style(view, CSSProperty.FlexShrink, value) }
+const flexWrap = fn(view: View, value: String) -> View { return style(view, CSSProperty.FlexWrap, value) }
+const gridTemplateColumns = fn(view: View, value: String) -> View { return style(view, CSSProperty.GridTemplateColumns, value) }
+const gridTemplateRows = fn(view: View, value: String) -> View { return style(view, CSSProperty.GridTemplateRows, value) }
+const fontWeight = fn(view: View, value: String) -> View { return style(view, CSSProperty.FontWeight, value) }
+const lineHeight = fn(view: View, value: String) -> View { return style(view, CSSProperty.LineHeight, value) }
+const textAlign = fn(view: View, value: String) -> View { return style(view, CSSProperty.TextAlign, value) }
+const letterSpacing = fn(view: View, value: String) -> View { return style(view, CSSProperty.LetterSpacing, value) }
+const textDecoration = fn(view: View, value: String) -> View { return style(view, CSSProperty.TextDecoration, value) }
+const whiteSpace = fn(view: View, value: String) -> View { return style(view, CSSProperty.WhiteSpace, value) }
+const textTransform = fn(view: View, value: String) -> View { return style(view, CSSProperty.TextTransform, value) }
+const border = fn(view: View, value: String) -> View { return style(view, CSSProperty.Border, value) }
+const borderWidth = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderWidth, value) }
+const borderColor = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderColor, value) }
+const borderStyle = fn(view: View, value: String) -> View { return style(view, CSSProperty.BorderStyle, value) }
+const boxShadow = fn(view: View, value: String) -> View { return style(view, CSSProperty.BoxShadow, value) }
+const opacity = fn(view: View, value: String) -> View { return style(view, CSSProperty.Opacity, value) }
+const cursor = fn(view: View, value: String) -> View { return style(view, CSSProperty.Cursor, value) }
+const overflow = fn(view: View, value: String) -> View { return style(view, CSSProperty.Overflow, value) }
+const position = fn(view: View, value: String) -> View { return style(view, CSSProperty.Position, value) }
+const top = fn(view: View, value: String) -> View { return style(view, CSSProperty.Top, value) }
+const right = fn(view: View, value: String) -> View { return style(view, CSSProperty.Right, value) }
+const bottom = fn(view: View, value: String) -> View { return style(view, CSSProperty.Bottom, value) }
+const left = fn(view: View, value: String) -> View { return style(view, CSSProperty.Left, value) }
+const zIndex = fn(view: View, value: String) -> View { return style(view, CSSProperty.ZIndex, value) }
+const transition = fn(view: View, value: String) -> View { return style(view, CSSProperty.Transition, value) }
+const boxSizing = fn(view: View, value: String) -> View { return style(view, CSSProperty.BoxSizing, value) }
+
+# Component catalog — leaf components (no children). Every entry is sugar
+# over el() (plus, for text content, a direct `v.text = ...` assignment —
+# safe here because `v` is always a fresh local from el(), never a function
+# parameter, so it isn't subject to the parameter-immutability rule
+# attr()/style()/addChild() work around with the rebind pattern). None of
+# these know or care which terminal (renderToString here, mount() in
+# @caja/siriguela-dom) will eventually walk the tree.
+const text = fn(content: String) -> View {
+	let v = el("p")
+	v.text = content
+	return v
+}
+
+# headingTag maps a heading level to its tag name via a closed if-chain
+# rather than a generic Number->String conversion (no such builtin exists
+# in the "string"/"cast" modules) — level is expected to be 1-6; anything
+# else (0, 7, a typo) quietly clamps to "h6" rather than panicking, the
+# same "don't crash on a bad but harmless input" spirit as the rest of this
+# catalog.
+private const headingTag = fn(level: Number) -> String {
+	if (level == 1) {
+		return "h1"
+	}
+	if (level == 2) {
+		return "h2"
+	}
+	if (level == 3) {
+		return "h3"
+	}
+	if (level == 4) {
+		return "h4"
+	}
+	if (level == 5) {
+		return "h5"
+	}
+	return "h6"
+}
+
+const heading = fn(level: Number, content: String) -> View {
+	let v = el(headingTag(level))
+	v.text = content
+	return v
+}
+
+const button = fn(label: String) -> View {
+	let v = el("button")
+	v.text = label
+	return v
+}
+
+const textField = fn(placeholder: String) -> View {
+	let v = el("input")
+	v.void = true
+	return v |> attr("type", "text") |> attr("placeholder", placeholder)
+}
+
+const image = fn(src: String, alt: String) -> View {
+	let v = el("img")
+	v.void = true
+	return v |> attr("src", src) |> attr("alt", alt)
+}
+
+const link = fn(href: String, label: String) -> View {
+	let v = el("a")
+	v.text = label
+	return attr(v, "href", href)
+}
+
+const span = fn(content: String) -> View {
+	let v = el("span")
+	v.text = content
+	return v
+}
+
+const listItem = fn(content: String) -> View {
+	let v = el("li")
+	v.text = content
+	return v
+}
+
+const tableCell = fn(content: String) -> View {
+	let v = el("td")
+	v.text = content
+	return v
+}
+
+const tableHeaderCell = fn(content: String) -> View {
+	let v = el("th")
+	v.text = content
+	return v
+}
+
+const label = fn(forId: String, content: String) -> View {
+	let v = el("label") |> attr("for", forId)
+	v.text = content
+	return v
+}
+
+# addChildren folds addChild over an entire [View] array — the first real
+# workout for array recursion in this file beyond a straight walk-and-concat
+# (mapConcat). A pure tail call (`return addChildren(...)` directly, nothing
+# wrapping it), so this compiles as an ordinary self-recursive loop and
+# never needed the non-tail-call self-recursion fix in
+# internal/pipeline/compiler/transpiler.go's selfReferencingFunctionDecl.
+const addChildren = fn(view: View, children: [View]) -> View {
+	if (array.len(children) == 0) {
+		return view
+	}
+	return addChildren(addChild(view, array.head(children)), array.tail(children))
+}
+
+# column/row are flex-container wrappers — nesting them builds a tree the
+# same way nesting <div>s always has, just without writing a single tag by
+# hand. box is a single-child passthrough (for padding/border/background
+# only, no layout styling of its own — a plain wrapping <div>). spacer has
+# no children at all; it exists purely to occupy space via flex-basis
+# inside a row/column.
+const column = fn(children: [View]) -> View {
+	let v = el("div") |> style(CSSProperty.Display, "flex") |> style(CSSProperty.FlexDirection, "column")
+	return addChildren(v, children)
+}
+
+const row = fn(children: [View]) -> View {
+	let v = el("div") |> style(CSSProperty.Display, "flex") |> style(CSSProperty.FlexDirection, "row")
+	return addChildren(v, children)
+}
+
+const box = fn(child: View) -> View {
+	return el("div") |> addChild(child)
+}
+
+const spacer = fn(size: String) -> View {
+	return el("div") |> style(CSSProperty.FlexBasis, size)
+}
+
+# Semantic/structural elements — unstyled multi-child wrappers, unlike
+# column/row: these are structural/semantic (matching plain HTML block
+# display), not layout primitives, so nothing here sets display/
+# flex-direction the way column/row do. Pipe on your own layout modifiers
+# as needed, same as any other View.
+const section = fn(children: [View]) -> View {
+	return addChildren(el("section"), children)
+}
+
+const article = fn(children: [View]) -> View {
+	return addChildren(el("article"), children)
+}
+
+const nav = fn(children: [View]) -> View {
+	return addChildren(el("nav"), children)
+}
+
+const header = fn(children: [View]) -> View {
+	return addChildren(el("header"), children)
+}
+
+const footer = fn(children: [View]) -> View {
+	return addChildren(el("footer"), children)
+}
+
+# Named mainEl, not main — "main" is the transpiler's own generated Go
+# entry point name (every compiled program has exactly one func main());
+# a top-level Caja binding named "main" would collide with it.
+const mainEl = fn(children: [View]) -> View {
+	return addChildren(el("main"), children)
+}
+
+const aside = fn(children: [View]) -> View {
+	return addChildren(el("aside"), children)
+}
+
+const form = fn(children: [View]) -> View {
+	return addChildren(el("form"), children)
+}
+
+const unorderedList = fn(items: [View]) -> View {
+	return addChildren(el("ul"), items)
+}
+
+const orderedList = fn(items: [View]) -> View {
+	return addChildren(el("ol"), items)
+}
+
+const table = fn(children: [View]) -> View {
+	return addChildren(el("table"), children)
+}
+
+const tableRow = fn(children: [View]) -> View {
+	return addChildren(el("tr"), children)
+}
+
+# Stateful form elements. HTML boolean attributes (checked, selected) are
+# true-if-present and false-if-absent regardless of their value — browsers
+# treat checked="checked", checked="", and checked="true" identically as
+# checked=true; only OMITTING the attribute means false. So "state" here is
+# just a conditional attr() call, no new View field or capability needed:
+# el()/attr()/if are already everything this requires.
+const checkbox = fn(checked: Boolean) -> View {
+	let base = el("input") |> attr("type", "checkbox")
+	base.void = true
+	if (checked) {
+		return attr(base, "checked", "checked")
+	}
+	return base
+}
+
+const radio = fn(name: String, value: String, checked: Boolean) -> View {
+	let base = el("input") |> attr("type", "radio") |> attr("name", name) |> attr("value", value)
+	base.void = true
+	if (checked) {
+		return attr(base, "checked", "checked")
+	}
+	return base
+}
+
+# option's second parameter is named optionLabel, not label — label is
+# also a top-level function name in this same file. The cross-module
+# parameter-shadowing bug that made this collision genuinely dangerous
+# (internal/pipeline/compiler/transpiler.go's resolveIdentifierGoName) is
+# fixed now, but there's no reason to lean on that fix when a different
+# name costs nothing.
+const option = fn(value: String, optionLabel: String, selected: Boolean) -> View {
+	let base = el("option") |> attr("value", value)
+	base.text = optionLabel
+	if (selected) {
+		return attr(base, "selected", "selected")
+	}
+	return base
+}
+
+const select = fn(options: [View]) -> View {
+	return addChildren(el("select"), options)
+}
+
+# rows is a String, not a Number — Caja has no general Number->String
+# conversion (headingTag above only gets away with a hardcoded if-chain
+# because heading levels are a closed 1-6 set; an arbitrary row count isn't
+# closed the same way). Matches the existing idiom of passing CSS-value-
+# shaped things as strings (padding("20px")) rather than a new pattern.
+const textArea = fn(placeholder: String, rows: String) -> View {
+	return el("textarea") |> attr("placeholder", placeholder) |> attr("rows", rows)
+}
+
+# onClick/onInput append to view.handlers rather than calling browser.on
+# directly — attachment stays deferred to mount() (in the separate
+# @caja/siriguela-dom package), since building a View must stay
+# backend-agnostic: nothing here can assume a DOM exists, or even that this
+# tree will ever be mounted at all rather than rendered to a string.
+#
+# `handler` cannot read a `let` from an enclosing scope — Caja's function
+# purity rule applies to it exactly like any other function value, and
+# nothing about passing it through onClick/onInput changes that. Read the
+# current value inside the handler instead (once @caja/siriguela-dom's
+# mount() actually calls it) — a fresh browser.getElementById/querySelector,
+# browser.getValue, localStorageGet, etc. — the same pattern
+# internal/pipeline/compiler/samples/browser/browser.caja's own click
+# handler already uses for exactly this reason.
+const onClick = fn(view: View, handler: fn() -> Nothing) -> View {
+	let v = view
+	v.handlers = array.push(v.handlers, Handler{event: "click", handler: handler})
+	return v
+}
+
+const onInput = fn(view: View, handler: fn() -> Nothing) -> View {
+	let v = view
+	v.handlers = array.push(v.handlers, Handler{event: "input", handler: handler})
+	return v
+}
+
+# escapeHTML replaces & first — string.replace(s, "&", "&amp;") must run
+# before the </>-replacements, or those replacements' own inserted "&"
+# characters get re-escaped a second time.
+#
+# Parameter deliberately isn't named `text` — that name is already taken by
+# the top-level text() component above. A parameter shadowing an unrelated
+# sibling global of the same name used to be a real bug when this file was
+# transpiled as an imported module (not the top-level script): it resolved
+# to the wrong (global) binding, because
+# internal/pipeline/compiler/transpiler.go's resolveIdentifierGoName only
+# checked "does a global with this name exist anywhere" and "is this
+# identifier's own definition in the current module's file," both trivially
+# true for a same-named local too, never that this specific occurrence's
+# resolved definition actually WAS the global's. Fixed there (compare
+# definition tokens, not just names) and covered by
+# TestCrossModuleParameterShadowingSiblingGlobal. Left as `str` here anyway
+# — no reason to keep relying on a name collision now that it's merely
+# harmless instead of broken.
+private const escapeHTML = fn(str: String) -> String {
+	let step1 = string.replace(str, "&", "&amp;")
+	let step2 = string.replace(step1, "<", "&lt;")
+	let step3 = string.replace(step2, ">", "&gt;")
+	return step3
+}
+
+# Attribute values are rendered single-quoted (name='value'), not the more
+# usual double-quoted — not a style choice. Caja's string literals have no
+# escape sequences at all (lexer.go's readString terminates on the first
+# raw '"' it sees, with no backslash handling whatsoever), so there is no
+# way to write a string literal containing a literal double-quote character
+# to use as escapeHTML's replacement target. A literal single-quote
+# character has no such problem (it isn't the string delimiter), so
+# single-quoting attributes and escaping "'" instead is the only
+# representable choice here, not a preference.
+private const escapeAttrValue = fn(value: String) -> String {
+	let escaped = escapeHTML(value)
+	return string.replace(escaped, "'", "&#39;")
+}
+
+private const renderAttrEntries = fn(attrs: [Attr]) -> String {
+	if (array.len(attrs) == 0) {
+		return ""
+	}
+	let head = array.head(attrs)
+	let rest = renderAttrEntries(array.tail(attrs))
+	let entry = " " |> string.concat(head.name) |> string.concat("='") |> string.concat(escapeAttrValue(head.value)) |> string.concat("'")
+	return entry |> string.concat(rest)
+}
+
+private const renderStyleDeclarations = fn(styles: [Style]) -> String {
+	if (array.len(styles) == 0) {
+		return ""
+	}
+	let head = array.head(styles)
+	let rest = renderStyleDeclarations(array.tail(styles))
+	let decl = head.property |> string.concat(":") |> string.concat(escapeAttrValue(head.value)) |> string.concat(";")
+	return decl |> string.concat(rest)
+}
+
+# renderAttrs folds a View's styles array into a single synthesized
+# style='...' attribute alongside its plain attrs — the same shape a
+# hand-written <tag attr='x' style='prop:val;'> would have.
+private const renderAttrs = fn(view: View) -> String {
+	let attrsStr = renderAttrEntries(view.attrs)
+	let styleDecls = renderStyleDeclarations(view.styles)
+	if (string.len(styleDecls) == 0) {
+		return attrsStr
+	}
+	return attrsStr |> string.concat(" style='") |> string.concat(styleDecls) |> string.concat("'")
+}
+
+# mapConcat renders each item of a [View] via `render` and concatenates the
+# results. It takes `render` as a plain parameter (rather than calling
+# renderToString by name) specifically so it can be declared BEFORE
+# renderToString: Caja has no forward references between separate `let`
+# bindings — only a function may reference its OWN name from inside its own
+# body, never a not-yet-declared sibling — so renderToString and a "walk my
+# children and call renderToString on each" helper can't reference each
+# other directly in either declaration order. renderToString instead passes
+# itself in as `render`, a self-reference-as-a-value it's free to make
+# (internal/pipeline/compiler/transpiler.go's selfReferencingFunctionDecl
+# exists specifically to make a self-referencing `let`-bound closure like
+# that actually compile).
+private const mapConcat = fn(items: [View], render: fn(View) -> String) -> String {
+	if (array.len(items) == 0) {
+		return ""
+	}
+	let head = array.head(items)
+	let rest = mapConcat(array.tail(items), render)
+	return render(head) |> string.concat(rest)
+}
+
+# renderToString — the static-page terminal. Pure except for one
+# intentional side channel: it warns (via log.warn) when it walks a View
+# carrying handlers, since a static page has no JS runtime to attach them
+# to. Confirmed this actually surfaces at `caja build` time for a
+# static-page project: that build step runs the compiled binary once (to
+# populate dist/) with stdout/stderr wired to the CLI's own, so a log.warn
+# call here prints during `caja build` exactly like any other log.warn in a
+# static-page's own main.caja would.
+const renderToString = fn(view: View) -> String {
+	if (array.len(view.handlers) > 0) {
+		let msg = "siriguela: view <" |> string.concat(view.tag) |> string.concat("> has event handlers, but renderToString() drops them (no JS runtime in a static-page build)")
+		log.warn(msg, "")
+	}
+
+	if (view.tag == "") {
+		return escapeHTML(view.text)
+	}
+
+	let openTag = "<" |> string.concat(view.tag) |> string.concat(renderAttrs(view))
+
+	if (view.void) {
+		return openTag |> string.concat(" />")
+	}
+
+	let inner = escapeHTML(view.text) |> string.concat(mapConcat(view.children, renderToString))
+	return openTag
+		|> string.concat(">")
+		|> string.concat(inner)
+		|> string.concat("</")
+		|> string.concat(view.tag)
+		|> string.concat(">")
+}
+
+# Default theme, based on the siriguela fruit itself: a deep magenta skin, a
+# warm orange flesh, a muted olive-green leaf, a pale cream background, and
+# a near-black ink for text — so a siriguela consumer gets a coherent look
+# out of the box instead of starting from an unstyled catalog. Palette
+# constants are plain Strings (hex colors), not a Color enum — unlike
+# CSSProperty they're not a closed set the compiler needs to validate; a
+# theme is meant to be re-pointed at different hex values by a consumer
+# overriding these, which a closed enum would prevent.
+#
+# These are ordinary functions built on the catalog above, nothing more —
+# see "Building a custom theme" in the README for how to define your own
+# set of these alongside (or instead of) the default ones.
+const siriguelaSkin = "#7A2048"
+const siriguelaFlesh = "#F0A23A"
+const siriguelaLeaf = "#6E8B3D"
+const siriguelaCream = "#FBF3E6"
+const siriguelaInk = "#2B1710"
+
+const primaryButton = fn(label: String) -> View {
+	return button(label)
+		|> backgroundColor(siriguelaSkin)
+		|> color(siriguelaCream)
+		|> padding("12px 20px")
+		|> rounded("6px")
+}
+
+const secondaryButton = fn(label: String) -> View {
+	return button(label)
+		|> backgroundColor(siriguelaCream)
+		|> color(siriguelaSkin)
+		|> padding("12px 20px")
+		|> rounded("6px")
+}
+
+const card = fn(children: [View]) -> View {
+	return column(children)
+		|> backgroundColor(siriguelaCream)
+		|> padding("24px")
+		|> rounded("12px")
+}
+
+const pageHeading = fn(content: String) -> View {
+	return heading(1, content)
+		|> color(siriguelaInk)
+		|> fontFamily("system-ui, sans-serif")
+}
+
+const themedLink = fn(href: String, label: String) -> View {
+	return link(href, label)
+		|> color(siriguelaLeaf)
+}

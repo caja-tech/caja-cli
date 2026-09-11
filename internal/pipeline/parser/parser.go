@@ -511,8 +511,8 @@ func (p *Parser) parseStatement() ast.Statement {
 	if p.currToken.Type == lexer.PRIVATE {
 		isPrivate = true
 		p.nextToken()
-		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST && p.currToken.Type != lexer.DEFINE && p.currToken.Type != lexer.UNION {
-			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'")
+		if p.currToken.Type != lexer.LET && p.currToken.Type != lexer.TYPE && p.currToken.Type != lexer.CONST && p.currToken.Type != lexer.DEFINE && p.currToken.Type != lexer.UNION && p.currToken.Type != lexer.ENUM {
+			p.reportError(p.currToken, "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', 'union', or 'enum'")
 			return nil
 		}
 	}
@@ -567,6 +567,15 @@ func (p *Parser) parseStatement() ast.Statement {
 
 	if p.currToken.Type == lexer.UNION {
 		stmt := p.parseUnionStatement()
+		if stmt == nil {
+			return nil
+		}
+		stmt.IsPrivate = isPrivate
+		return stmt
+	}
+
+	if p.currToken.Type == lexer.ENUM {
+		stmt := p.parseEnumStatement()
 		if stmt == nil {
 			return nil
 		}
@@ -843,6 +852,64 @@ func (p *Parser) parseUnionStatement() *ast.UnionStatement {
 			return nil
 		}
 		stmt.Variants = append(stmt.Variants, &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal})
+	}
+
+	return stmt
+}
+
+// parseEnumStatement parses a closed enum declaration of the form
+// `enum Name { Member = literal, Member2 = literal2, ... }`, mirroring
+// parseStructLiteral's comma-separated-pairs handling. The parser only
+// requires each member's value to be a parseable expression; restricting it
+// to an actual literal (and inferring the enum's backing type from it) is
+// the analyzer's job (analyzeEnumStatement), not the grammar's.
+func (p *Parser) parseEnumStatement() *ast.EnumStatement {
+	stmt := &ast.EnumStatement{Token: p.currToken}
+
+	if !p.expectPeek(lexer.IDENT) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected identifier, got %s", p.currToken.Type))
+		return nil
+	}
+	stmt.Name = &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}
+
+	if !p.expectPeek(lexer.LBRACE) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected lbrace, got %s", p.currToken.Type))
+		return nil
+	}
+
+	for p.peekToken.Type != lexer.RBRACE && p.peekToken.Type != lexer.EOF {
+		p.nextToken() // move to member name
+
+		if p.currToken.Type != lexer.IDENT {
+			p.reportError(p.currToken, fmt.Sprintf("expected identifier as enum member, got %s", p.currToken.Type))
+			return nil
+		}
+		member := ast.EnumMember{Name: &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal}}
+
+		if !p.expectPeek(lexer.ASSIGN) {
+			p.reportError(p.peekToken, fmt.Sprintf("expected '=' after enum member name, got %s", p.currToken.Type))
+			return nil
+		}
+
+		p.nextToken() // move to the member's value
+		member.Value = p.parseExpression(lexer.LOWEST_PRECEDENCE)
+		if member.Value == nil {
+			return nil
+		}
+
+		stmt.Members = append(stmt.Members, member)
+
+		if p.peekToken.Type == lexer.COMMA {
+			p.nextToken()
+		} else if p.peekToken.Type != lexer.RBRACE {
+			p.reportError(p.peekToken, fmt.Sprintf("expected comma or rbrace, got %s", p.peekToken.Type))
+			return nil
+		}
+	}
+
+	if !p.expectPeek(lexer.RBRACE) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected rbrace, got %s", p.currToken.Type))
+		return nil
 	}
 
 	return stmt

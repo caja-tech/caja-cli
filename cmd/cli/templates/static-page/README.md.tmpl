@@ -2,7 +2,10 @@
 
 A Caja **static-page** project — `main.caja` runs once at build time and writes
 plain HTML/CSS into `dist/` via the `page` builtin module, the same way a
-static site generator's build step works.
+static site generator's build step works. The page itself is built as a
+`@caja/siriguela` View tree (`renderToString()` turns it into the HTML
+`page.write` writes) rather than a hand-written HTML string — see
+`main.caja` for the pattern, and https://www.cajalang.com for more.
 
 ## Development
 

@@ -50,6 +50,25 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Enum Types",
+			input: `
+				enum CSSProperty { Padding = "padding", Margin = "margin" }
+				let style = fn(property: CSSProperty, value: String) -> String {
+					return property
+				}
+				let result = style(CSSProperty.Padding, "8px")
+			`,
+			expected: []string{
+				// The enum declaration itself emits nothing — it has no Go
+				// type of its own, unlike a struct or union.
+				"var style func(string, string) string = func(property string, value string) string {",
+				// CSSProperty.Padding transpiles directly to its member's
+				// literal value, already a plain Go string — no distinct
+				// "CSSProperty" Go type or cast appears anywhere.
+				`var result string = style("padding", "8px")`,
+			},
+		},
+		{
 			name: "Safe Pipeline",
 			input: `
 				type Customer struct { age Number }
@@ -334,7 +353,19 @@ func TestTranspile(t *testing.T) {
 				let val = fact(10, 1)
 			`,
 			expected: []string{
-				"var fact func(float64, float64) float64 = func(n float64, acc float64) float64 {",
+				// Declared as declare-then-assign, not a single `var fact
+				// func(...)... = func(...) {...}` statement — fact's body
+				// references its own name (the pre-rewrite `return fact(...)`
+				// below), and a self-referencing closure can't be part of its
+				// own initializer in Go (see selfReferencingFunctionDecl).
+				// This is orthogonal to the TCO rewrite itself: the loop body
+				// below never actually calls "fact" (that reference is fully
+				// eliminated by the rewrite), but the split is applied based
+				// on the original AST shape, not on whether TCO happens to
+				// remove every occurrence — always correct, occasionally
+				// one statement more than strictly necessary.
+				"var fact func(float64, float64) float64",
+				"fact = func(n float64, acc float64) float64 {",
 				"for {",
 				"if (n == 0.0) {",
 				"return acc",
@@ -347,6 +378,35 @@ func TestTranspile(t *testing.T) {
 				"}",
 				"}",
 				"var val float64 = fact(10.0, 1.0)",
+			},
+		},
+		{
+			// Regression test for a self-recursive `let`-bound function whose
+			// recursive call is NOT a pure tail call (its result feeds into
+			// further computation, `n * fact(n - 1)`, rather than being
+			// returned directly) — this bypasses the TCO loop-rewrite
+			// entirely, unlike "Tail Call Optimization" above, so the
+			// generated closure genuinely still calls itself by name. Before
+			// selfReferencingFunctionDecl, this transpiled to a single `var
+			// fact func(...)... = func(...){ ...fact(...)... }` statement,
+			// which fails to even `go build` ("undefined: fact") — Go
+			// resolves an identifier inside a closure literal against the
+			// enclosing declaration's own scope, which only begins after
+			// that declaration, even though the closure body isn't
+			// evaluated until called much later.
+			name: "Non-tail-call self-recursion compiles as declare-then-assign",
+			input: `
+				let fact = fn(n: Number) -> Number {
+					if (n <= 1) {
+						return 1
+					}
+					return n * fact(n - 1)
+				}
+				let result = fact(5)
+			`,
+			expected: []string{
+				"var fact func(float64) float64",
+				"fact = func(n float64) float64 {",
 			},
 		},
 		{

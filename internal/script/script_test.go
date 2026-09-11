@@ -96,6 +96,24 @@ func TestModules(t *testing.T) {
 			expectVal:   160,
 		},
 		{
+			// Regression test for a real bug: a node_modules package's own
+			// nested import (index.caja importing its sibling helper.caja)
+			// used to resolve against the TOP-LEVEL script's directory
+			// (this test file's own "tests" dir) instead of the package's
+			// own directory (tests/node_modules/@caja/nestedimport/) — the
+			// existing "Transitive Module Alias Import" case above doesn't
+			// catch this, since all three of its files happen to live in
+			// the same directory, so old and new resolution coincide there.
+			// This fixture is the first one with a genuine cross-directory
+			// nested import: the top-level script lives in tests/, but
+			// index.caja's own "helper" import must resolve relative to
+			// tests/node_modules/@caja/nestedimport/, not tests/ itself.
+			name:        "Cross-Directory Nested Import (node_modules package importing its own sibling file)",
+			file:        "test_cross_dir_nested_import.caja",
+			expectError: false,
+			expectVal:   105,
+		},
+		{
 			name:        "Empty Module Import",
 			file:        "test_import_empty.caja",
 			expectError: true,

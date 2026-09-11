@@ -122,15 +122,39 @@ func NewBuildCmd() (*cobra.Command, error) {
 				return fmt.Errorf("failed to retrieve 'arch' flag: %w", err)
 			}
 			isWebApp := manifest != nil && manifest.Type == project.TypeWebApp
-			if targetOS == "" && targetArch == "" && (compiler.UsesBrowserModule(goCode) || isWebApp) {
-				// The browser module compiles to syscall/js, which only builds
-				// under GOOS=js/GOARCH=wasm — default to that target instead of
-				// letting `go build` fail with a raw "build constraints exclude
-				// all Go files" error on the host platform. A declared web-app
-				// project targets wasm even before UsesBrowserModule would catch
-				// it (e.g. if its main.caja doesn't happen to import browser
-				// yet), making the project's declared type authoritative.
-				targetOS, targetArch = "js", "wasm"
+			if targetOS == "" && targetArch == "" {
+				if manifest != nil {
+					// A declared project type alone determines the kind of
+					// output `caja build` produces once one exists — wasm +
+					// browser harness for web-app, a plain native binary for
+					// static-page/http-api — regardless of whether the
+					// transpiled code happens to reference browser.* anywhere.
+					// This matters because merely IMPORTING a module that
+					// contains browser-touching code (even a function nothing
+					// in the program ever calls) makes UsesBrowserModule below
+					// return true too: cross-module transpilation emits every
+					// top-level statement of an imported module unconditionally,
+					// not just the ones actually used. Without this branch, a
+					// static-page project that merely imports such a module
+					// would get compiled to wasm and then crash outright
+					// ("exec format error") when the static-page build path
+					// tries to run that wasm binary as a native generator —
+					// confirmed directly. The heuristic below is only a
+					// fallback for when there's no declared type to consult at
+					// all.
+					if isWebApp {
+						targetOS, targetArch = "js", "wasm"
+					}
+				} else if compiler.UsesBrowserModule(goCode) {
+					// No declared project type (a standalone script compiled
+					// via --file with no cajaproj.yml) — the browser module
+					// compiles to syscall/js, which only builds under
+					// GOOS=js/GOARCH=wasm, so fall back to sniffing the
+					// transpiled output for it rather than letting `go build`
+					// fail with a raw "build constraints exclude all Go files"
+					// error on the host platform.
+					targetOS, targetArch = "js", "wasm"
+				}
 			}
 			outBin, resolvedOS, resolvedArch, crossCompiling, err := resolveOutputBin(filePath, targetOS, targetArch, runtime.GOOS, runtime.GOARCH)
 			if err != nil {

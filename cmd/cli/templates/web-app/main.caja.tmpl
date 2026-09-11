@@ -1,11 +1,21 @@
+import "@caja/siriguela" as siriguela
+import "@caja/siriguela-dom" as siriguelaDom
 import browser
+
+# This scaffold builds the page as a siriguela View tree instead of a raw
+# HTML string — mount() walks it into live DOM nodes under #app. See
+# https://www.cajalang.com for more on siriguela.
 
 browser.log("{{.Name}} booted")
 
-let app = browser.getElementById("app")
-browser.setHTML(app, "<h1>{{.Name}}</h1><p>Edit main.caja, then run 'caja build' to compile to wasm or 'caja serve' to run it locally.</p><button id='btn'>Click me</button>")
+let ui = siriguela.el("div")
+	|> siriguela.addChild(siriguela.pageHeading(1, "{{.Name}}"))
+	|> siriguela.addChild(siriguela.text("Edit main.caja, then run 'caja build' to compile to wasm or 'caja serve' to run it locally."))
+	|> siriguela.addChild(
+		siriguela.primaryButton("Click me")
+		|> siriguela.onClick(fn() -> Nothing {
+			browser.alert("Hello from {{.Name}}!")
+		})
+	)
 
-let btn = browser.getElementById("btn")
-browser.on("click", btn, fn() -> Nothing {
-    browser.alert("Hello from {{.Name}}!")
-})
+siriguelaDom.mount(ui, browser.getElementById("app"))

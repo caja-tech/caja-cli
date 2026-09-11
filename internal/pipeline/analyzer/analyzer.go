@@ -7,6 +7,7 @@ import (
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/modules"
 	"context"
+	"path/filepath"
 
 	"fmt"
 
@@ -220,6 +221,8 @@ func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 		return a.analyzeTypeConstraintStatement(n)
 	case *ast.UnionStatement:
 		return a.analyzeUnionStatement(n)
+	case *ast.EnumStatement:
+		return a.analyzeEnumStatement(n)
 	case *ast.IsExpression:
 		return a.analyzeIsExpression(n)
 	case *ast.FunctionLiteral:
@@ -909,7 +912,36 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 			a.globalEnv.ModuleFilePaths[modPath] = resolvedModPath
 		}
 
-		modEnv := environment.NewEnvironment(a.globalEnv.BaseDir, modPath, true)
+		// modEnv's BaseDir is the RESOLVED module's own directory
+		// (filepath.Dir(resolvedModPath)), not a.globalEnv.BaseDir (the
+		// top-level program's directory) — a module's own nested imports
+		// must resolve relative to where THAT module actually lives, the
+		// same way Node's own module resolution works. Getting this wrong
+		// silently breaks any package split into multiple files that import
+		// each other: a package loaded via node_modules by an external
+		// consumer would have its own internal imports resolve against the
+		// CONSUMER's directory instead of the package's own, since (before
+		// this fix) every nesting level inherited the same original
+		// top-level BaseDir no matter how deep. Confirmed safe to change:
+		// BaseDir has exactly one write site (NewEnvironment) and two read
+		// sites in the whole repo, both in this function; it feeds nothing
+		// else (not error text, not the ModuleASTs/ModuleFilePaths/
+		// ModuleAnalyzers cache keys, which are keyed by the raw import
+		// specifier string, not BaseDir or a resolved path).
+		//
+		// Known, deliberately deferred residual risk: the circular-import
+		// guard right above (a.loading[modPath]) is keyed by the raw
+		// specifier string too, not a resolved path. Two unrelated files in
+		// different directories that each have their own same-named
+		// relative import (e.g. two different "./helper"s pointing at two
+		// different files) could theoretically collide on that string key
+		// now that resolution is per-directory instead of globally
+		// anchored. Fixing that would need modules.Load's resolve step
+		// split out and run before the circular check above (currently the
+		// check runs first, before the path is even resolved) — a larger
+		// restructure, not needed for this fix, and nothing in this repo
+		// exercises the collision today.
+		modEnv := environment.NewEnvironment(filepath.Dir(resolvedModPath), modPath, true)
 		modEnv.ModuleASTs = a.globalEnv.ModuleASTs
 		// Share these maps (not just re-derive them) so a TRANSITIVE import
 		// processed while analyzing this module — modAnalyzer's own
@@ -1128,6 +1160,69 @@ func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
 	}
 
 	return union
+}
+
+// analyzeEnumStatement resolves each member's literal value, infers the
+// enum's backing type from them (currently only String literals are
+// supported — Number-backed enums are a natural future extension, not
+// implemented yet), and registers an EnumSymbol under the enum's own name.
+//
+// Unlike every other type-introducing statement (type/define/union), an
+// enum is declared into BOTH the type registry (declareType, so
+// `property: CSSProperty` resolves as a parameter type) and the value scope
+// (declare, so `CSSProperty.Padding` resolves as a PropertyExpression the
+// normal way — analyzePropertyExpression calls a.analyze on the Object side,
+// which only ever looks in value scope, never the type registry). This dual
+// registration is deliberate and specific to enums: struct/union names
+// don't need it because struct instantiation is parsed as a distinct
+// StructLiteral node (carrying the struct name as a plain string), not as
+// property access on the bare type name.
+func (a *Analyzer) analyzeEnumStatement(n *ast.EnumStatement) symbol.Symbol {
+	a.requireTopLevel(n.Token, "enum")
+	a.checkNameAvailable(n.Token, n.Name.Value)
+
+	members := make(map[string]string)
+	var backingType environment.ObjectType
+	seen := make(map[string]bool)
+
+	for _, m := range n.Members {
+		if seen[m.Name.Value] {
+			a.reportError(m.Name.Token, fmt.Sprintf("semantic error: duplicate enum member '%s' in enum '%s'", m.Name.Value, n.Name.Value))
+			continue
+		}
+		seen[m.Name.Value] = true
+
+		strLit, ok := m.Value.(*ast.StringLiteral)
+		if !ok {
+			a.reportError(m.Name.Token, fmt.Sprintf("semantic error: enum member '%s' must be a literal (only String literals are supported today)", m.Name.Value))
+			continue
+		}
+
+		backingType = environment.STRING_OBJ
+		members[m.Name.Value] = strLit.Value
+	}
+
+	if len(n.Members) == 0 {
+		a.reportError(n.Token, fmt.Sprintf("semantic error: enum '%s' must declare at least one member", n.Name.Value))
+	}
+	if backingType == "" {
+		backingType = environment.ANY_OBJ
+	}
+
+	enumSym := symbol.NewEnumSymbol(n.Name.Value, members, backingType, a.globalEnv.FileName)
+	a.declareType(n.Name.Value, enumSym)
+	a.declare(n.Name.Value, enumSym, true, n.Name.Token)
+	a.nodeSymbols[n.Name] = enumSym
+
+	if n.IsPrivate {
+		if len(a.scopes) > 1 {
+			a.reportError(n.Token, "semantic error: 'private' modifier is only allowed at the top-level of a module")
+		} else {
+			a.privates[n.Name.Value] = true
+		}
+	}
+
+	return enumSym
 }
 
 // analyzeIsExpression narrows a union-typed value to one of its listed
@@ -1666,6 +1761,22 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 	} else if !isNullable && n.Safe {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: unnecessary safe navigation on non-nullable type (property: %s)", n.Property.Value))
 		return symbol.AnySymbol()
+	}
+
+	// Enum member access (e.g. `CSSProperty.Padding`) resolves against the
+	// EnumSymbol itself, not against Type() (which forwards to the enum's
+	// backing primitive type and would otherwise fall into the generic
+	// "property access not supported for String" error below). The result
+	// of accessing a member is the enum type itself, not its backing
+	// type — that's what lets `style(view, CSSProperty.Padding, ...)`
+	// type-check against a `property: CSSProperty` parameter.
+	if enumSym, ok := leftSymbol.(*symbol.EnumSymbol); ok {
+		if _, exists := enumSym.Members[n.Property.Value]; !exists {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: '%s' is not a member of enum '%s'", n.Property.Value, enumSym.Name))
+			return symbol.AnySymbol()
+		}
+		a.nodeSymbols[n.Property] = enumSym
+		return enumSym
 	}
 
 	var structDef *symbol.StructDefSymbol

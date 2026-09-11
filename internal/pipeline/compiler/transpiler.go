@@ -397,6 +397,40 @@ func identifierReadAfter(node ast.Node, name string, afterLine, afterCol int) bo
 	return identifierReadAfterWalk(node, name, afterLine, afterCol, false)
 }
 
+// selfReferencingFunctionDecl handles a `let`/`const` binding whose value is
+// a function literal that references its own bound name anywhere in its
+// body — self-recursion that isn't a pure tail self-call (return
+// name(args), which the *ast.ReturnStatement case above rewrites into a
+// loop with no actual reference left behind), or the function simply
+// passing/storing its own name as a value. Go can't resolve `name` inside a
+// closure literal that's part of the SAME `var name T = <closure>` /
+// `name := <closure>` statement — a variable's scope begins only after its
+// own declaration, even though the closure body isn't evaluated until
+// called much later. The fix is the standard Go idiom for a
+// self-referencing closure: declare the variable first with no initializer,
+// then assign the closure to it as a separate statement, so by the time the
+// closure literal is compiled `name` already denotes a real (zero-valued,
+// but declared) variable it can close over by reference.
+//
+// Reports ok=false (leaving the caller's normal single-statement codegen in
+// place) whenever the value isn't a function literal, or is one that never
+// references its own name — the overwhelmingly common case, where the
+// simpler single-statement form is fine (and, for a pure tail-recursive
+// function, is what the TCO loop-rewrite above already expects, since it
+// never introduces a real self-reference to begin with).
+func selfReferencingFunctionDecl(goName, cajaName string, value ast.Expression, varType, val string) (string, bool) {
+	fnLit, ok := value.(*ast.FunctionLiteral)
+	if !ok || !identifierReadAfter(fnLit.Body, cajaName, 0, 0) {
+		return "", false
+	}
+	// mapSymbolToGoType always resolves a *symbol.FunctionSymbol to a
+	// concrete "func(...)..." string (built directly from its param/return
+	// types, never falling through to the generic any-producing switch), so
+	// varType is never empty/"any" here in practice — this is just the one
+	// declaration this whole function exists to produce.
+	return fmt.Sprintf("var %s %s\n%s = %s", goName, varType, goName, val), true
+}
+
 func identifierReadAfterWalk(node ast.Node, name string, afterLine, afterCol int, insideClosure bool) bool {
 	rec := func(n ast.Node) bool {
 		return identifierReadAfterWalk(n, name, afterLine, afterCol, insideClosure)
@@ -1228,6 +1262,10 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 		}
 		val = maybeShareValue(s.Value, val, ctx)
 
+		if decl, ok := selfReferencingFunctionDecl(prefixIdentifier(ctx, s.Name.Value), s.Name.Value, s.Value, varType, val); ok {
+			return decl, nil
+		}
+
 		if varType != "" && varType != "any" {
 			return fmt.Sprintf("var %s %s = %s", prefixIdentifier(ctx, s.Name.Value), varType, val), nil
 		}
@@ -1253,6 +1291,10 @@ func transpileStatement(stmt ast.Statement, ctx *transpileContext) (string, erro
 			return "", nil
 		}
 		val = maybeShareValue(s.Value, val, ctx)
+
+		if decl, ok := selfReferencingFunctionDecl(prefixIdentifier(ctx, s.Name.Value), s.Name.Value, s.Value, varType, val); ok {
+			return decl, nil
+		}
 
 		return fmt.Sprintf("%s := %s // const", prefixIdentifier(ctx, s.Name.Value), val), nil
 
@@ -1491,6 +1533,14 @@ func (s *%s) cajaClone() *%s {
 		}
 		return fmt.Sprintf("// type %s ...", prefixIdentifier(ctx, s.Name.Value)), nil
 
+	case *ast.EnumStatement:
+		// An enum has no Go type of its own — mapSymbolToGoType deliberately
+		// has no EnumSymbol case, so every use of an enum-typed value already
+		// transpiles as its backing primitive type (see the PropertyExpression
+		// case below, which emits an enum member access as the member's raw
+		// literal value). The declaration itself therefore emits nothing.
+		return "", nil
+
 	case *ast.UnionStatement:
 		var buf bytes.Buffer
 		unionName := prefixIdentifier(ctx, s.Name.Value)
@@ -1639,9 +1689,26 @@ func resolveIdentifierGoName(e *ast.Identifier, ctx *transpileContext) string {
 	}
 	// If it's a global variable defined in the current module being transpiled (not main)
 	if ctx.CurrentModulePath != "" {
-		_, isGlobal := a.GlobalScope()[e.Value]
-		_, filePath, ok := a.GetDefinition(e)
-		if isGlobal && ok && filePath == ctx.CurrentModulePath {
+		tok, filePath, ok := a.GetDefinition(e)
+		if entry, isGlobal := a.GlobalScope()[e.Value]; isGlobal && ok && filePath == ctx.CurrentModulePath && tok == entry.DefinitionToken {
+			// The tok == entry.DefinitionToken check is load-bearing, not
+			// redundant with the surrounding conditions: a same-named local
+			// (a function parameter, or a `let` inside a nested scope) that
+			// merely shadows a module-level binding of the same name also
+			// satisfies "a global with this name exists" (isGlobal, a pure
+			// name lookup into GlobalScope) and "this identifier's own
+			// definition lives in the current module's file" (filePath ==
+			// ctx.CurrentModulePath, trivially true for ANY binding declared
+			// in this same file, local or global) without actually
+			// referring to the global at all. Only comparing this
+			// occurrence's own resolved definition token against the
+			// global scope entry's recorded token confirms this identifier
+			// really does resolve to the module-level binding — otherwise a
+			// local shadowing a sibling global name got module-prefixed by
+			// mistake and resolved to the wrong (global) variable at
+			// runtime, a real, confirmed miscompilation for e.g. a
+			// module-level `text` function and an unrelated function
+			// elsewhere in that same module with its own `text` parameter.
 			return sanitizeIdentifier(ctx.CurrentModulePath) + "_" + e.Value
 		}
 	}
@@ -2013,6 +2080,16 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			} else if modSym.FilePath != "" {
 				return sanitizeIdentifier(modSym.FilePath) + "_" + e.Property.Value, nil
 			}
+		}
+		if enumSym, ok := objSym.(*symbol.EnumSymbol); ok {
+			// An enum has no Go type/value of its own (see the
+			// *ast.EnumStatement case above) — a member access transpiles
+			// directly to the member's underlying literal value, already a
+			// plain Go value of the backing type, so it drops straight into
+			// any context expecting that type (a string parameter, a
+			// map[string]string key/value, ...) with no wrapping or cast.
+			value := enumSym.Members[e.Property.Value]
+			return fmt.Sprintf("%q", value), nil
 		}
 
 		obj, err := transpileExpression(e.Object, ctx, "")

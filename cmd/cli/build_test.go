@@ -181,6 +181,64 @@ func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
 	}
 }
 
+// TestBuildCmd_StaticPageIgnoresBrowserModuleHeuristic confirms that once a
+// project declares its type via cajaproj.yml, that declared type ALONE
+// decides the build target — not compiler.UsesBrowserModule sniffing the
+// transpiled Go source for a "syscall/js" import. Before this test's fix,
+// a static-page project whose code merely referenced browser.* anywhere
+// (even inside an imported library function nothing actually called) got
+// compiled to wasm and then crashed with "exec format error" when the
+// static-page build path tried to run that wasm binary as a native
+// generator, since manifest.Type == TypeStaticPage was only ORed against
+// UsesBrowserModule rather than short-circuiting it.
+//
+// This script directly calls browser.log — the simplest thing that makes
+// UsesBrowserModule true — deliberately chosen so the assertion isn't "this
+// script builds successfully" (syscall/js genuinely cannot compile for a
+// native GOOS at the Go-toolchain level, regardless of project type) but
+// that the failure is an honest Go compile error naming syscall/js (proving
+// a NATIVE build was correctly attempted, as static-page requires), never
+// the "exec format error" crash a wasm-then-run-natively mismatch produces,
+// and never a silently-produced wasm binary in the first place.
+func TestBuildCmd_StaticPageIgnoresBrowserModuleHeuristic(t *testing.T) {
+	dir := t.TempDir()
+	source := "import browser\nbrowser.log(\"hello\")\n"
+	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write main.caja: %v", err)
+	}
+	manifest := &project.Manifest{Name: "demo", Type: project.TypeStaticPage, CajaVersion: "dev"}
+	if err := project.Save(dir, manifest); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	chdir(t, dir)
+
+	cmd, _ := NewBuildCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{})
+
+	// compiler.Compile wires the `go build` subprocess's own stderr directly
+	// to os.Stderr (visible in test output above, mentioning "syscall/js:
+	// build constraints exclude all Go files") rather than folding it into
+	// the returned error, so this can only assert on what the returned
+	// error/binary presence actually reveal: that the failure is a plain
+	// `go build failed: exit status 1` from an honestly-attempted NATIVE
+	// build, not the "exec format error" crash a wasm-then-run-natively
+	// mismatch produces, and that no wasm binary was produced in the first
+	// place.
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected build to fail (syscall/js cannot compile for a native GOOS), but it succeeded")
+	}
+	if strings.Contains(err.Error(), "exec format error") {
+		t.Fatalf("build failed with 'exec format error' — this means a wasm binary was produced and then run as native, i.e. the declared static-page project type was NOT respected: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(dir, "main-js-wasm.wasm")); statErr == nil {
+		t.Errorf("expected no wasm binary to be produced for a static-page project")
+	}
+}
+
 // TestBuildCmd_WebAppAutoDiscoveryWritesIndexHTML checks that a manifest-
 // declared web-app project's build also writes index.html alongside the
 // usual <name>.html harness, so the output directory is servable at a bare

@@ -492,6 +492,49 @@ func (us *UnionStatement) String() string {
 	return out
 }
 
+// EnumMember represents one `Name = literal` entry inside an enum
+// declaration. Value is restricted by the parser to a literal expression
+// (currently only *StringLiteral) — the analyzer is what actually enforces
+// that restriction and infers the enum's backing type from it.
+type EnumMember struct {
+	Name  *Identifier
+	Value Expression
+}
+
+func (em *EnumMember) String() string {
+	return em.Name.String() + " = " + em.Value.String()
+}
+
+// EnumStatement declares a closed enum type whose backing primitive type is
+// inferred from its members' literal values, e.g.
+// `enum CSSProperty { Padding = "padding", Margin = "margin" }`. Unlike
+// UnionStatement (a closed set of struct-type variants), an enum value
+// widens implicitly to its backing type but a bare value of the backing
+// type does not narrow to the enum — see analyzer.go's analyzeEnumStatement
+// and symbol.EnumSymbol for the asymmetric Equals rule that enforces this.
+type EnumStatement struct {
+	Token     lexer.Token // The 'enum' token
+	Name      *Identifier
+	Members   []EnumMember
+	IsPrivate bool
+}
+
+func (es *EnumStatement) statementNode()       {}
+func (es *EnumStatement) TokenLiteral() string { return es.Token.Literal }
+func (es *EnumStatement) String() string {
+	var members []string
+	for _, m := range es.Members {
+		members = append(members, m.String())
+	}
+
+	out := ""
+	if es.IsPrivate {
+		out += "private "
+	}
+	out += es.TokenLiteral() + " " + es.Name.String() + " { " + strings.Join(members, ", ") + " }"
+	return out
+}
+
 type TypeAliasStatement struct {
 	Token            lexer.Token
 	Name             *Identifier

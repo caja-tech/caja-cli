@@ -136,6 +136,74 @@ func TestRunReportsCajaSourceLocation(t *testing.T) {
 	}
 }
 
+// TestCrossModuleParameterShadowingSiblingGlobal is a regression test for a
+// real miscompilation: a function parameter that shadows an unrelated
+// top-level binding of the same name *elsewhere in the same imported
+// module* used to resolve, inside a cross-module transpile, to the
+// module-prefixed GLOBAL instead of the local parameter — resolveIdentifierGoName's
+// "is this a global?" check only tested whether a global with the same NAME
+// existed anywhere in the module (a.GlobalScope()[e.Value]) and that this
+// identifier's own definition lived in the same file (trivially true for a
+// local too, since it's declared in that same file), never that THIS
+// occurrence's resolved definition token actually WAS the global's. Here
+// `lib.caja` declares a top-level `text` function and a *different*
+// function `escapeHTML` whose own parameter is also named `text` — before
+// the fix, `escapeHTML`'s body incorrectly referenced the top-level `text`
+// function (a type mismatch here, since it returns a different type, which
+// is what made this repro-able as a compile error rather than a silent
+// wrong-value bug — the underlying resolution mistake would just as easily
+// misresolve two same-named bindings of the *same* type with no compile
+// error and a silently wrong result).
+func TestCrossModuleParameterShadowingSiblingGlobal(t *testing.T) {
+	dir := t.TempDir()
+	libSource := `import string
+
+const text = fn(content: String) -> String {
+	return content
+}
+
+const escapeHTML = fn(text: String) -> String {
+	return string.replace(text, "&", "&amp;")
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "lib.caja"), []byte(libSource), 0644); err != nil {
+		t.Fatalf("failed to write lib.caja: %v", err)
+	}
+
+	mainSource := `import "lib"
+import log
+
+log.info("result:", lib.escapeHTML("a & b"))
+`
+	mainPath := filepath.Join(dir, "main.caja")
+	if err := os.WriteFile(mainPath, []byte(mainSource), 0644); err != nil {
+		t.Fatalf("failed to write main.caja: %v", err)
+	}
+
+	program, _, a, err := script.ParseWithDir(mainSource, dir, mainPath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := compiler.Transpile(program, a, compiler.TranspileOptions{})
+	if err != nil {
+		t.Fatalf("transpilation failed: %v", err)
+	}
+	if formatted, ferr := format.Source([]byte(goCode)); ferr == nil {
+		goCode = string(formatted)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("run failed: %v\nstderr:\n%s\ngenerated Go:\n%s", err, stderr.String(), goCode)
+	}
+
+	want := "result: a &amp; b"
+	if !strings.Contains(stdout.String(), want) {
+		t.Errorf("expected stdout to contain %q, got:\n%s", want, stdout.String())
+	}
+}
+
 // assertCleanAsyncPanicReport is the shared assertion for the two tests
 // below: a panic inside a spawned goroutine (stream-pipe stage, join call,
 // or async task) must produce caja run's normal clean "error: ..." message,

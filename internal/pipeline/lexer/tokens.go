@@ -81,6 +81,7 @@ const (
 	UNION   TokenType = "UNION"
 	IS      TokenType = "IS"
 	BAR     TokenType = "BAR"
+	ENUM    TokenType = "ENUM"
 )
 
 type Token struct {
@@ -123,6 +124,7 @@ var keywords = map[string]TokenType{
 	"unwrap":  UNWRAP,
 	"union":   UNION,
 	"is":      IS,
+	"enum":    ENUM,
 }
 
 // lookupIdent checks whether ident is a reserved keyword and returns the
@@ -138,7 +140,7 @@ func lookupIdent(ident string) TokenType {
 // isKeyword checks if the given token type is a reserved keyword in the language.
 func IsKeyword(tokenType TokenType) bool {
 	switch tokenType {
-	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE, ACTIVE, REACT, MEMO, ASYNC, AWAIT, UNWRAP, UNION, IS:
+	case RETURN, IF, ELSE, LET, FN, TRUE, FALSE, TYPE, IMPORT, AS, AND, OR, XOR, PRIVATE, STRUCT, CONST, DEFINE, CONSTRAINTS, WITH, NIL, MOVE, ACTIVE, REACT, MEMO, ASYNC, AWAIT, UNWRAP, UNION, IS, ENUM:
 		return true
 	}
 	return false

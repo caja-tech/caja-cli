@@ -1214,12 +1214,12 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private on import",
 			input:         "private import \"foo\"",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', 'union', or 'enum'",
 		},
 		{
 			name:          "Private on return",
 			input:         "private return 10",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', 'union', or 'enum'",
 		},
 		{
 			name:          "Return private",
@@ -1239,7 +1239,7 @@ func TestPrivateModifierErrors(t *testing.T) {
 		{
 			name:          "Private standalone",
 			input:         "private",
-			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', or 'union'",
+			expectedError: "syntax error: 'private' modifier must be followed by 'let', 'const', 'type', 'define', 'union', or 'enum'",
 		},
 	}
 
@@ -1659,6 +1659,58 @@ func TestUnionStatementErrors(t *testing.T) {
 		"union Animal =",            // Missing first variant
 		"union Animal = Cat |",      // Missing variant after '|'
 		"union Animal = Cat, Dog",   // Comma instead of pipe
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+func TestEnumStatementParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Enum with one member",
+			input:    `enum Color { Red = "red" }`,
+			expected: `enum Color { Red = "red" }`,
+		},
+		{
+			name:     "Enum with multiple members",
+			input:    `enum CSSProperty { Padding = "padding", Margin = "margin" }`,
+			expected: `enum CSSProperty { Padding = "padding", Margin = "margin" }`,
+		},
+		{
+			name:     "Enum with trailing comma",
+			input:    `enum Color { Red = "red", Blue = "blue", }`,
+			expected: `enum Color { Red = "red", Blue = "blue" }`,
+		},
+		{
+			name:     "Private enum",
+			input:    `private enum Color { Red = "red" }`,
+			expected: `private enum Color { Red = "red" }`,
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+func TestEnumStatementErrors(t *testing.T) {
+	tests := []string{
+		`enum { Red = "red" }`,            // Missing enum name
+		`enum Color Red = "red" }`,        // Missing '{'
+		`enum Color { = "red" }`,          // Missing member name
+		`enum Color { Red "red" }`,        // Missing '=' after member name
+		`enum Color { Red = }`,            // Missing value after '='
+		`enum Color { Red = "red"`,        // Missing closing '}'
+		`enum Color { Red = "red" Blue = "blue" }`, // Missing comma between members
 	}
 
 	for _, input := range tests {

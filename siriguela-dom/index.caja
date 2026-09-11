@@ -1,0 +1,97 @@
+import "@caja/siriguela"
+import browser
+import array
+import string
+
+# mount() lives in its own package, separate from @caja/siriguela's View/
+# el/attr/style/renderToString, because merely IMPORTING a module that
+# contains ANY browser-touching code — even a function nothing in the
+# consuming program ever calls — forces the whole compiled binary into
+# wasm-only mode (confirmed directly: internal/pipeline/compiler's
+# UsesBrowserModule just greps the transpiled Go source for the literal
+# "syscall/js" import string, which lands there because cross-module
+# transpilation emits every top-level statement of an imported module
+# unconditionally, not just the ones actually called). A static-page
+# project that only ever calls renderToString() must never end up needing
+# GOOS=js/wasm just because the same file also happened to define mount().
+
+const applyAttrs = fn(el: browser.Element, attrs: [siriguela.Attr]) -> Nothing {
+	if (array.len(attrs) == 0) {
+		return
+	}
+	let head = array.head(attrs)
+	browser.setAttribute(el, head.name, head.value)
+	return applyAttrs(el, array.tail(attrs))
+}
+
+const applyStyles = fn(el: browser.Element, styles: [siriguela.Style]) -> Nothing {
+	if (array.len(styles) == 0) {
+		return
+	}
+	let head = array.head(styles)
+	browser.setStyle(el, head.property, head.value)
+	return applyStyles(el, array.tail(styles))
+}
+
+const attachHandlers = fn(el: browser.Element, handlers: [siriguela.Handler]) -> Nothing {
+	if (array.len(handlers) == 0) {
+		return
+	}
+	let head = array.head(handlers)
+	browser.on(head.event, el, head.handler)
+	return attachHandlers(el, array.tail(handlers))
+}
+
+# mountChildren takes `mountOne` as a plain parameter, exactly like
+# @caja/siriguela's mapConcat takes `render` — the same forward-reference
+# constraint applies here: mount() and a "mount each of my children" helper
+# need each other, but Caja has no forward references between separate
+# `let` bindings, only self-reference from within a function's own body.
+# mount(), defined after this, passes itself in as `mountOne`.
+const mountChildren = fn(children: [siriguela.View], parent: browser.Element, mountOne: fn(siriguela.View, browser.Element) -> browser.Element) -> Nothing {
+	if (array.len(children) == 0) {
+		return
+	}
+	let head = array.head(children)
+	mountOne(head, parent)
+	return mountChildren(array.tail(children), parent, mountOne)
+}
+
+# mount — the web-app terminal. Returns the root element it created, so a
+# caller can keep a handle for a later, explicit browser.setText/setStyle
+# call — an opt-in escape hatch, not automatic reactivity.
+const mount = fn(view: siriguela.View, parent: browser.Element) -> browser.Element {
+	let el = browser.createElement(view.tag)
+	applyAttrs(el, view.attrs)
+	applyStyles(el, view.styles)
+	if (string.len(view.text) > 0) {
+		browser.setText(el, view.text)
+	}
+	mountChildren(view.children, el, mount)
+	attachHandlers(el, view.handlers)
+	browser.appendChild(parent, el)
+	return el
+}
+
+# sync — explicit reconciliation. There is no automatic reactivity here:
+# Caja's `active`/`react` system can't be reached from inside any function
+# body at all (purity forbids reading OR writing an outer `let`, `active`
+# or not), so an event handler already has to re-fetch whatever state it
+# needs fresh, the same "no closures" pattern onClick/onInput's own
+# handlers already require (see @caja/siriguela's index.caja). sync() is
+# just the DOM-reconciliation half of that: call it after rebuilding a View
+# from that freshly-read state.
+#
+# v1 strategy is clear-and-remount, not a diff/patch: browser.setHTML(el,
+# "") clears mountedRoot's entire current subtree in one call (there's no
+# "get this element's children" builtin to walk and remove them one at a
+# time), then mount() builds the new tree fresh underneath it. Correct, but
+# loses any focus/scroll state inside the reconciled subtree, and repaints
+# the whole thing rather than patching only what changed — a real keyed
+# diff would need mount() to retain a live element-per-node mapping it
+# deliberately doesn't keep today, so it's a deferred optimization, not a
+# v1 requirement.
+const sync = fn(view: siriguela.View, mountedRoot: browser.Element) -> Nothing {
+	browser.setHTML(mountedRoot, "")
+	mount(view, mountedRoot)
+}

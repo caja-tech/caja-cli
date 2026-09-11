@@ -18,9 +18,20 @@ func NewBasicSymbol(symbolType environment.ObjectType) *BasicSymbol {
 
 // Equals compares this BasicSymbol with another Symbol to determine if they represent the same type.
 // It returns true if their types match exactly, or if either symbol is of type ANY_OBJ.
+//
+// An EnumSymbol whose backing type matches this primitive is also accepted
+// here — an enum value widens implicitly to its backing type (e.g. a
+// CSSProperty flows anywhere a String is expected), even though the
+// reverse is rejected by EnumSymbol.Equals (a bare String does not narrow
+// to the enum). This one-directional asymmetry is deliberate: see
+// EnumSymbol's doc comment.
 func (bs *BasicSymbol) Equals(other Symbol) bool {
 	if bs.symbolType == environment.ANY_OBJ || other.Type() == environment.ANY_OBJ {
 		return true
+	}
+
+	if enumSymbol, ok := other.(*EnumSymbol); ok {
+		return bs.symbolType == enumSymbol.BackingType
 	}
 
 	otherSymbol, ok := other.(*BasicSymbol)

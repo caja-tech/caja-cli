@@ -1,0 +1,6 @@
+{
+  "name": "@caja/siriguela",
+  "version": "0.1.0",
+  "description": "Renderer-agnostic UI component DSL for Caja — one View tree, mount() for web-app, renderToString() for static-page.",
+  "main": "index.caja"
+}

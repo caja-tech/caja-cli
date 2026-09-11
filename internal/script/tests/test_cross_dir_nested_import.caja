@@ -1,0 +1,3 @@
+import "@caja/nestedimport" as pkg
+
+return pkg.get_value()

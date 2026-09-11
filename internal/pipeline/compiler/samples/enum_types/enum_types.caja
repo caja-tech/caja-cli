@@ -1,0 +1,30 @@
+import "log"
+
+# A closed enum type: the backing type (String, here) is inferred from the
+# members' literal values, not declared explicitly.
+enum CSSProperty {
+	Padding = "padding",
+	Margin = "margin",
+	BackgroundColor = "background-color",
+}
+
+# An enum value widens implicitly to its backing type — style() can take a
+# CSSProperty and both return it and store it as a map[String]String key
+# with no cast, since a CSSProperty already IS a String wherever one is
+# expected.
+let style = fn(property: CSSProperty, value: String) -> map[String]String {
+	let declarations: map[String]String = {}
+	declarations[property] = value
+	return declarations
+}
+
+let padding = style(CSSProperty.Padding, "8px")
+log.info("padding rule:", padding)
+
+# The reverse direction is NOT allowed: a bare String does not narrow to
+# CSSProperty, so this line is intentionally commented out — uncommenting
+# it is a compile-time type error, not a runtime one:
+#     let bad = style("padding", "8px")
+
+let margin = style(CSSProperty.Margin, "4px")
+log.info("margin rule:", margin)
