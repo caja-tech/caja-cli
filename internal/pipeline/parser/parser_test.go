@@ -1512,6 +1512,242 @@ func TestTrailingBlockCallErrors(t *testing.T) {
 	}
 }
 
+// TestTrailingLambdaParsing verifies Kotlin-style trailing-lambda sugar:
+// "call(args) paramName => { ... }" appends a bare FunctionLiteral (not an
+// ArrayLiteral, unlike TestTrailingBlockCallParsing above) as the call's
+// last argument.
+func TestTrailingLambdaParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Trailing lambda with block body",
+			input:    "route(\"GET\", \"/health\") req => {\nreturn ok(req)\n}",
+			expected: "route(\"GET\", \"/health\", req(req: ) { ... })",
+		},
+		{
+			name:     "Trailing lambda with single-expression body",
+			input:    "route(\"GET\", \"/health\") req => ok(req)",
+			expected: "route(\"GET\", \"/health\", req(req: ) { ... })",
+		},
+		{
+			name:     "Trailing lambda on a call with no existing args",
+			input:    "middleware() next => {\nreturn next\n}",
+			expected: "middleware(next(next: ) { ... })",
+		},
+		{
+			name:     "Trailing lambda on a property-method call",
+			input:    "server.get(\"/x\") req => {\nreturn ok(req)\n}",
+			expected: "(server.get)(\"/x\", req(req: ) { ... })",
+		},
+		{
+			name:     "Trailing lambda nested inside a trailing block",
+			input:    "registerRoutes(server) {\nroute(\"GET\", \"/health\") req => {\nreturn ok(req)\n}\n}",
+			expected: "registerRoutes(server, [route(\"GET\", \"/health\", req(req: ) { ... })])",
+		},
+		{
+			name:     "Trailing lambda as another call's argument",
+			input:    "use(route(\"GET\", \"/health\") req => {\nreturn ok(req)\n})",
+			expected: "use(route(\"GET\", \"/health\", req(req: ) { ... }))",
+		},
+		{
+			name:     "A call followed by '{' still uses the existing array-building sugar, unaffected",
+			input:    "foo() {\nbar()\n}",
+			expected: "foo([bar()])",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestTrailingLambdaErrors verifies that a call followed by an identifier
+// with no FAT_ARROW after it is left alone (falls through to the ordinary
+// one-statement-per-line rule) rather than silently consuming a token, and
+// that a trailing lambda missing its body produces a sensible parse error
+// instead of a panic.
+func TestTrailingLambdaErrors(t *testing.T) {
+	tests := []string{
+		"foo() bar",     // IDENT with no FAT_ARROW after a call, same line: falls through to the ordinary "one statement per line" error, not a silent no-op
+		"foo() req =>",  // FAT_ARROW with nothing after it (EOF)
+		"foo() req => }", // invalid single-expression body (a bare '}' has no prefix parse function)
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+// TestStringInterpolationParsing verifies Kotlin-style string interpolation:
+// a "${expr}" occurrence inside a string literal splits it into an
+// InterpolatedStringLiteral of literal-text/expression segments, while a
+// plain string with no "${" anywhere parses exactly as before.
+func TestStringInterpolationParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Plain string with no interpolation is unaffected",
+			input:    `"hello world"`,
+			expected: `"hello world"`,
+		},
+		{
+			name:     "Single interpolated identifier",
+			input:    `"${name}"`,
+			expected: `"${name}"`,
+		},
+		{
+			name:     "Literal text around and between two interpolations",
+			input:    `"${a} ${b}"`,
+			expected: `"${a} ${b}"`,
+		},
+		{
+			name:     "Interpolated property access",
+			input:    `"${req.method}"`,
+			expected: `"${(req.method)}"`,
+		},
+		{
+			name:     "Interpolated call expression",
+			input:    `"${len(arr)}"`,
+			expected: `"${len(arr)}"`,
+		},
+		{
+			name:     "Interpolated arithmetic expression",
+			input:    `"${a + b}"`,
+			expected: `"${(a + b)}"`,
+		},
+		{
+			name:     "Interpolated string composes with ordinary '+' concatenation",
+			input:    `"a" + "${x}"`,
+			expected: `("a" + "${x}")`,
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestStringInterpolationErrors verifies malformed interpolations produce a
+// sensible parse error rather than a panic or a silent misparse.
+func TestStringInterpolationErrors(t *testing.T) {
+	tests := []string{
+		`"${1 +"`,  // unterminated: no closing '}' before the string itself ends
+		`"${1 2}"`, // trailing content after the embedded expression
+		`"${}"`,    // empty interpolation, no expression at all
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
+// TestStringEscapeParsing verifies escape-sequence decoding (Kotlin's set:
+// \t \b \n \r \' \" \\ \$, plus \uXXXX), and its interaction with string
+// interpolation: "\$" must not trigger interpolation even immediately
+// before "{", and escape-decoding must not disturb interpolation boundary-
+// finding for a "${...}" appearing later in the same literal.
+func TestStringEscapeParsing(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:     "Newline escape decodes to a real newline",
+			input:    `"a\nb"`,
+			expected: "\"a\nb\"",
+		},
+		{
+			name:     "Tab escape decodes to a real tab",
+			input:    `"a\tb"`,
+			expected: "\"a\tb\"",
+		},
+		{
+			name:     "Backspace escape decodes",
+			input:    `"a\bb"`,
+			expected: "\"a\bb\"",
+		},
+		{
+			name:     "Carriage return escape decodes",
+			input:    `"a\rb"`,
+			expected: "\"a\rb\"",
+		},
+		{
+			name:     "Escaped double quote decodes to a literal quote",
+			input:    `"a\"b"`,
+			expected: `"a"b"`,
+		},
+		{
+			name:     "Escaped single quote decodes to a literal quote",
+			input:    `"a\'b"`,
+			expected: `"a'b"`,
+		},
+		{
+			name:     "Escaped backslash decodes to one literal backslash",
+			input:    `"a\\b"`,
+			expected: `"a\b"`,
+		},
+		{
+			name:     "Escaped dollar not followed by '{' is just a literal dollar",
+			input:    `"cost: \$5"`,
+			expected: `"cost: $5"`,
+		},
+		{
+			name:     "Escaped dollar-brace does NOT start an interpolation",
+			input:    `"\${not a var}"`,
+			expected: `"${not a var}"`,
+		},
+		{
+			name:     "Escaped interpolation alongside a real one in the same string",
+			input:    `"${x} \${literal}"`,
+			expected: `"${x} ${literal}"`,
+		},
+		{
+			name:     "Unicode escape decodes to the given code point",
+			input:    `"I \u2764 Caja"`,
+			expected: `"I ❤ Caja"`,
+		},
+		{
+			name:     "Nested string literal inside an interpolation now parses successfully",
+			input:    `"${concat(x, "-")}"`,
+			expected: `"${concat(x, "-")}"`,
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// TestStringEscapeErrors verifies an unrecognized escape sequence reports a
+// parse error rather than silently passing the backslash through — matching
+// Kotlin/Go's own strictness, not the lenient behavior some languages use.
+func TestStringEscapeErrors(t *testing.T) {
+	tests := []string{
+		`"a\zb"`, // 'z' is not a recognized escape target
+		`"\u12"`, // \u needs exactly 4 hex digits
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			tknzr := lexer.New(input)
+			p := New(tknzr)
+			p.Parse()
+
+			errors := p.Errors()
+			if len(errors) == 0 {
+				t.Fatalf("expected parser errors for input %q, but got none", input)
+			}
+		})
+	}
+}
+
 func TestPipeOperatorParsing(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -524,14 +524,11 @@ private const escapeHTML = fn(str: String) -> String {
 }
 
 # Attribute values are rendered single-quoted (name='value'), not the more
-# usual double-quoted — not a style choice. Caja's string literals have no
-# escape sequences at all (lexer.go's readString terminates on the first
-# raw '"' it sees, with no backslash handling whatsoever), so there is no
-# way to write a string literal containing a literal double-quote character
-# to use as escapeHTML's replacement target. A literal single-quote
-# character has no such problem (it isn't the string delimiter), so
-# single-quoting attributes and escaping "'" instead is the only
-# representable choice here, not a preference.
+# usual double-quoted. Caja's string literals now support escape sequences
+# (\" included), so double-quoting attributes and escaping \" would also be
+# representable — this is a settled style choice at this point, not a
+# forced one, and switching it would be a gratuitous output-format change
+# for existing consumers, not a bug fix.
 private const escapeAttrValue = fn(value: String) -> String {
 	let escaped = escapeHTML(value)
 	return string.replace(escaped, "'", "&#39;")

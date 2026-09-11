@@ -100,7 +100,10 @@ func testInitScaffold(t *testing.T, projectType, name string) string {
 	cmd, _ := NewInitCmd()
 	bufOut := new(bytes.Buffer)
 	cmd.SetOut(bufOut)
-	cmd.SetArgs([]string{"--name", name, "--type", projectType, "--dir", dir})
+	// --skip-install: tests must not shell out to a real package manager
+	// (slow, network-dependent, and not hermetic in CI) — a no-op for
+	// project types with no dependencies to install anyway.
+	cmd.SetArgs([]string{"--name", name, "--type", projectType, "--dir", dir, "--skip-install"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected init --type %s to succeed, got: %v\noutput:\n%s", projectType, err, bufOut.String())
@@ -173,5 +176,75 @@ func TestInitCmd_ScaffoldsHTTPAPI(t *testing.T) {
 	}
 	if !strings.Contains(string(mainCaja), `import "http" as http`) {
 		t.Errorf("expected main.caja to import the http module, got:\n%s", mainCaja)
+	}
+	if !strings.Contains(string(mainCaja), `@caja/acerola`) {
+		t.Errorf("expected main.caja to import @caja/acerola, got:\n%s", mainCaja)
+	}
+}
+
+// TestInitCmd_HTTPAPIScaffoldsPackageJSON confirms the http-api scaffold
+// declares @caja/acerola as a dependency, so a package manager install
+// (real or manual) has something to fetch.
+func TestInitCmd_HTTPAPIScaffoldsPackageJSON(t *testing.T) {
+	dir := testInitScaffold(t, "http-api", "demo-api-pkg")
+
+	pkgJSON, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		t.Fatalf("expected package.json to exist: %v", err)
+	}
+	if !strings.Contains(string(pkgJSON), `"@caja/acerola"`) {
+		t.Errorf("expected package.json to declare @caja/acerola as a dependency, got:\n%s", pkgJSON)
+	}
+	if !strings.Contains(string(pkgJSON), `"demo-api-pkg"`) {
+		t.Errorf("expected package.json to be rendered with the project name, got:\n%s", pkgJSON)
+	}
+}
+
+// TestInitCmd_OtherProjectTypesHaveNoPackageJSON confirms package.json is
+// http-api-only — static-page/web-app have no npm dependency to manage.
+func TestInitCmd_OtherProjectTypesHaveNoPackageJSON(t *testing.T) {
+	for _, projectType := range []string{"static-page", "web-app"} {
+		dir := testInitScaffold(t, projectType, "demo-"+projectType)
+		if _, err := os.Stat(filepath.Join(dir, "package.json")); !os.IsNotExist(err) {
+			t.Errorf("expected no package.json for %s project, stat err: %v", projectType, err)
+		}
+	}
+}
+
+// TestInitCmd_SkipInstallLeavesNoNodeModules confirms --skip-install
+// actually skips the install step (no node_modules ever gets created),
+// rather than just suppressing output.
+func TestInitCmd_SkipInstallLeavesNoNodeModules(t *testing.T) {
+	dir := testInitScaffold(t, "http-api", "demo-skip-install")
+
+	if _, err := os.Stat(filepath.Join(dir, "node_modules")); !os.IsNotExist(err) {
+		t.Errorf("expected no node_modules with --skip-install, stat err: %v", err)
+	}
+}
+
+// TestInitCmd_InstallWarnsWithoutFailingWhenNoPackageManagerFound confirms
+// a missing npm/bun (or any other install failure) degrades to a warning
+// rather than failing the whole init — the scaffolded project is still
+// valid even if the dependency install didn't happen. Simulated here by
+// pointing PATH somewhere with neither binary, rather than depending on the
+// real npm registry's current state.
+func TestInitCmd_InstallWarnsWithoutFailingWhenNoPackageManagerFound(t *testing.T) {
+	emptyPathDir := t.TempDir()
+	t.Setenv("PATH", emptyPathDir)
+
+	dir := filepath.Join(t.TempDir(), "demo-no-pm")
+	cmd, _ := NewInitCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{"--name", "demo-no-pm", "--type", "http-api", "--dir", dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected init to still succeed without a package manager on PATH, got: %v\noutput:\n%s", err, bufOut.String())
+	}
+	if !strings.Contains(bufOut.String(), "no npm or bun found on PATH") {
+		t.Errorf("expected a warning about the missing package manager, got output:\n%s", bufOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "main.caja")); err != nil {
+		t.Errorf("expected the scaffold to still be created despite the install warning: %v", err)
 	}
 }

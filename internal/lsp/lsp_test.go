@@ -158,6 +158,15 @@ union Animal = Cat | Dog`,
 			expectedNil:    false,
 			expectedString: "Cat",
 		},
+		{
+			name:           "Identifier inside a string interpolation hover",
+			uri:            "file:///test_interpolation_hover.caja",
+			input:          "let multiplier = 5\nlet msg = \"value is ${multiplier}\"",
+			queryLine:      1,
+			queryChar:      24, // hovering over 'multiplier' inside "${multiplier}"
+			expectedNil:    false,
+			expectedString: "Number",
+		},
 	}
 
 	for _, tt := range tests {

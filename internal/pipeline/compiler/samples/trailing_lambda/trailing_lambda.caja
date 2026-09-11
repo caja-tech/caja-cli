@@ -1,0 +1,21 @@
+import "array" as array
+
+type Route struct {
+	path    String
+	handler fn(String) -> String
+}
+
+let route = fn(path: String, handler: fn(String) -> String) -> Route {
+	return Route { path: path, handler: handler }
+}
+
+let registerRoutes = fn(routes: [Route]) -> Number {
+	return array.len(routes)
+}
+
+let count = registerRoutes() {
+	route("/health") req => {
+		return req
+	}
+	route("/status") req => req
+}

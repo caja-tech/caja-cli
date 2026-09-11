@@ -407,6 +407,73 @@ func TestStringTokenization(t *testing.T) {
 	runTestsOnTokens(tknzr, tests, t)
 }
 
+// TestStringEscapeBoundaryScanning verifies readString's boundary-scan is
+// escape-aware (an escaped quote doesn't end the string early) and
+// interpolation-depth-aware (a nested string/date literal inside an
+// unclosed "${...}" doesn't get mistaken for the outer string's own
+// terminator) — both at the raw-token level. Escape *decoding* itself
+// happens later, in the parser (see parser_test.go's
+// TestStringEscapeParsing) — the token's Literal here is still the raw,
+// undecoded source text.
+func TestStringEscapeBoundaryScanning(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		literal string
+	}{
+		{"Escaped double quote does not end the string early", `"a\"b"`, `a\"b`},
+		{"Escaped backslash", `"a\\b"`, `a\\b`},
+		{
+			name:    "Nested string literal inside an interpolation",
+			input:   `"${concat(x, "-")}"`,
+			literal: `${concat(x, "-")}`,
+		},
+		{
+			name:    "Two separate interpolations in sequence",
+			input:   `"${a}${b}"`,
+			literal: `${a}${b}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tknzr := New(tt.input)
+			tok := tknzr.NextToken()
+			if len(tknzr.Errors) != 0 {
+				t.Fatalf("expected no lexer errors, got %v", tknzr.Errors)
+			}
+			if tok.Type != STRING {
+				t.Fatalf("expected STRING token, got %s", tok.Type)
+			}
+			if tok.Literal != tt.literal {
+				t.Errorf("expected literal %q, got %q", tt.literal, tok.Literal)
+			}
+		})
+	}
+}
+
+// TestUnterminatedInterpolationDoesNotPanic guards the exact bug found
+// while building this: an unclosed "${" with no matching "}" before the
+// source runs out must report an "unterminated string literal" error, not
+// walk readChar past the end of input (which previously panicked with a
+// slice-bounds-out-of-range in readString).
+func TestUnterminatedInterpolationDoesNotPanic(t *testing.T) {
+	inputs := []string{
+		`"${1 +"`,
+		`"${`,
+		`"${"a"`,
+	}
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			tknzr := New(in)
+			tknzr.NextToken()
+			if len(tknzr.Errors) == 0 {
+				t.Fatalf("expected an unterminated-string-literal error for %q, got none", in)
+			}
+		})
+	}
+}
+
 // TestBooleanTokenization tests the tokenization of boolean literals.
 func TestBooleanTokenization(t *testing.T) {
 	input := "let isDone = true\nlet isFailed = false"

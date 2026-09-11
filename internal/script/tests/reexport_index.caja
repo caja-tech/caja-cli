@@ -1,0 +1,1 @@
+import { registerRoutes } from "reexport_router"

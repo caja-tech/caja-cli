@@ -1,0 +1,13 @@
+let name = "World"
+let count = 5
+
+let greeting = "Hello, ${name}! count=${count}"
+
+let score = fn(cond: Boolean) -> Number {
+    if (cond) {
+        return 1
+    }
+    return 0
+}
+
+return score(greeting == "Hello, World! count=5")

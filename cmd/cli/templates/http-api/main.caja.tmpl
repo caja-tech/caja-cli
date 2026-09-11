@@ -1,9 +1,12 @@
 import "http" as http
+import { route, registerRoutes } from "@caja/acerola"
 
-let router = http.newRouter()
+let server = http.newRouter()
 
-router.get("/", fn(req: http.Request) -> http.Response {
-    return http.ok("Hello from {{.Name}}!")
-})
+registerRoutes(server) {
+    route("GET", "/") req => {
+        return http.ok("Hello from {{.Name}}!")
+    }
+}
 
-http.listen(router, 8080)
+http.listen(server, 8080)

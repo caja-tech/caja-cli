@@ -68,6 +68,7 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 			"toLower":    NewBuiltinSymbol(moduleName, 1, "toLower(str: String) -> String", "str: String"),
 			"trim":       NewBuiltinSymbol(moduleName, 1, "trim(str: String) -> String", "str: String"),
 			"len":        NewBuiltinSymbol(moduleName, 1, "len(str: String) -> Number", "str: String"),
+			"format":     NewBuiltinSymbol(moduleName, 2, "format(fmt: String, value: Any) -> String", "fmt: String", "value: Any"),
 		}, nil, true
 
 	case "math":

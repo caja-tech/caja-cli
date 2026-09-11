@@ -1,0 +1,23 @@
+import "http" as http
+
+# withClient references http.Client as a parameter type but never calls
+# http.newClient(...) itself -- the compiler must still emit the Client
+# Go type and its supporting glue, since Go requires every function in the
+# compiled program to type-check regardless of whether it's ever called.
+# This regresses a bug where http.Client's codegen was gated only on an
+# actual http.newClient(...) call site anywhere in the program, missing a
+# function that merely takes/returns one (found while wiring @caja/acerola,
+# an external library, into a fresh caja-init http-api scaffold).
+const withClient = fn(
+    client: http.Client,
+    handler: fn(http.Request, http.Client) -> http.Response
+) -> http.Handler {
+    return fn(req: http.Request) -> http.Response {
+        return handler(req, client)
+    }
+}
+
+let router = http.newRouter()
+router.get("/", fn(req: http.Request) -> http.Response {
+    return http.ok("ok")
+})
