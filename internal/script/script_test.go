@@ -229,6 +229,78 @@ func TestModules(t *testing.T) {
 			expectVal:   30.0,
 		},
 		{
+			name:        "Named Imports Type/Union Test",
+			file:        "test_named_imports_type.caja",
+			expectError: false,
+			expectVal:   7.0,
+		},
+		{
+			name:        "Named Imports Private Type Rejected Test",
+			file:        "test_named_imports_type_private.caja",
+			expectError: true,
+			errorMsg:    "semantic error: module 'second_types' has no exported member 'Hidden'",
+		},
+		{
+			name:        "Wildcard Imports Builtin Test",
+			file:        "test_wildcard_imports_builtin.caja",
+			expectError: false,
+			expectVal:   30.0,
+		},
+		{
+			name:        "Wildcard Imports Custom Module Test",
+			file:        "test_wildcard_imports_custom.caja",
+			expectError: false,
+			expectVal:   15.0,
+		},
+		{
+			name:        "Wildcard Imports Types Test",
+			file:        "test_wildcard_imports_types.caja",
+			expectError: false,
+			expectVal:   13.0,
+		},
+		{
+			// Two wildcards sharing a name is legal; only reaching for the
+			// colliding name bare is an error.
+			name:        "Wildcard Ambiguous Name Used",
+			file:        "test_wildcard_ambiguous.caja",
+			expectError: true,
+			errorMsg:    "ambiguous reference to 'len'",
+		},
+		{
+			name:        "Wildcard Ambiguous Name Never Used",
+			file:        "test_wildcard_ambiguous_unused.caja",
+			expectError: false,
+			expectVal:   3.0,
+		},
+		{
+			// Wildcard-imported names are not re-exported, so a module that
+			// only wildcard-imported 'add' cannot hand it on.
+			name:        "Wildcard Imports Are Not Re-exported",
+			file:        "test_wildcard_no_reexport.caja",
+			expectError: true,
+			errorMsg:    "semantic error: module 'wildcard_facade' has no exported member 'add'",
+		},
+		{
+			name:        "Wildcard Import After A Declaration",
+			file:        "test_wildcard_late.caja",
+			expectError: true,
+			errorMsg:    "import statements must appear at the beginning of the file",
+		},
+		{
+			// The type side mirrors the value side: two wildcards exporting
+			// the same type name only error where the bare name is used.
+			name:        "Wildcard Ambiguous Type Used",
+			file:        "test_wildcard_ambiguous_type.caja",
+			expectError: true,
+			errorMsg:    "ambiguous type 'Shape'",
+		},
+		{
+			name:        "Wildcard Ambiguous Type Never Used",
+			file:        "test_wildcard_ambiguous_type_unused.caja",
+			expectError: false,
+			expectVal:   33.0,
+		},
+		{
 			// Confirms both a String-typed and a Number-typed "${...}"
 			// segment interpolate correctly end to end (built, compiled,
 			// and actually run) — and specifically that a whole number

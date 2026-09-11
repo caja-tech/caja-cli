@@ -1,0 +1,6 @@
+import * from "second_types"
+
+let p: Point = Point { x: 6, y: 7 }
+let s: Shape = p
+
+return p.x + p.y

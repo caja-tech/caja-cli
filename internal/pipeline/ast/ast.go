@@ -322,6 +322,12 @@ type ImportStatement struct {
 	Name         *Identifier
 	Path         string
 	NamedImports []*Identifier
+	// IsWildcard marks `import * from mod`, which binds every exported member
+	// of the module directly into the importing scope. Mutually exclusive with
+	// NamedImports by construction (the parser treats '*' and '{' as
+	// alternatives), and carries no per-name nodes of its own — the members are
+	// resolved from the module's symbol table during analysis.
+	IsWildcard bool
 }
 
 func (is *ImportStatement) statementNode()       {}
@@ -329,6 +335,10 @@ func (is *ImportStatement) TokenLiteral() string { return is.Token.Literal }
 func (is *ImportStatement) String() string {
 	var out string
 	out += is.TokenLiteral()
+
+	if is.IsWildcard {
+		out += " * from"
+	}
 
 	if len(is.NamedImports) > 0 {
 		out += " { "
@@ -668,14 +678,26 @@ func (ie *IfExpression) String() string {
 	return out
 }
 
+// NamedArgument represents a `name: value` argument in a function call,
+// e.g. the `method: "GET"` in route(method: "GET").
+type NamedArgument struct {
+	Token lexer.Token // the argument name's IDENT token
+	Name  *Identifier
+	Value Expression
+}
+
+func (na *NamedArgument) TokenLiteral() string { return na.Token.Literal }
+func (na *NamedArgument) String() string       { return na.Name.Value + ": " + na.Value.String() }
+
 // CallExpression is an expression node that represents a function invocation.
 // It contains the function being called and the list of argument expressions.
 type CallExpression struct {
-	Token         lexer.Token // The '(' token or the '::' token
-	Function      Expression  // Identifier or FunctionLiteral
-	TypeArguments []string    // Generic type arguments e.g., f::<Number>()
-	Arguments     []Expression
-	RParenToken   lexer.Token
+	Token          lexer.Token // The '(' token or the '::' token
+	Function       Expression  // Identifier or FunctionLiteral
+	TypeArguments  []string    // Generic type arguments e.g., f::<Number>()
+	Arguments      []Expression
+	NamedArguments []*NamedArgument
+	RParenToken    lexer.Token
 }
 
 func (ce *CallExpression) expressionNode()      {}
@@ -696,14 +718,14 @@ func (ce *CallExpression) String() string {
 	
 	out += "("
 
-	if len(ce.Arguments) > 0 {
-		for i, arg := range ce.Arguments {
-			out += arg.String()
-			if i != len(ce.Arguments)-1 {
-				out += ", "
-			}
-		}
+	parts := []string{}
+	for _, arg := range ce.Arguments {
+		parts = append(parts, arg.String())
 	}
+	for _, na := range ce.NamedArguments {
+		parts = append(parts, na.String())
+	}
+	out += strings.Join(parts, ", ")
 
 	out += ")"
 

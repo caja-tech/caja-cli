@@ -1,0 +1,4 @@
+import { Hidden } from "second_types"
+
+let h: Hidden = Hidden { value: 1 }
+return h.value

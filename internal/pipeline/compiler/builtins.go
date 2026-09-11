@@ -248,6 +248,16 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			return fmt.Sprintf("caja_map_containsKey(%s, %s)", argStrs[0], argStrs[1]), nil
 		case "delete":
 			return fmt.Sprintf("caja_map_delete(%s, %s)", argStrs[0], argStrs[1]), nil
+		case "keys":
+			ctx.usedModules["sort"] = true
+			ctx.usedModules["cow_array"] = true
+			ctx.usedModules["map_keys_values"] = true
+			return fmt.Sprintf("caja_map_keys(%s)", argStrs[0]), nil
+		case "values":
+			ctx.usedModules["sort"] = true
+			ctx.usedModules["cow_array"] = true
+			ctx.usedModules["map_keys_values"] = true
+			return fmt.Sprintf("caja_map_values(%s)", argStrs[0]), nil
 		}
 
 	case "log":
@@ -934,6 +944,35 @@ func caja_map_delete[K comparable, V any](m *cajaMap[K, V], key K) *cajaMap[K, V
 	}
 	delete(newData, key)
 	return &cajaMap[K, V]{Data: newData}
+}
+`)
+	}
+
+	if ctx.usedModules["map_keys_values"] {
+		buf.WriteString(`
+func caja_map_keys[K comparable, V any](m *cajaMap[K, V]) *cajaArray[K] {
+	keys := make([]K, 0, len(m.Data))
+	for k := range m.Data {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+	})
+	return &cajaArray[K]{Data: keys}
+}
+func caja_map_values[K comparable, V any](m *cajaMap[K, V]) *cajaArray[V] {
+	keys := make([]K, 0, len(m.Data))
+	for k := range m.Data {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return fmt.Sprintf("%v", keys[i]) < fmt.Sprintf("%v", keys[j])
+	})
+	values := make([]V, len(keys))
+	for i, k := range keys {
+		values[i] = m.Data[k]
+	}
+	return &cajaArray[V]{Data: values}
 }
 `)
 	}

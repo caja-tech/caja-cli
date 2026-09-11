@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"caja-cli/internal/pipeline/analyzer"
 	"caja-cli/internal/pipeline/analyzer/symbol"
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/lexer"
@@ -76,7 +77,7 @@ func (h *CajaHandler) Completion(_ context.Context, params *lsp.CompletionParams
 	}
 
 	// Suggest Variables in Scope
-	vars := GetVariablesInScope(state.Prog, params.Position.Line, params.Position.Character)
+	vars := GetVariablesInScope(state.Prog, state.Analyzer, params.Position.Line, params.Position.Character)
 	for _, v := range vars {
 		items = append(items, lsp.CompletionItem{
 			Label: v,
@@ -201,7 +202,7 @@ func isDeclOf(stmt ast.Statement, name string) bool {
 	return false
 }
 
-func GetVariablesInScope(node ast.Node, line, col int) []string {
+func GetVariablesInScope(node ast.Node, a *analyzer.Analyzer, line, col int) []string {
 	var vars []string
 
 	// Helper to track uniqueness
@@ -219,7 +220,7 @@ func GetVariablesInScope(node ast.Node, line, col int) []string {
 				stmtToken := GetNodeToken(stmt)
 				// 1-indexed vs 0-indexed: line is 0-indexed, stmtToken.Line is 1-indexed
 				if stmtToken.Line < line+1 || (stmtToken.Line == line+1 && stmtToken.Column <= col+1) {
-					addDecl(stmt, &vars, seen)
+					addDecl(stmt, a, &vars, seen)
 				}
 				if containsPosition(stmt, line, col) {
 					walk(stmt)
@@ -229,7 +230,7 @@ func GetVariablesInScope(node ast.Node, line, col int) []string {
 			for _, stmt := range nodeType.Statements {
 				stmtToken := GetNodeToken(stmt)
 				if stmtToken.Line < line+1 || (stmtToken.Line == line+1 && stmtToken.Column <= col+1) {
-					addDecl(stmt, &vars, seen)
+					addDecl(stmt, a, &vars, seen)
 				}
 				if containsPosition(stmt, line, col) {
 					walk(stmt)
@@ -267,7 +268,7 @@ func GetVariablesInScope(node ast.Node, line, col int) []string {
 	return vars
 }
 
-func addDecl(stmt ast.Statement, vars *[]string, seen map[string]bool) {
+func addDecl(stmt ast.Statement, a *analyzer.Analyzer, vars *[]string, seen map[string]bool) {
 	switch s := stmt.(type) {
 	case *ast.LetStatement:
 		if s.Name != nil && !seen[s.Name.Value] {
@@ -290,7 +291,64 @@ func addDecl(stmt ast.Statement, vars *[]string, seen map[string]bool) {
 				seen[named.Value] = true
 			}
 		}
+		if s.IsWildcard {
+			addWildcardDecls(s, a, vars, seen)
+		}
 	}
+}
+
+// addWildcardDecls offers the members of a `import * from mod` statement as
+// bare completions. Unlike every other case in addDecl these names have no AST
+// node to read, so they come from the module's symbol table instead. Names two
+// wildcards both bound are skipped, since accepting one would only produce an
+// ambiguity error.
+func addWildcardDecls(s *ast.ImportStatement, a *analyzer.Analyzer, vars *[]string, seen map[string]bool) {
+	modSym, ok := wildcardModuleSymbol(s, a)
+	if !ok {
+		return
+	}
+
+	add := func(name string) {
+		if seen[name] || modSym.IsPrivate(name) {
+			return
+		}
+		if a != nil {
+			if _, ambiguous := a.AmbiguousWildcardModules(name); ambiguous {
+				return
+			}
+		}
+		*vars = append(*vars, name)
+		seen[name] = true
+	}
+
+	for name, sym := range modSym.GetSymbols() {
+		// Module aliases are never wildcard-imported (see bindWildcardImport).
+		if _, isModule := sym.(*symbol.ModuleSymbol); isModule {
+			continue
+		}
+		add(name)
+	}
+	for name := range modSym.GetTypes() {
+		add(name)
+	}
+}
+
+// wildcardModuleSymbol resolves the module a wildcard import refers to,
+// preferring the analyzer's own binding (which covers user modules as well as
+// builtins) and falling back to the standard-module table so completions still
+// work in a buffer that has not analyzed cleanly.
+func wildcardModuleSymbol(s *ast.ImportStatement, a *analyzer.Analyzer) (*symbol.ModuleSymbol, bool) {
+	if a != nil && s.Name != nil {
+		if entry, ok := a.GlobalScope()[s.Name.Value]; ok {
+			if modSym, isMod := entry.Sym.(*symbol.ModuleSymbol); isMod {
+				return modSym, true
+			}
+		}
+	}
+	if symbols, types, ok := symbol.GetStandardModule(s.Path); ok {
+		return symbol.NewModuleSymbol(s.Path, symbols, types, nil, nil, nil, s.Path), true
+	}
+	return nil, false
 }
 
 // We also need to map CompletionItemKind

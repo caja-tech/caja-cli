@@ -845,9 +845,20 @@ func (p *Parser) parseStatement() ast.Statement {
 func (p *Parser) parseImportStatement() *ast.ImportStatement {
 	statement := &ast.ImportStatement{Token: p.currToken}
 
-	if p.peekToken.Type == lexer.LBRACE {
+	if p.peekToken.Type == lexer.ASTERISK {
+		// `import * from mod` — '*' and '{...}' are alternatives, never combined.
+		p.nextToken() // move to '*'
+		statement.IsWildcard = true
+
+		// 'from' is not a keyword or token type of its own; it is matched as a
+		// literal IDENT, the same way the named-import branch below does.
+		if !p.expectPeek(lexer.IDENT) || p.currToken.Literal != "from" {
+			p.reportError(p.currToken, "expected 'from' after wildcard import")
+			return nil
+		}
+	} else if p.peekToken.Type == lexer.LBRACE {
 		p.nextToken() // move to '{'
-		
+
 		for p.peekToken.Type != lexer.RBRACE && p.peekToken.Type != lexer.EOF {
 			p.nextToken()
 			if p.currToken.Type == lexer.COMMA {
@@ -1382,6 +1393,74 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	return list
 }
 
+// parseCallArgumentList is parseExpressionList's counterpart for call sites
+// that also accept named arguments (name: value), e.g. route(method: "GET").
+// Positional arguments must come before named ones; a positional argument
+// appearing after a named one is a syntax error, keeping the resolution
+// rule simple ("named args fill whatever positionals left open").
+func (p *Parser) parseCallArgumentList(end lexer.TokenType) ([]ast.Expression, []*ast.NamedArgument) {
+	var positional []ast.Expression
+	var named []*ast.NamedArgument
+
+	if p.peekToken.Type == end {
+		p.nextToken()
+		return positional, named
+	}
+
+	p.nextToken()
+	if !p.parseCallArgument(&positional, &named) {
+		return nil, nil
+	}
+
+	for p.peekToken.Type == lexer.COMMA {
+		p.nextToken() // Move to the comma
+		p.nextToken() // Move past the comma to the next argument
+
+		if !p.parseCallArgument(&positional, &named) {
+			return nil, nil
+		}
+	}
+
+	if !p.expectPeek(end) {
+		p.reportError(p.peekToken, fmt.Sprintf("expected '%s', got %s", end, p.currToken.Type))
+		return nil, nil
+	}
+
+	return positional, named
+}
+
+// parseCallArgument parses a single call argument (with p.currToken on its
+// first token) as either positional or named ("name: value"), appending it
+// to the corresponding slice. Returns false (having already reported an
+// error) if a positional argument follows a named one, or if the argument
+// expression itself fails to parse.
+func (p *Parser) parseCallArgument(positional *[]ast.Expression, named *[]*ast.NamedArgument) bool {
+	if p.currToken.Type == lexer.IDENT && p.peekToken.Type == lexer.COLON {
+		nameToken := p.currToken
+		nameIdent := &ast.Identifier{Token: nameToken, Value: nameToken.Literal}
+		p.nextToken() // move onto ':'
+		p.nextToken() // move past ':' onto the value's first token
+		val := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+		if val == nil {
+			return false
+		}
+		*named = append(*named, &ast.NamedArgument{Token: nameToken, Name: nameIdent, Value: val})
+		return true
+	}
+
+	if len(*named) > 0 {
+		p.reportError(p.currToken, "syntax error: positional arguments must come before named arguments")
+		return false
+	}
+
+	val := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+	if val == nil {
+		return false
+	}
+	*positional = append(*positional, val)
+	return true
+}
+
 // parseExpression is the core of the Pratt parser. It looks up a prefix parse
 // function for the current token, then repeatedly applies infix parse functions
 // as long as the next token's precedence exceeds the given precedence level,
@@ -1836,7 +1915,7 @@ func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
 // expression and its parsed arguments.
 func (p *Parser) parseFunctionCallExpression(function ast.Expression) ast.Expression {
 	exp := &ast.CallExpression{Token: p.currToken, Function: function}
-	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	exp.Arguments, exp.NamedArguments = p.parseCallArgumentList(lexer.RPAREN)
 	exp.RParenToken = p.currToken
 	return exp
 }
@@ -1856,7 +1935,7 @@ func (p *Parser) parseTurbofishExpression(left ast.Expression) ast.Expression {
 	if p.peekToken.Type == lexer.LPAREN {
 		p.nextToken() // move to '('
 		exp := &ast.CallExpression{Token: tok, Function: left, TypeArguments: typeArgs}
-		exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+		exp.Arguments, exp.NamedArguments = p.parseCallArgumentList(lexer.RPAREN)
 		exp.RParenToken = p.currToken
 		return exp
 	}
