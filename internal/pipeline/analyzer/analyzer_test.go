@@ -3961,6 +3961,34 @@ let handle = fn(req: Request) -> Response {
 `,
 		},
 		{
+			// The time module exports Instant/Duration types alongside its
+			// functions, so a wildcard of it must bind both halves.
+			name: "Wildcard imports the time module's values and types",
+			input: `import * from "time"
+let wait: Duration = seconds(2)
+let at: Instant = now()
+let secs = toSeconds(wait)
+`,
+		},
+		{
+			// 'format' is exported by both time and string — a real collision
+			// between two builtin modules, not a contrived one.
+			name: "Colliding name across time and string errors at the use site",
+			input: `import * from "time"
+import * from "string"
+let s = format(now(), "2006")
+`,
+			expectedError: "semantic error: ambiguous reference to 'format': wildcard-imported from 'time' and 'string'. Suggestion: qualify it (time.format or string.format)",
+		},
+		{
+			name: "Colliding time/string name stays legal while unused",
+			input: `import * from "time"
+import * from "string"
+let shouted = toUpper("caja")
+let wait = seconds(2)
+`,
+		},
+		{
 			name:          "Wildcard from an unknown module still reports the import failure",
 			input:         `import * from "does_not_exist"`,
 			expectedError: "semantic error: failed to import 'does_not_exist': module 'does_not_exist' not found in local paths or node_modules",
