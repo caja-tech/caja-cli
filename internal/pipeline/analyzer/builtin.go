@@ -60,8 +60,20 @@ func (a *Analyzer) analyzeBuiltinCall(moduleName string, functionName string, n 
 		return a.analyzeTimeAddFunction(n), true
 	case "time.sub":
 		return a.analyzeTimeSubFunction(n), true
-	case "time.milliseconds", "time.seconds":
+	case "time.milliseconds", "time.seconds", "time.minutes", "time.hours":
 		return a.analyzeTimeDurationConstructorFunction(functionName, n), true
+	case "time.parse":
+		return a.analyzeTimeParseFunction(n), true
+	case "time.parseDuration":
+		return a.analyzeTimeParseDurationFunction(n), true
+	case "time.unix":
+		return a.analyzeTimeUnixFunction(n), true
+	case "time.unixSeconds", "time.unixMilli", "time.hour", "time.minute", "time.second", "time.nanosecond":
+		return a.analyzeTimeInstantToNumberFunction(functionName, n), true
+	case "time.before", "time.after", "time.equal":
+		return a.analyzeTimeInstantComparisonFunction(functionName, n), true
+	case "time.toMilliseconds", "time.toSeconds", "time.toMinutes", "time.toHours":
+		return a.analyzeTimeDurationToNumberFunction(functionName, n), true
 	case "math.abs", "math.sqrt", "math.floor", "math.ceil", "math.round":
 		return a.analyzeMathOneArgFunction(functionName, n), true
 	case "math.rand":
@@ -477,6 +489,32 @@ func (a *Analyzer) analyzeDateNewFunction(n *ast.CallExpression) symbol.Symbol {
 	return symbol.NewBasicSymbol(environment.DATE_OBJ)
 }
 
+// checkTimeArgNotNullable reports a type error and returns true if sym is a
+// Nullable value — mirrors checkBrowserArgNotNullable exactly (see its doc
+// comment for why NullableSymbol.Type() forwarding makes a plain Type()
+// check unsound). Needed because time.parse (Instant?) is the first
+// Nullable-producing function in this module; every time.* argument that
+// expects a plain Instant/Duration must reject an unnarrowed Nullable here.
+func (a *Analyzer) checkTimeArgNotNullable(sym symbol.Symbol, n *ast.CallExpression, position, functionName, expectedType string) bool {
+	if _, ok := sym.(*symbol.NullableSymbol); ok {
+		a.reportError(n.Token, fmt.Sprintf("type error: %s argument to '%s' must be a non-nullable %s, got %s — use cast.to(value, fallback) to unwrap it first", position, functionName, expectedType, sym.String()))
+		return true
+	}
+	return false
+}
+
+// checkTimeArgType reports a type error unless sym is objType (or ANY_OBJ),
+// after first rejecting a Nullable sym via checkTimeArgNotNullable — mirrors
+// checkBrowserArgType.
+func (a *Analyzer) checkTimeArgType(sym symbol.Symbol, n *ast.CallExpression, position, functionName, typeName string, objType environment.ObjectType) {
+	if a.checkTimeArgNotNullable(sym, n, position, functionName, typeName) {
+		return
+	}
+	if sym.Type() != objType && sym.Type() != environment.ANY_OBJ {
+		a.reportError(n.Token, fmt.Sprintf("type error: %s argument to '%s' must be %s, got %s", position, functionName, typeName, sym.Type()))
+	}
+}
+
 // analyzeTimeNowFunction checks the arity for the builtin time 'now' function, returning an INSTANT.
 func (a *Analyzer) analyzeTimeNowFunction(n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 0 {
@@ -496,10 +534,7 @@ func (a *Analyzer) analyzeTimeSleepFunction(n *ast.CallExpression) symbol.Symbol
 	}
 
 	durationSymbol := a.analyze(n.Arguments[0])
-
-	if durationSymbol.Type() != environment.DURATION_OBJ && durationSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'sleep' must be Duration, got %s", durationSymbol.Type()))
-	}
+	a.checkTimeArgType(durationSymbol, n, "first", "sleep", "Duration", environment.DURATION_OBJ)
 
 	return symbol.NewBasicSymbol(environment.NULL_OBJ)
 }
@@ -512,10 +547,7 @@ func (a *Analyzer) analyzeTimeSinceFunction(n *ast.CallExpression) symbol.Symbol
 	}
 
 	instantSymbol := a.analyze(n.Arguments[0])
-
-	if instantSymbol.Type() != environment.INSTANT_OBJ && instantSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'since' must be Instant, got %s", instantSymbol.Type()))
-	}
+	a.checkTimeArgType(instantSymbol, n, "first", "since", "Instant", environment.INSTANT_OBJ)
 
 	return symbol.NewBasicSymbol(environment.DURATION_OBJ)
 }
@@ -529,13 +561,8 @@ func (a *Analyzer) analyzeTimeFormatFunction(n *ast.CallExpression) symbol.Symbo
 
 	instantSymbol := a.analyze(n.Arguments[0])
 	layoutSymbol := a.analyze(n.Arguments[1])
-
-	if instantSymbol.Type() != environment.INSTANT_OBJ && instantSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'format' must be Instant, got %s", instantSymbol.Type()))
-	}
-	if layoutSymbol.Type() != environment.STRING_OBJ && layoutSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'format' must be String, got %s", layoutSymbol.Type()))
-	}
+	a.checkTimeArgType(instantSymbol, n, "first", "format", "Instant", environment.INSTANT_OBJ)
+	a.checkTimeArgType(layoutSymbol, n, "second", "format", "String", environment.STRING_OBJ)
 
 	return symbol.NewBasicSymbol(environment.STRING_OBJ)
 }
@@ -549,13 +576,8 @@ func (a *Analyzer) analyzeTimeAddFunction(n *ast.CallExpression) symbol.Symbol {
 
 	instantSymbol := a.analyze(n.Arguments[0])
 	durationSymbol := a.analyze(n.Arguments[1])
-
-	if instantSymbol.Type() != environment.INSTANT_OBJ && instantSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'add' must be Instant, got %s", instantSymbol.Type()))
-	}
-	if durationSymbol.Type() != environment.DURATION_OBJ && durationSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'add' must be Duration, got %s", durationSymbol.Type()))
-	}
+	a.checkTimeArgType(instantSymbol, n, "first", "add", "Instant", environment.INSTANT_OBJ)
+	a.checkTimeArgType(durationSymbol, n, "second", "add", "Duration", environment.DURATION_OBJ)
 
 	return symbol.NewBasicSymbol(environment.INSTANT_OBJ)
 }
@@ -569,19 +591,14 @@ func (a *Analyzer) analyzeTimeSubFunction(n *ast.CallExpression) symbol.Symbol {
 
 	instant1Symbol := a.analyze(n.Arguments[0])
 	instant2Symbol := a.analyze(n.Arguments[1])
-
-	if instant1Symbol.Type() != environment.INSTANT_OBJ && instant1Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to 'sub' must be Instant, got %s", instant1Symbol.Type()))
-	}
-	if instant2Symbol.Type() != environment.INSTANT_OBJ && instant2Symbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: second argument to 'sub' must be Instant, got %s", instant2Symbol.Type()))
-	}
+	a.checkTimeArgType(instant1Symbol, n, "first", "sub", "Instant", environment.INSTANT_OBJ)
+	a.checkTimeArgType(instant2Symbol, n, "second", "sub", "Instant", environment.INSTANT_OBJ)
 
 	return symbol.NewBasicSymbol(environment.DURATION_OBJ)
 }
 
-// analyzeTimeDurationConstructorFunction checks the arity and type for the builtin time 'milliseconds'/'seconds'
-// functions, returning a DURATION.
+// analyzeTimeDurationConstructorFunction checks the arity and type for the builtin time
+// 'milliseconds'/'seconds'/'minutes'/'hours' functions, returning a DURATION.
 func (a *Analyzer) analyzeTimeDurationConstructorFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
 	if len(n.Arguments) != 1 {
 		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", functionName, len(n.Arguments)))
@@ -589,12 +606,107 @@ func (a *Analyzer) analyzeTimeDurationConstructorFunction(functionName string, n
 	}
 
 	numSymbol := a.analyze(n.Arguments[0])
-
-	if numSymbol.Type() != environment.NUMBER_OBJ && numSymbol.Type() != environment.ANY_OBJ {
-		a.reportError(n.Token, fmt.Sprintf("type error: first argument to '%s' must be Number, got %s", functionName, numSymbol.Type()))
-	}
+	a.checkTimeArgType(numSymbol, n, "first", functionName, "Number", environment.NUMBER_OBJ)
 
 	return symbol.NewBasicSymbol(environment.DURATION_OBJ)
+}
+
+// analyzeTimeParseFunction checks the arity and type for the builtin time
+// 'parse' function, returning an Instant? (Nullable) since an invalid
+// layout/value pairing can fail to parse — same Nullable treatment as
+// browser.querySelector (see analyzeBrowserQuerySelectorFunction).
+func (a *Analyzer) analyzeTimeParseFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'parse', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	layoutSymbol := a.analyze(n.Arguments[0])
+	valueSymbol := a.analyze(n.Arguments[1])
+	a.checkTimeArgType(layoutSymbol, n, "first", "parse", "String", environment.STRING_OBJ)
+	a.checkTimeArgType(valueSymbol, n, "second", "parse", "String", environment.STRING_OBJ)
+
+	return &symbol.NullableSymbol{Underlying: symbol.NewBasicSymbol(environment.INSTANT_OBJ)}
+}
+
+// analyzeTimeParseDurationFunction checks the arity and type for the builtin
+// time 'parseDuration' function, returning a Duration? (Nullable) since an
+// unparseable duration string (e.g. missing unit, malformed number) can fail
+// — same Nullable treatment as analyzeTimeParseFunction above.
+func (a *Analyzer) analyzeTimeParseDurationFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for 'parseDuration', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	strSymbol := a.analyze(n.Arguments[0])
+	a.checkTimeArgType(strSymbol, n, "first", "parseDuration", "String", environment.STRING_OBJ)
+
+	return &symbol.NullableSymbol{Underlying: symbol.NewBasicSymbol(environment.DURATION_OBJ)}
+}
+
+// analyzeTimeUnixFunction checks the arity and type for the builtin time
+// 'unix' function, returning an INSTANT.
+func (a *Analyzer) analyzeTimeUnixFunction(n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for 'unix', got %d", len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	secSymbol := a.analyze(n.Arguments[0])
+	nsecSymbol := a.analyze(n.Arguments[1])
+	a.checkTimeArgType(secSymbol, n, "first", "unix", "Number", environment.NUMBER_OBJ)
+	a.checkTimeArgType(nsecSymbol, n, "second", "unix", "Number", environment.NUMBER_OBJ)
+
+	return symbol.NewBasicSymbol(environment.INSTANT_OBJ)
+}
+
+// analyzeTimeInstantToNumberFunction checks the arity and type for the
+// builtin time 'unixSeconds'/'unixMilli'/'hour'/'minute'/'second'/
+// 'nanosecond' functions, all of which take a single Instant and return a
+// NUMBER — one helper for all six, mirroring analyzeDateComponentFunction.
+func (a *Analyzer) analyzeTimeInstantToNumberFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	instantSymbol := a.analyze(n.Arguments[0])
+	a.checkTimeArgType(instantSymbol, n, "first", functionName, "Instant", environment.INSTANT_OBJ)
+
+	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
+}
+
+// analyzeTimeInstantComparisonFunction checks the arity and type for the
+// builtin time 'before'/'after'/'equal' functions, all of which take two
+// Instants and return a BOOLEAN.
+func (a *Analyzer) analyzeTimeInstantComparisonFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 2 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 2 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	aSymbol := a.analyze(n.Arguments[0])
+	bSymbol := a.analyze(n.Arguments[1])
+	a.checkTimeArgType(aSymbol, n, "first", functionName, "Instant", environment.INSTANT_OBJ)
+	a.checkTimeArgType(bSymbol, n, "second", functionName, "Instant", environment.INSTANT_OBJ)
+
+	return symbol.NewBasicSymbol(environment.BOOLEAN_OBJ)
+}
+
+// analyzeTimeDurationToNumberFunction checks the arity and type for the
+// builtin time 'toMilliseconds'/'toSeconds'/'toMinutes'/'toHours' functions,
+// all of which take a single Duration and return a NUMBER.
+func (a *Analyzer) analyzeTimeDurationToNumberFunction(functionName string, n *ast.CallExpression) symbol.Symbol {
+	if len(n.Arguments) != 1 {
+		a.reportError(n.Token, fmt.Sprintf("arity error: expected 1 arguments for '%s', got %d", functionName, len(n.Arguments)))
+		return symbol.AnySymbol()
+	}
+
+	durationSymbol := a.analyze(n.Arguments[0])
+	a.checkTimeArgType(durationSymbol, n, "first", functionName, "Duration", environment.DURATION_OBJ)
+
+	return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 }
 
 // analyzeMathZeroArgFunction checks the arity and type for 0-argument math functions, returning a NUMBER.
