@@ -112,6 +112,39 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 			"to": NewFunctionSymbol(moduleName, "to", []string{"value", "fallback"}, []string{"T", "R"}, 2, []Symbol{NewGenericSymbol("T"), NewGenericSymbol("R")}, NewGenericSymbol("R")),
 		}, nil, true
 
+	case "time":
+		return map[string]Symbol{
+				"now":            NewBuiltinSymbol(moduleName, 0, "now() -> Instant"),
+				"sleep":          NewBuiltinSymbol(moduleName, 1, "sleep(d: Duration) -> Nothing", "d: Duration"),
+				"since":          NewBuiltinSymbol(moduleName, 1, "since(t: Instant) -> Duration", "t: Instant"),
+				"format":         NewBuiltinSymbol(moduleName, 2, "format(t: Instant, layout: String) -> String", "t: Instant", "layout: String"),
+				"add":            NewBuiltinSymbol(moduleName, 2, "add(t: Instant, d: Duration) -> Instant", "t: Instant", "d: Duration"),
+				"sub":            NewBuiltinSymbol(moduleName, 2, "sub(a: Instant, b: Instant) -> Duration", "a: Instant", "b: Instant"),
+				"milliseconds":   NewBuiltinSymbol(moduleName, 1, "milliseconds(n: Number) -> Duration", "n: Number"),
+				"seconds":        NewBuiltinSymbol(moduleName, 1, "seconds(n: Number) -> Duration", "n: Number"),
+				"parse":          NewBuiltinSymbol(moduleName, 2, "parse(layout: String, value: String) -> Instant?", "layout: String", "value: String"),
+				"parseDuration":  NewBuiltinSymbol(moduleName, 1, "parseDuration(s: String) -> Duration?", "s: String"),
+				"unix":           NewBuiltinSymbol(moduleName, 2, "unix(sec: Number, nsec: Number) -> Instant", "sec: Number", "nsec: Number"),
+				"unixSeconds":    NewBuiltinSymbol(moduleName, 1, "unixSeconds(t: Instant) -> Number", "t: Instant"),
+				"unixMilli":      NewBuiltinSymbol(moduleName, 1, "unixMilli(t: Instant) -> Number", "t: Instant"),
+				"before":         NewBuiltinSymbol(moduleName, 2, "before(a: Instant, b: Instant) -> Boolean", "a: Instant", "b: Instant"),
+				"after":          NewBuiltinSymbol(moduleName, 2, "after(a: Instant, b: Instant) -> Boolean", "a: Instant", "b: Instant"),
+				"equal":          NewBuiltinSymbol(moduleName, 2, "equal(a: Instant, b: Instant) -> Boolean", "a: Instant", "b: Instant"),
+				"hour":           NewBuiltinSymbol(moduleName, 1, "hour(t: Instant) -> Number", "t: Instant"),
+				"minute":         NewBuiltinSymbol(moduleName, 1, "minute(t: Instant) -> Number", "t: Instant"),
+				"second":         NewBuiltinSymbol(moduleName, 1, "second(t: Instant) -> Number", "t: Instant"),
+				"nanosecond":     NewBuiltinSymbol(moduleName, 1, "nanosecond(t: Instant) -> Number", "t: Instant"),
+				"minutes":        NewBuiltinSymbol(moduleName, 1, "minutes(n: Number) -> Duration", "n: Number"),
+				"hours":          NewBuiltinSymbol(moduleName, 1, "hours(n: Number) -> Duration", "n: Number"),
+				"toMilliseconds": NewBuiltinSymbol(moduleName, 1, "toMilliseconds(d: Duration) -> Number", "d: Duration"),
+				"toSeconds":      NewBuiltinSymbol(moduleName, 1, "toSeconds(d: Duration) -> Number", "d: Duration"),
+				"toMinutes":      NewBuiltinSymbol(moduleName, 1, "toMinutes(d: Duration) -> Number", "d: Duration"),
+				"toHours":        NewBuiltinSymbol(moduleName, 1, "toHours(d: Duration) -> Number", "d: Duration"),
+			}, map[string]Symbol{
+				"Instant":  NewBasicSymbol(environment.INSTANT_OBJ),
+				"Duration": NewBasicSymbol(environment.DURATION_OBJ),
+			}, true
+
 	case "http":
 		return getHTTPStandardModule(moduleName)
 	case "page":

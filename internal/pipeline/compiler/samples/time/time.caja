@@ -1,0 +1,42 @@
+import "time" as time
+import cast
+
+let start: time.Instant = time.now()
+time.sleep(time.milliseconds(10))
+let elapsed: time.Duration = time.since(start)
+let formatted = time.format(start, "2006-01-02 15:04:05")
+let later = time.add(start, time.seconds(5))
+let gap = time.sub(later, start)
+
+let parsed = time.parse("2006-01-02", "2024-01-01")
+let safeParsed: time.Instant = cast.to(parsed, start)
+let invalidParsed = time.parse("2006-01-02", "not-a-date")
+let fallbackParsed: time.Instant = cast.to(invalidParsed, start)
+
+let parsedDuration = time.parseDuration("1h30m")
+let safeParsedDuration: time.Duration = cast.to(parsedDuration, elapsed)
+let invalidParsedDuration = time.parseDuration("not-a-duration")
+let fallbackParsedDuration: time.Duration = cast.to(invalidParsedDuration, elapsed)
+
+let epoch: time.Instant = time.unix(0, 0)
+let unixSecs = time.unixSeconds(start)
+let unixMs = time.unixMilli(start)
+
+let isBefore = time.before(epoch, start)
+let isAfter = time.after(start, epoch)
+let isSame = time.equal(start, start)
+
+let h = time.hour(start)
+let m = time.minute(start)
+let s = time.second(start)
+let ns = time.nanosecond(start)
+
+let twoMinutes: time.Duration = time.minutes(2)
+let oneHour: time.Duration = time.hours(1)
+
+let gapMs = time.toMilliseconds(gap)
+let gapS = time.toSeconds(gap)
+let gapM = time.toMinutes(gap)
+let gapH = time.toHours(gap)
+
+return formatted

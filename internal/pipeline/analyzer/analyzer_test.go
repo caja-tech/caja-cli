@@ -1441,6 +1441,235 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			expectedErrors: []string{"type error: first argument to 'new' must be Number, got String"},
 		},
 		{
+			name:  "time.now() works with correct types",
+			input: "import time\nreturn time.now()",
+		},
+		{
+			name:           "time.now() rejects unexpected arguments",
+			input:          "import time\nreturn time.now(1)",
+			expectedErrors: []string{"arity error: expected 0 arguments for 'now', got 1"},
+		},
+		{
+			name:  "time.sleep() works with correct types",
+			input: "import time\nreturn time.sleep(time.seconds(1))",
+		},
+		{
+			name:           "time.sleep() rejects missing arguments",
+			input:          "import time\nreturn time.sleep()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'sleep', got 0"},
+		},
+		{
+			name:           "time.sleep() rejects mismatched types",
+			input:          "import time\nreturn time.sleep(5)",
+			expectedErrors: []string{"type error: first argument to 'sleep' must be Duration, got Number"},
+		},
+		{
+			name:  "time.since() works with correct types",
+			input: "import time\nreturn time.since(time.now())",
+		},
+		{
+			name:           "time.since() rejects mismatched types",
+			input:          "import time\nreturn time.since(5)",
+			expectedErrors: []string{"type error: first argument to 'since' must be Instant, got Number"},
+		},
+		{
+			name:  "time.format() works with correct types",
+			input: "import time\nreturn time.format(time.now(), \"2006-01-02 15:04:05\")",
+		},
+		{
+			name:           "time.format() rejects mismatched first argument",
+			input:          "import time\nreturn time.format(5, \"x\")",
+			expectedErrors: []string{"type error: first argument to 'format' must be Instant, got Number"},
+		},
+		{
+			name:           "time.format() rejects mismatched second argument",
+			input:          "import time\nreturn time.format(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'format' must be String, got Number"},
+		},
+		{
+			name:           "time.format() rejects an unnarrowed Nullable Instant (time.parse's result)",
+			input:          "import time\nlet p = time.parse(\"2006-01-02\", \"2024-01-01\")\nreturn time.format(p, \"2006-01-02\")",
+			expectedErrors: []string{"type error: first argument to 'format' must be a non-nullable Instant, got Instant? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "time.add() works with correct types",
+			input: "import time\nreturn time.add(time.now(), time.seconds(1))",
+		},
+		{
+			name:           "time.add() rejects mismatched second argument",
+			input:          "import time\nreturn time.add(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'add' must be Duration, got Number"},
+		},
+		{
+			name:           "time.add() rejects an unnarrowed Nullable Instant (time.parse's result)",
+			input:          "import time\nlet p = time.parse(\"2006-01-02\", \"2024-01-01\")\nreturn time.add(p, time.seconds(1))",
+			expectedErrors: []string{"type error: first argument to 'add' must be a non-nullable Instant, got Instant? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:           "time.add() rejects an unnarrowed Nullable Duration (time.parseDuration's result)",
+			input:          "import time\nlet d = time.parseDuration(\"1h\")\nreturn time.add(time.now(), d)",
+			expectedErrors: []string{"type error: second argument to 'add' must be a non-nullable Duration, got Duration? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "time.sub() works with correct types",
+			input: "import time\nreturn time.sub(time.now(), time.now())",
+		},
+		{
+			name:           "time.sub() rejects mismatched second argument",
+			input:          "import time\nreturn time.sub(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'sub' must be Instant, got Number"},
+		},
+		{
+			name:           "time.sub() rejects an unnarrowed Nullable Instant in its first argument (time.parse's result)",
+			input:          "import time\nlet p = time.parse(\"2006-01-02\", \"2024-01-01\")\nreturn time.sub(p, time.now())",
+			expectedErrors: []string{"type error: first argument to 'sub' must be a non-nullable Instant, got Instant? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:           "time.sub() rejects an unnarrowed Nullable Instant in its second argument (time.parse's result)",
+			input:          "import time\nlet p = time.parse(\"2006-01-02\", \"2024-01-01\")\nreturn time.sub(time.now(), p)",
+			expectedErrors: []string{"type error: second argument to 'sub' must be a non-nullable Instant, got Instant? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "time.milliseconds() works with correct types",
+			input: "import time\nreturn time.milliseconds(500)",
+		},
+		{
+			name:           "time.milliseconds() rejects mismatched types",
+			input:          "import time\nreturn time.milliseconds(\"x\")",
+			expectedErrors: []string{"type error: first argument to 'milliseconds' must be Number, got String"},
+		},
+		{
+			name:  "time.seconds() works with correct types",
+			input: "import time\nreturn time.seconds(5)",
+		},
+		{
+			name:           "time.seconds() rejects mismatched types",
+			input:          "import time\nreturn time.seconds(\"x\")",
+			expectedErrors: []string{"type error: first argument to 'seconds' must be Number, got String"},
+		},
+		{
+			name:  "time.Instant type annotation resolves",
+			input: "import time\nlet t: time.Instant = time.now()\nreturn t",
+		},
+		{
+			name:  "time.Duration type annotation resolves",
+			input: "import time\nlet d: time.Duration = time.seconds(1)\nreturn d",
+		},
+		{
+			name:  "time.parse() works with correct types",
+			input: "import time\nreturn time.parse(\"2006-01-02\", \"2024-01-01\")",
+		},
+		{
+			name:           "time.parse() rejects mismatched first argument",
+			input:          "import time\nreturn time.parse(5, \"x\")",
+			expectedErrors: []string{"type error: first argument to 'parse' must be String, got Number"},
+		},
+		{
+			name:  "time.parse()'s Instant? type annotation resolves",
+			input: "import time\nlet t: time.Instant? = time.parse(\"2006-01-02\", \"2024-01-01\")\nreturn t",
+		},
+		{
+			name:           "time.parse() rejects a missing argument",
+			input:          "import time\nreturn time.parse(\"2006-01-02\")",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'parse', got 1"},
+		},
+		{
+			name:           "time.since() rejects an unnarrowed Nullable Instant (time.parse's result)",
+			input:          "import time\nlet p = time.parse(\"2006-01-02\", \"2024-01-01\")\nreturn time.since(p)",
+			expectedErrors: []string{"type error: first argument to 'since' must be a non-nullable Instant, got Instant? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "time.parseDuration() works with correct types",
+			input: "import time\nreturn time.parseDuration(\"1h30m\")",
+		},
+		{
+			name:           "time.parseDuration() rejects mismatched types",
+			input:          "import time\nreturn time.parseDuration(5)",
+			expectedErrors: []string{"type error: first argument to 'parseDuration' must be String, got Number"},
+		},
+		{
+			name:  "time.parseDuration()'s Duration? type annotation resolves",
+			input: "import time\nlet d: time.Duration? = time.parseDuration(\"1h30m\")\nreturn d",
+		},
+		{
+			name:           "time.parseDuration() rejects a missing argument",
+			input:          "import time\nreturn time.parseDuration()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'parseDuration', got 0"},
+		},
+		{
+			name:           "time.sleep() rejects an unnarrowed Nullable Duration (time.parseDuration's result)",
+			input:          "import time\nlet d = time.parseDuration(\"1h30m\")\nreturn time.sleep(d)",
+			expectedErrors: []string{"type error: first argument to 'sleep' must be a non-nullable Duration, got Duration? — use cast.to(value, fallback) to unwrap it first"},
+		},
+		{
+			name:  "time.unix() works with correct types",
+			input: "import time\nreturn time.unix(0, 0)",
+		},
+		{
+			name:           "time.unix() rejects mismatched second argument",
+			input:          "import time\nreturn time.unix(0, \"x\")",
+			expectedErrors: []string{"type error: second argument to 'unix' must be Number, got String"},
+		},
+		{
+			name:           "time.unix() rejects a missing argument",
+			input:          "import time\nreturn time.unix(0)",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'unix', got 1"},
+		},
+		{
+			name:  "time.hour() works with correct types",
+			input: "import time\nreturn time.hour(time.now())",
+		},
+		{
+			name:           "time.hour() rejects mismatched types",
+			input:          "import time\nreturn time.hour(5)",
+			expectedErrors: []string{"type error: first argument to 'hour' must be Instant, got Number"},
+		},
+		{
+			name:           "time.hour() rejects a missing argument (shared with unixSeconds/unixMilli/minute/second/nanosecond)",
+			input:          "import time\nreturn time.hour()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'hour', got 0"},
+		},
+		{
+			name:  "time.unixMilli() works with correct types",
+			input: "import time\nreturn time.unixMilli(time.now())",
+		},
+		{
+			name:  "time.before() works with correct types",
+			input: "import time\nreturn time.before(time.now(), time.now())",
+		},
+		{
+			name:           "time.before() rejects mismatched second argument",
+			input:          "import time\nreturn time.before(time.now(), 5)",
+			expectedErrors: []string{"type error: second argument to 'before' must be Instant, got Number"},
+		},
+		{
+			name:           "time.before() rejects a missing argument (shared with after/equal)",
+			input:          "import time\nreturn time.before(time.now())",
+			expectedErrors: []string{"arity error: expected 2 arguments for 'before', got 1"},
+		},
+		{
+			name:  "time.minutes() works with correct types",
+			input: "import time\nreturn time.minutes(2)",
+		},
+		{
+			name:  "time.hours() works with correct types",
+			input: "import time\nreturn time.hours(1)",
+		},
+		{
+			name:  "time.toMilliseconds() works with correct types",
+			input: "import time\nreturn time.toMilliseconds(time.seconds(1))",
+		},
+		{
+			name:           "time.toMilliseconds() rejects mismatched types",
+			input:          "import time\nreturn time.toMilliseconds(5)",
+			expectedErrors: []string{"type error: first argument to 'toMilliseconds' must be Duration, got Number"},
+		},
+		{
+			name:           "time.toMilliseconds() rejects a missing argument (shared with toSeconds/toMinutes/toHours)",
+			input:          "import time\nreturn time.toMilliseconds()",
+			expectedErrors: []string{"arity error: expected 1 arguments for 'toMilliseconds', got 0"},
+		},
+		{
 			name:  "abs() works with correct types",
 			input: "import math\nreturn math.abs(-10.5)",
 		},
