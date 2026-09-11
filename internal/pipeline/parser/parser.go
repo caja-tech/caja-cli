@@ -187,12 +187,237 @@ func (p *Parser) parseNumberLiteral() ast.Expression {
 	return literal
 }
 
-// parseStringLiteral returns a StringLiteral expression node for the current token.
+// parseStringLiteral returns a StringLiteral expression node for the current
+// token, or — if the raw literal contains a backslash escape or "${"
+// (Kotlin-style string interpolation) — runs the full escape+interpolation
+// scan and returns either a decoded StringLiteral (no embedded expressions
+// found) or an InterpolatedStringLiteral. A plain literal with neither
+// anywhere in it parses exactly as before, byte for byte — this is a cheap
+// fast path, not just an optimization: the overwhelming majority of string
+// literals in any program have no escapes or interpolation at all.
 func (p *Parser) parseStringLiteral() ast.Expression {
-	return &ast.StringLiteral{
-		Token: p.currToken,
-		Value: p.currToken.Literal,
+	token := p.currToken
+	raw := token.Literal
+
+	if !strings.Contains(raw, "\\") && !strings.Contains(raw, "${") {
+		return &ast.StringLiteral{Token: token, Value: raw}
 	}
+
+	segments, hasExpr, ok := p.scanStringLiteralContent(token)
+	if !ok {
+		return nil
+	}
+	if !hasExpr {
+		value := ""
+		if len(segments) > 0 {
+			value = segments[0].Text
+		}
+		return &ast.StringLiteral{Token: token, Value: value}
+	}
+	return &ast.InterpolatedStringLiteral{Token: token, Segments: segments}
+}
+
+// decodeEscape decodes a single escape sequence at the start of s (which
+// must begin with '\'), returning the decoded text, how many raw bytes it
+// consumed (including the backslash), and whether it was recognized.
+// Matches Kotlin's own escape set exactly: \t \b \n \r \' \" \\ \$, plus
+// \uXXXX (exactly 4 hex digits) for an arbitrary Unicode code point. An
+// unrecognized escape returns ok=false — Caja is strict here, matching
+// Kotlin/Go's own compile-time rejection of unknown escapes rather than
+// silently passing an unrecognized "\x" through as two literal characters.
+func decodeEscape(s string) (decoded string, consumed int, ok bool) {
+	if len(s) < 2 {
+		return "", len(s), false
+	}
+	switch s[1] {
+	case 't':
+		return "\t", 2, true
+	case 'b':
+		return "\b", 2, true
+	case 'n':
+		return "\n", 2, true
+	case 'r':
+		return "\r", 2, true
+	case '\'':
+		return "'", 2, true
+	case '"':
+		return "\"", 2, true
+	case '\\':
+		return "\\", 2, true
+	case '$':
+		return "$", 2, true
+	case 'u':
+		if len(s) < 6 {
+			return "", len(s), false
+		}
+		code, err := strconv.ParseInt(s[2:6], 16, 32)
+		if err != nil {
+			return "", 6, false
+		}
+		return string(rune(code)), 6, true
+	default:
+		return "", 2, false
+	}
+}
+
+// scanStringLiteralContent walks a STRING token's raw literal text once,
+// decoding escape sequences and splitting out "${...}" interpolations at
+// the same time — order matters here, for two reasons:
+//
+//   - An escaped "\$" must not be mistaken for the start of a real
+//     interpolation. Decoding escapes as a separate, EARLIER pass (e.g.
+//     inside lexer.readString itself) would collapse "\${x}" down to "${x}"
+//     before this scan ever ran, defeating the escape's whole purpose — so
+//     escape-decoding and "${"-detection happen together, in one left-to-
+//     right pass, exactly in source order.
+//   - Interpolation boundary-finding must stay anchored to RAW source byte
+//     positions for advancePosition/lexer.NewAt's seeding to stay correct —
+//     decoding a literal-text segment can only shrink it (e.g. "\n", two
+//     source bytes, becomes one real newline byte), so position tracking is
+//     always computed against the untouched raw text, never the decoded
+//     output.
+//
+// Boundary-finding itself (matching "${" to its own "}", skipping over any
+// nested string/date literal so braces or quotes INSIDE one don't miscount)
+// is done by plain text scanning (findInterpolationEnd), not by tokenizing —
+// Lexer exposes no byte-offset accessor a token-based scan could use to know
+// where to resume. Each extracted expression's text is then parsed with a
+// fresh lexer+parser, seeded via lexer.NewAt at its true position in the
+// original file, so a syntax error inside "${...}" is still reported at the
+// right line/column, not relative to the extracted substring.
+//
+// Returns the segment list, whether at least one embedded expression was
+// found (false means the string is just a decoded plain string, packaged by
+// the caller into a StringLiteral instead), and ok=false if a fatal error
+// (e.g. an unterminated interpolation) was already reported and parsing
+// should abort for this literal.
+func (p *Parser) scanStringLiteralContent(token lexer.Token) (segments []ast.InterpolatedStringSegment, hasExpr bool, ok bool) {
+	raw := token.Literal
+	var textBuf strings.Builder
+	line, col := token.Line, token.Column+1 // position of raw[0]
+	i := 0
+
+	flushText := func() {
+		if textBuf.Len() > 0 {
+			segments = append(segments, ast.InterpolatedStringSegment{Text: textBuf.String()})
+			textBuf.Reset()
+		}
+	}
+
+	for i < len(raw) {
+		if raw[i] == '\\' {
+			decoded, consumed, escOk := decodeEscape(raw[i:])
+			if !escOk {
+				end := min(i+consumed, len(raw))
+				p.reportError(token, fmt.Sprintf("syntax error: unrecognized escape sequence '%s' in string literal", raw[i:end]))
+				textBuf.WriteByte('\\')
+				line, col = advancePosition(line, col, raw[i:i+1])
+				i++
+				continue
+			}
+			textBuf.WriteString(decoded)
+			line, col = advancePosition(line, col, raw[i:i+consumed])
+			i += consumed
+			continue
+		}
+
+		if raw[i] == '$' && i+1 < len(raw) && raw[i+1] == '{' {
+			flushText()
+			hasExpr = true
+
+			// Position of the expression's first byte, i.e. right after "${".
+			exprLine, exprCol := advancePosition(line, col, raw[i:i+2])
+
+			end := findInterpolationEnd(raw[i+2:])
+			if end == -1 {
+				p.reportError(token, "syntax error: unterminated string interpolation, missing '}'")
+				return nil, false, false
+			}
+			exprText := raw[i+2 : i+2+end]
+
+			// NewAt's seed column is "one before" the first character it will
+			// report (its own priming readChar() call unconditionally advances
+			// Column once before any real token is produced — the same
+			// convention New(input) itself relies on for column 1 to be a
+			// file's first real character), hence exprCol-1 here.
+			exprLexer := lexer.NewAt(exprText, exprLine, exprCol-1)
+			exprParser := New(exprLexer)
+			expr := exprParser.parseExpression(lexer.LOWEST_PRECEDENCE)
+			if exprParser.peekToken.Type != lexer.EOF {
+				exprParser.reportError(exprParser.peekToken, fmt.Sprintf("syntax error: unexpected token '%s' after string interpolation expression", exprParser.peekToken.Literal))
+			}
+			p.diagnosticErrors = append(p.diagnosticErrors, exprParser.diagnosticErrors...)
+			p.tknzr.Errors = append(p.tknzr.Errors, exprLexer.Errors...)
+
+			segments = append(segments, ast.InterpolatedStringSegment{Expr: expr})
+
+			consumedThrough := i + 2 + end + 1 // everything through the closing '}'
+			line, col = advancePosition(line, col, raw[i:consumedThrough])
+			i = consumedThrough
+			continue
+		}
+
+		textBuf.WriteByte(raw[i])
+		line, col = advancePosition(line, col, raw[i:i+1])
+		i++
+	}
+	flushText()
+	return segments, hasExpr, true
+}
+
+// findInterpolationEnd finds the byte offset (relative to the start of s) of
+// the "}" that closes an interpolation opened by "${", given s is everything
+// after that "${". Braces and quotes preceded by "\" are skipped without
+// inspection (mirroring decodeEscape's own escape recognition, so an escaped
+// brace/quote inside the expression text can't desync the count or the
+// nested-literal scan below), and braces inside a nested string ("...") or
+// date ('...') literal don't count either, mirroring readString/readDate's
+// own scan-to-the-next-unescaped-delimiter rule. Returns -1 if no matching
+// "}" is found.
+func findInterpolationEnd(s string) int {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++ // skip the escaped character without inspecting it
+		case '"', '\'':
+			quote := s[i]
+			i++
+			for i < len(s) && s[i] != quote {
+				if s[i] == '\\' {
+					i++
+				}
+				i++
+			}
+		case '{':
+			depth++
+		case '}':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+// advancePosition returns the (line, column) of the character immediately
+// following text, given text's own first character sits at (line, col) —
+// mirroring Lexer.readChar's newline-counting rule (a lone '\r', or '\n',
+// starts a new line; "\r\n" together counts as one newline, matching
+// isCurrentCharANewLine).
+func advancePosition(line, col int, text string) (int, int) {
+	for i := 0; i < len(text); i++ {
+		ch := text[i]
+		isNewline := ch == '\n' || (ch == '\r' && (i+1 >= len(text) || text[i+1] != '\n'))
+		if isNewline {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
 }
 
 // parseBooleanLiteral returns a BooleanLiteral expression node for the current token.
@@ -1179,6 +1404,39 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		leftExpression = infix(leftExpression)
 	}
 
+	// Kotlin-style trailing lambda: "call(args) paramName => { ... }" appends
+	// a bare FunctionLiteral (not an ArrayLiteral, unlike the trailing-BLOCK
+	// sugar above which triggers on '{' via infixParseFuncs[LBRACE]) as the
+	// call's last argument. Deliberately NOT implemented as a registered
+	// infixParseFuncs[IDENT] entry: IDENT is the single most common prefix
+	// token in the grammar, so giving it a real infix precedence would make
+	// the loop above attempt this check after every identifier-ending
+	// expression, everywhere — a much larger blast radius than this
+	// call-expression-only, two-token-confirmed pattern needs. The
+	// "precedence == LOWEST_PRECEDENCE" guard restricts this to where an
+	// expression is entered fresh (a statement, a let/const RHS, a call
+	// argument) rather than mid-operator, which is every context the actual
+	// feature needs and no more.
+	if precedence == lexer.LOWEST_PRECEDENCE {
+		if call, ok := leftExpression.(*ast.CallExpression); ok && p.peekToken.Type == lexer.IDENT {
+			// One-token-ahead-of-peek check via a cloned lexer, mirroring
+			// isAnonymousFunctionLookahead's established pattern: p.tknzr's
+			// cursor already sits just past peekToken, so cloning it and
+			// pulling one token tells us what follows the identifier
+			// without consuming anything from the real parser state.
+			if p.tknzr.Clone().NextToken().Type == lexer.FAT_ARROW {
+				paramTok := p.peekToken
+				p.nextToken() // consume the parameter identifier
+				p.nextToken() // consume FAT_ARROW
+				fn := &ast.FunctionLiteral{Token: paramTok}
+				fn.Parameters = []*ast.Parameter{{Token: paramTok, Name: paramTok.Literal, Type: ""}}
+				fn.Body = p.parseArrowFunctionBody()
+				call.Arguments = append(call.Arguments, fn)
+				call.RParenToken = p.currToken // extend the call's span, mirroring parseTrailingBlockCall
+			}
+		}
+	}
+
 	return leftExpression
 }
 
@@ -1194,28 +1452,38 @@ func (p *Parser) parseIdentifierOrAnonymousFunction() ast.Expression {
 		lit := &ast.FunctionLiteral{Token: p.currToken}
 		param := &ast.Parameter{Token: p.currToken, Name: p.currToken.Literal, Type: ""}
 		lit.Parameters = []*ast.Parameter{param}
-		
+
 		p.nextToken() // move to FAT_ARROW
-		
-		if p.peekToken.Type == lexer.LBRACE {
-			p.nextToken() // move to LBRACE
-			lit.Body = p.parseBlockStatement()
-		} else {
-			p.nextToken() // move to start of expression
-			expr := p.parseExpression(lexer.LOWEST_PRECEDENCE)
-			lit.Body = &ast.BlockStatement{
-				Token: p.currToken,
-				Statements: []ast.Statement{
-					&ast.ReturnStatement{
-						Token:       p.currToken,
-						ReturnValue: expr,
-					},
-				},
-			}
-		}
+		lit.Body = p.parseArrowFunctionBody()
 		return lit
 	}
 	return p.parseIdentifier()
+}
+
+// parseArrowFunctionBody parses the body of an arrow function once its
+// parameter list is built and p.currToken sits on the FAT_ARROW ('=>')
+// token: a full block if '{' follows, otherwise a single expression
+// implicitly wrapped in a return statement (e.g. "x => x + 1"). Shared by
+// every "=>"-based arrow-function form — single-param
+// (parseIdentifierOrAnonymousFunction), multi-param (parseAnonymousFunction),
+// and the trailing-lambda sugar (parseExpression) — so the three forms'
+// bodies parse identically rather than drifting apart.
+func (p *Parser) parseArrowFunctionBody() *ast.BlockStatement {
+	if p.peekToken.Type == lexer.LBRACE {
+		p.nextToken() // move to LBRACE
+		return p.parseBlockStatement()
+	}
+	p.nextToken() // move to start of expression
+	expr := p.parseExpression(lexer.LOWEST_PRECEDENCE)
+	return &ast.BlockStatement{
+		Token: p.currToken,
+		Statements: []ast.Statement{
+			&ast.ReturnStatement{
+				Token:       p.currToken,
+				ReturnValue: expr,
+			},
+		},
+	}
 }
 
 // parsePrefixExpression parses a prefix operator expression, such as -5 or !true.
@@ -1488,28 +1756,12 @@ func (p *Parser) parseAnonymousFunction() ast.Expression {
 	lit := &ast.FunctionLiteral{Token: p.currToken} // Token is '('
 	
 	lit.Parameters = p.parseAnonymousFunctionParameters()
-	
+
 	if !p.expectPeek(lexer.FAT_ARROW) {
 		return nil
 	}
-	
-	if p.peekToken.Type == lexer.LBRACE {
-		p.nextToken() // move to LBRACE
-		lit.Body = p.parseBlockStatement()
-	} else {
-		p.nextToken() // move to start of expression
-		expr := p.parseExpression(lexer.LOWEST_PRECEDENCE)
-		lit.Body = &ast.BlockStatement{
-			Token: p.currToken,
-			Statements: []ast.Statement{
-				&ast.ReturnStatement{
-					Token:       p.currToken,
-					ReturnValue: expr,
-				},
-			},
-		}
-	}
-	
+
+	lit.Body = p.parseArrowFunctionBody()
 	return lit
 }
 

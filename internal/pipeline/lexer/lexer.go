@@ -47,6 +47,17 @@ func New(input string) *Lexer {
 	return t
 }
 
+// NewAt is like New, but seeds the starting Line/Column instead of always
+// beginning at (1, 0). Used to lex a substring extracted from a larger
+// source file (e.g. an interpolated string's "${...}" segment) while still
+// reporting positions relative to the original file, not the substring.
+func NewAt(input string, startLine, startColumn int) *Lexer {
+	t := &Lexer{input: input, ErrorTracker: ErrorTracker{Line: startLine, Column: startColumn}}
+	t.readChar()
+
+	return t
+}
+
 // Clone creates a shallow copy of the Lexer without sharing the Errors slice,
 // allowing safe lookahead without modifying the original lexer's error state.
 func (l *Lexer) Clone() *Lexer {
@@ -115,14 +126,68 @@ func (l *Lexer) readChar() {
 }
 
 // readString consumes characters until a closing double quote or EOF is
-// encountered, returning the enclosed string literal. It also consumes the
-// closing quote if present.
+// encountered, returning the enclosed string literal RAW (escape sequences
+// like "\n"/"\"" are left undecoded here — decoding happens later in the
+// parser, once "${...}" interpolation boundaries are already fixed; see
+// parseStringLiteral). It also consumes the closing quote if present.
+//
+// Two things this scan must not be fooled by, both confined to this one
+// function (no state spans multiple NextToken calls):
+//   - An escaped quote ("\"") must not end the string early — readChar past
+//     any "\" unconditionally consumes the following character without
+//     testing it against the closing delimiter.
+//   - A "${...}" interpolation's own embedded expression can itself contain
+//     a nested string/date literal (e.g. "${concat(x, "-")}"). A depth
+//     counter tracks whether the scan is currently inside a "${" that
+//     hasn't been closed by its matching "}" yet; a '"'/'\'' seen at depth 0
+//     ends the outer string as always, but one seen at depth > 0 starts a
+//     nested literal that gets its own escape-aware skip-to-delimiter scan
+//     (skipNestedDelimited) rather than being mistaken for the outer
+//     string's own terminator.
 func (l *Lexer) readString() string {
 	position := l.position + 1
+	interpDepth := 0
 	for {
 		l.readChar()
-		if l.ch == '"' || l.ch == 0 {
+		if l.ch == 0 {
 			break
+		}
+		if l.ch == '\\' {
+			l.readChar() // consume the escaped character verbatim
+			if l.ch == 0 {
+				break
+			}
+			continue
+		}
+		if interpDepth == 0 && l.ch == '"' {
+			break
+		}
+		if l.ch == '$' && l.peekChar() == '{' {
+			interpDepth++
+			l.readChar() // also consume the '{' so it isn't double-counted below
+			continue
+		}
+		if interpDepth > 0 {
+			switch l.ch {
+			case '{':
+				interpDepth++
+			case '}':
+				interpDepth--
+			case '"':
+				l.skipNestedDelimited('"')
+			case '\'':
+				l.skipNestedDelimited('\'')
+			}
+			// skipNestedDelimited advances via its own readChar calls and
+			// can land on EOF (an unterminated nested literal, or simply an
+			// unterminated outer/interpolation with no more input left) —
+			// check immediately rather than looping back to call readChar
+			// again, which would advance position/readPosition past the
+			// end of input with no bounds check (readChar itself doesn't
+			// guard against being called again after EOF).
+			if l.ch == 0 {
+				break
+			}
 		}
 	}
 	result := l.input[position:l.position]
@@ -135,14 +200,47 @@ func (l *Lexer) readString() string {
 	return result
 }
 
+// skipNestedDelimited advances past a nested "..."/'...' literal that starts
+// at the current character — used when readString finds one inside an
+// unclosed "${...}" interpolation. A small escape-aware scan to the closing
+// delimiter or EOF, mirroring readString/readDate's own rule, so neither an
+// escaped quote nor a quote belonging to this nested literal gets mistaken
+// for the outer string's own terminator.
+func (l *Lexer) skipNestedDelimited(closing rune) {
+	for {
+		l.readChar()
+		if l.ch == closing || l.ch == 0 {
+			return
+		}
+		if l.ch == '\\' {
+			l.readChar()
+			if l.ch == 0 {
+				return
+			}
+		}
+	}
+}
+
 // readDate consumes characters until a closing single quote or EOF is
-// encountered, returning the enclosed date literal. It also consumes the
-// closing quote if present.
+// encountered, returning the enclosed date literal RAW (undecoded — see
+// readString's doc comment; the same escape table applies). It also
+// consumes the closing quote if present. An escaped quote ("\'") does not
+// end the literal early, mirroring readString's own escape-skip.
 func (l *Lexer) readDate() string {
 	position := l.position + 1
 	for {
 		l.readChar()
-		if l.ch == '\'' || l.ch == 0 {
+		if l.ch == 0 {
+			break
+		}
+		if l.ch == '\\' {
+			l.readChar()
+			if l.ch == 0 {
+				break
+			}
+			continue
+		}
+		if l.ch == '\'' {
 			break
 		}
 	}

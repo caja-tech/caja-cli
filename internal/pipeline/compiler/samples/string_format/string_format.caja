@@ -1,0 +1,14 @@
+import "string" as string
+
+type Item struct {
+	name  String
+	price Number
+}
+
+let item = Item { name: "Widget", price: 19.999 }
+
+let escaped = "line one\nline two\ttabbed \"quoted\" \$5"
+let nested = "${string.concat(item.name, "-suffix")}"
+let priced = string.format("%.2f", item.price)
+
+let summary = "${item.name}: \$${priced}"

@@ -257,6 +257,8 @@ func (a *Analyzer) analyzeNode(node ast.Node) symbol.Symbol {
 		return symbol.NewBasicSymbol(environment.NUMBER_OBJ)
 	case *ast.StringLiteral:
 		return symbol.NewBasicSymbol(environment.STRING_OBJ)
+	case *ast.InterpolatedStringLiteral:
+		return a.analyzeInterpolatedStringLiteral(n)
 	case *ast.DateLiteral:
 		return symbol.NewBasicSymbol(environment.DATE_OBJ)
 	case *ast.BooleanLiteral:
@@ -342,6 +344,25 @@ func (a *Analyzer) analyzeArrayLiteral(n *ast.ArrayLiteral) symbol.Symbol {
 	}
 
 	return symbol.NewArraySymbol(firstElSymbol)
+}
+
+// analyzeInterpolatedStringLiteral analyzes every embedded expression
+// segment of a "${...}"-containing string literal, exactly the same way any
+// other expression gets analyzed — so purity enforcement ("pure functions
+// cannot capture global/module variable") and move-semantics tracking apply
+// to a read inside "${...}" with no special-casing needed here. An embedded
+// expression may resolve to any type (unlike a plain "+" concatenation,
+// which requires both sides to already be String) — the compiler
+// auto-stringifies non-String segments via caja_format_value, matching
+// Kotlin's own automatic toString() behavior. Always resolves to STRING_OBJ,
+// same as a plain StringLiteral.
+func (a *Analyzer) analyzeInterpolatedStringLiteral(n *ast.InterpolatedStringLiteral) symbol.Symbol {
+	for _, seg := range n.Segments {
+		if seg.Expr != nil {
+			a.analyze(seg.Expr)
+		}
+	}
+	return symbol.NewBasicSymbol(environment.STRING_OBJ)
 }
 
 func (a *Analyzer) analyzeMapLiteral(n *ast.MapLiteral) symbol.Symbol {

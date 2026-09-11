@@ -67,6 +67,54 @@ func isOwned(n ast.Expression) bool {
 	return false
 }
 
+// transpileStringFormatCall emits Go's own fmt.Sprintf for string.format —
+// mirroring string.concat's own choice of a thin, direct Go primitive
+// rather than new runtime machinery. When the format string is a
+// compile-time literal, its first real verb (skipping a literal "%%") is
+// inspected: an integer-family verb (%d %b %o %x %X %c) gets the value
+// argument wrapped in int(...), since Caja's Number always compiles to Go
+// float64 (which Go's fmt package rejects for those verbs, emitting
+// "%!d(float64=...)" instead of the intended integer). Any other verb, or a
+// non-literal (runtime-computed) format string that can't be inspected at
+// all, passes the value straight through — the documented limitation for
+// that case: Go's fmt never panics on a verb/type mismatch, it only ever
+// emits inline error text, never wrong-but-silent output.
+func transpileStringFormatCall(args []ast.Expression, argStrs []string) string {
+	valueArg := argStrs[1]
+	if lit, ok := args[0].(*ast.StringLiteral); ok && stringFormatHasIntegerVerb(lit.Value) {
+		valueArg = fmt.Sprintf("int(%s)", valueArg)
+	}
+	return fmt.Sprintf("fmt.Sprintf(%s, %s)", argStrs[0], valueArg)
+}
+
+// stringFormatHasIntegerVerb reports whether the first real printf verb in
+// fmtLiteral (skipping a literal "%%") is one of Go's integer-family verbs.
+func stringFormatHasIntegerVerb(fmtLiteral string) bool {
+	for i := 0; i < len(fmtLiteral); i++ {
+		if fmtLiteral[i] != '%' {
+			continue
+		}
+		if i+1 < len(fmtLiteral) && fmtLiteral[i+1] == '%' {
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(fmtLiteral) && strings.ContainsRune("-+ #0123456789.", rune(fmtLiteral[j])) {
+			j++
+		}
+		if j >= len(fmtLiteral) {
+			return false
+		}
+		switch fmtLiteral[j] {
+		case 'd', 'b', 'o', 'x', 'X', 'c':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *transpileContext) (string, error) {
 	ctx.usedModules[module] = true
 
@@ -144,6 +192,8 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			return fmt.Sprintf("strings.TrimSpace(%s)", argStrs[0]), nil
 		case "join":
 			return fmt.Sprintf("strings.Join(%s.Data, %s)", argStrs[0], argStrs[1]), nil
+		case "format":
+			return transpileStringFormatCall(args, argStrs), nil
 		}
 
 	case "array":

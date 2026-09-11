@@ -86,6 +86,38 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return `"` + sl.Value + `"` }
 
+// InterpolatedStringSegment is one piece of an interpolated string literal:
+// either a literal text chunk (Expr == nil) or an embedded expression
+// (Text == ""), e.g. `"${req.method} ${req.path}"` is the segment sequence
+// [{Expr: req.method}, {Text: " "}, {Expr: req.path}].
+type InterpolatedStringSegment struct {
+	Text string
+	Expr Expression
+}
+
+// InterpolatedStringLiteral is an expression node for a Kotlin-style
+// interpolated string ("...${expr}..."). It sits alongside StringLiteral
+// rather than replacing it — a string literal with no "${" in it still
+// parses as a plain StringLiteral, unchanged.
+type InterpolatedStringLiteral struct {
+	Token    lexer.Token
+	Segments []InterpolatedStringSegment
+}
+
+func (isl *InterpolatedStringLiteral) expressionNode()      {}
+func (isl *InterpolatedStringLiteral) TokenLiteral() string { return isl.Token.Literal }
+func (isl *InterpolatedStringLiteral) String() string {
+	out := `"`
+	for _, seg := range isl.Segments {
+		if seg.Expr != nil {
+			out += "${" + seg.Expr.String() + "}"
+		} else {
+			out += seg.Text
+		}
+	}
+	return out + `"`
+}
+
 // BooleanLiteral is an expression node that represents a boolean constant.
 // Token carries the original tokenizer.Token, and Value holds the boolean value.
 type BooleanLiteral struct {

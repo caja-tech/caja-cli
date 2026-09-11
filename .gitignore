@@ -4,6 +4,10 @@
 *.dll
 *.so
 *.dylib
+# `go build ./...` from the repo root writes one output binary per main
+# package into cwd when no -o is given — cmd/cli is the only main package,
+# so that binary lands here as a plain, extension-less "cli".
+/cli
 
 # Build output
 bin/

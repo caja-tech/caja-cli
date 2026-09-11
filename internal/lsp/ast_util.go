@@ -167,6 +167,15 @@ func findTightestNode(node ast.Node, line, col int) ast.Node {
 				bestChild = child
 			}
 		}
+	case *ast.InterpolatedStringLiteral:
+		for _, seg := range n.Segments {
+			if seg.Expr == nil {
+				continue
+			}
+			if child := findTightestNode(seg.Expr, line, col); child != nil {
+				bestChild = child
+			}
+		}
 	case *ast.MapLiteral:
 		for k, v := range n.Pairs {
 			if child := findTightestNode(k, line, col); child != nil {
@@ -218,6 +227,8 @@ func containsPosition(node ast.Node, line, col int) bool {
 	case *ast.NumberLiteral:
 		t = n.Token
 	case *ast.StringLiteral:
+		t = n.Token
+	case *ast.InterpolatedStringLiteral:
 		t = n.Token
 	case *ast.BooleanLiteral:
 		t = n.Token
@@ -372,6 +383,8 @@ func GetNodeToken(node ast.Node) lexer.Token {
 	case *ast.NumberLiteral:
 		t = n.Token
 	case *ast.StringLiteral:
+		t = n.Token
+	case *ast.InterpolatedStringLiteral:
 		t = n.Token
 	case *ast.BooleanLiteral:
 		t = n.Token

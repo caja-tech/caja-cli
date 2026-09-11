@@ -350,6 +350,105 @@ func TestTranspile(t *testing.T) {
 			},
 		},
 		{
+			name: "Non-Tail Self-Recursion Uses Two-Step Declaration",
+			input: `
+				let factorial = fn(n: Number) -> Number {
+					if (n == 0) {
+						return 1
+					}
+					return n * factorial(n - 1)
+				}
+				let val = factorial(5)
+			`,
+			expected: []string{
+				"var factorial func(float64) float64\n",
+				"factorial = func(n float64) float64 {",
+				"return (n * factorial((n - 1.0)))",
+				"var val float64 = factorial(5.0)",
+			},
+		},
+		{
+			// A "-> Nothing" function returning a call to a DIFFERENT
+			// "-> Nothing" function (not itself — that's the tail-call
+			// rewrite case above) must not wrap the call in "_ = ...": the
+			// callee has zero Go return values, so "_ = innerFn()" is
+			// itself invalid Go ("(no value) used as value") — this is
+			// exactly the shape a public wrapper delegating to a private
+			// recursive helper takes (e.g. @caja/std's
+			// forEachIndexed/_forEachIndexed pair).
+			name: "Return Of A Different Nothing-Returning Call Skips Discard Assignment",
+			input: `
+				let inner = fn(n: Number) -> Nothing {
+					return
+				}
+				let outer = fn(n: Number) -> Nothing {
+					return inner(n)
+				}
+				outer(5)
+			`,
+			expected: []string{
+				"\tinner(n)\n\treturn",
+			},
+		},
+		{
+			name: "String Interpolation",
+			input: `
+				let name = "World"
+				let count = 5
+				let greeting = "Hello, ${name}! count=${count}"
+			`,
+			expected: []string{
+				// name is already String-typed, so it's emitted bare; count
+				// is Number-typed, so it's wrapped in caja_format_value —
+				// the same runtime helper log.info's args formatting already
+				// uses — to auto-stringify it (Kotlin-style automatic
+				// toString()), rather than requiring the user to cast it.
+				`var greeting string = ("Hello, " + name + "! count=" + caja_format_value(count))`,
+			},
+		},
+		{
+			name: "String Format With Literal Format String",
+			input: `
+				import string
+				let price = 3.14159
+				let count = 5
+				let precise = string.format("%.2f", price)
+				let padded = string.format("%5d", count)
+				let label = string.format("Hello, %s!", "Caja")
+			`,
+			expected: []string{
+				// %.2f is float-family: the value passes through as-is (a
+				// plain float64 already works for that verb).
+				`var precise string = fmt.Sprintf("%.2f", price)`,
+				// %5d is integer-family, and Caja's Number always compiles
+				// to Go float64 — which fmt.Sprintf rejects for %d-family
+				// verbs (emitting "%!d(float64=...)") unless wrapped in
+				// int(...) first, which is only possible to do here because
+				// the format string is a compile-time literal.
+				`var padded string = fmt.Sprintf("%5d", int(count))`,
+				// %s is a generic verb: no int(...) wrapping, even though
+				// the value here is a String, not a Number.
+				`var label string = fmt.Sprintf("Hello, %s!", "Caja")`,
+			},
+		},
+		{
+			name: "String Format With Runtime-Computed Format String",
+			input: `
+				import string
+				let fmtStr = string.concat("%", "d")
+				let count = 5
+				let result = string.format(fmtStr, count)
+			`,
+			expected: []string{
+				// The format string isn't a literal, so its verb can't be
+				// inspected at compile time — the value passes through
+				// un-wrapped, accepting Go's own non-panicking "%!d(...)"
+				// mismatch behavior as the documented limitation for this
+				// case (see transpileStringFormatCall's doc comment).
+				`var result string = fmt.Sprintf(fmtStr, count)`,
+			},
+		},
+		{
 			name: "Pipeline Operator",
 			input: `
 				let isEven = fn(x: Number) -> Boolean { return x % 2 == 0 }
