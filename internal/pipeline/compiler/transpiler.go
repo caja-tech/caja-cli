@@ -2114,6 +2114,16 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			if modSym, isMod := objSym.(*symbol.ModuleSymbol); isMod && builtinModules[modSym.FilePath] {
 				return transpileBuiltinCall(modSym.FilePath, prop.Property.Value, e.Arguments, ctx)
 			}
+			// UFCS sugar: receiver.fn(args...) where receiver is a plain value
+			// (not a module), resolved by the analyzer against a function
+			// exported by an imported module (builtin or real) or declared
+			// as a top-level function in this file, whose first parameter
+			// type matches the receiver's type. Route through the same
+			// codegen the direct/qualified call form for that function
+			// already uses, with the receiver spliced in as argument 0.
+			if modulePath, isUFCS := a.GetUFCSModulePath(prop); isUFCS {
+				return transpileUFCSCall(modulePath, prop, e.Arguments, ctx)
+			}
 		} else if ident, ok := e.Function.(*ast.Identifier); ok {
 			importedMod := a.GetImportedModule(ident)
 			if importedMod != "" && builtinModules[importedMod] {
@@ -2145,17 +2155,7 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 		if resolved, ok := a.GetResolvedCallArguments(e); ok {
 			callArgs = resolved
 		}
-
-		args := []string{}
-		for _, arg := range callArgs {
-			argStr, err := transpileExpression(arg, ctx, "")
-			if err != nil {
-				return "", err
-			}
-			argStr = maybeShareValue(arg, argStr, ctx)
-			args = append(args, argStr)
-		}
-		return fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", ")), nil
+		return transpileCallWithArgs(fn, callArgs, ctx)
 	case *ast.PropertyExpression:
 		objSym, _ := a.GetSymbol(e.Object)
 		if modSym, ok := objSym.(*symbol.ModuleSymbol); ok {
@@ -2631,6 +2631,54 @@ func sanitizeIdentifier(path string) string {
 	s = strings.ReplaceAll(s, "-", "_")
 	s = strings.ReplaceAll(s, "@", "_") // scoped node_modules-style paths, e.g. "@caja/query"
 	return s
+}
+
+// transpileCallWithArgs transpiles a call to fn (a Go expression string
+// already resolved to callable form) applied to args, sharing the
+// per-argument transpileExpression + maybeShareValue logic used by every
+// non-builtin call path: the generic function-call codegen and UFCS calls
+// routed to a real module's function or a same-file top-level function.
+func transpileCallWithArgs(fn string, args []ast.Expression, ctx *transpileContext) (string, error) {
+	argStrs := make([]string, len(args))
+	for i, arg := range args {
+		argStr, err := transpileExpression(arg, ctx, "")
+		if err != nil {
+			return "", err
+		}
+		argStrs[i] = maybeShareValue(arg, argStr, ctx)
+	}
+	return fmt.Sprintf("%s(%s)", fn, strings.Join(argStrs, ", ")), nil
+}
+
+// transpileUFCSCall transpiles a UFCS-matched call (receiver.fn(args...))
+// to whatever the direct/qualified call form for the matched function
+// already emits, with the receiver spliced in as argument 0:
+//   - a builtin module's function (modulePath is a builtinModules key):
+//     the same transpileBuiltinCall dispatcher a real array.push(...) call
+//     uses.
+//   - a real (non-builtin) module's function: the same
+//     sanitizeIdentifier(modulePath)+"_"+name Go identifier the module's own
+//     definition is transpiled under (see prefixIdentifier) and that a
+//     direct qualified call to it already resolves to (see the
+//     *ast.PropertyExpression case above). Note this uses the callee's own
+//     module path, not ctx.CurrentModulePath (the caller's) — they only
+//     coincide when the UFCS call is inside the same module that declares
+//     the function.
+//   - a same-file top-level function (modulePath == ""): named exactly
+//     as its own `let` binding was, via the same prefixIdentifier(ctx, name)
+//     the definition site used — including the case where ctx itself is
+//     transpiling the entry script under a non-empty CurrentModulePath (the
+//     entry script is transpiled like any other module), so a bare name is
+//     NOT always correct here.
+func transpileUFCSCall(modulePath string, prop *ast.PropertyExpression, callArgs []ast.Expression, ctx *transpileContext) (string, error) {
+	args := append([]ast.Expression{prop.Object}, callArgs...)
+	if modulePath == "" {
+		return transpileCallWithArgs(prefixIdentifier(ctx, prop.Property.Value), args, ctx)
+	}
+	if builtinModules[modulePath] {
+		return transpileBuiltinCall(modulePath, prop.Property.Value, args, ctx)
+	}
+	return transpileCallWithArgs(sanitizeIdentifier(modulePath)+"_"+prop.Property.Value, args, ctx)
 }
 
 func prefixIdentifier(ctx *transpileContext, name string) string {

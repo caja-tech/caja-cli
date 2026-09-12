@@ -271,6 +271,53 @@ func TestWildcardImportSamplesRun(t *testing.T) {
 	}
 }
 
+// TestUFCSSampleRuns runs the ufcs sample end to end (TestSamplesCompilation
+// only compiles it) and pins its exact output. Compilation alone proves the
+// emitted Go is well-formed and names a real callee; only running it proves
+// the receiver is actually passed as argument 0 — a receiver spliced into the
+// wrong position, or dropped, still compiles for same-typed parameters and
+// would silently produce different values here.
+//
+// The values cover every codegen branch of transpileUFCSCall at once: a
+// builtin module's function (a1/a2 vs. the qualified a3), an explicit `move`
+// receiver mutated in place, a same-file top-level function (doubled), a real
+// module's function (tripled vs. the qualified tripledQualified), and a UFCS
+// call made from inside a non-entry module (boosted).
+func TestUFCSSampleRuns(t *testing.T) {
+	goCode := transpileSampleToGo(t, "ufcs", "ufcs")
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	want := strings.Join([]string{
+		"[INFO] a1: [1, 2, 3, 4]",
+		"[INFO] a2: [10, 20, 30]",
+		"[INFO] a3: [1, 2, 3, 4]",
+		"[INFO] moved: [1, 2, 3, 4]",
+		"[INFO] greeting: HI",
+		"[INFO] absN: 5",
+		"[INFO] doubled: 10",
+		"[INFO] tripled: 15",
+		"[INFO] tripledQualified: 15",
+		"[INFO] boosted: 15",
+		// mag reads two different fields (x*10 + y), so a receiver spliced
+		// into the wrong argument slot changes this number rather than
+		// silently still compiling.
+		"[INFO] magnitude: 34",
+		"[INFO] magAnnotated: 34",
+		// Same name, picked by argument count: the struct's own field
+		// (f * 100) vs. the free function (p.x * f + o).
+		"[INFO] viaField: 200",
+		"[INFO] viaFunction: 11",
+		"",
+	}, "\n")
+	if stdout.String() != want {
+		t.Errorf("expected UFCS sample output:\n%s\ngot:\n%s", want, stdout.String())
+	}
+}
+
 // TestWildcardImportDoesNotReexport guards the decision that an import is a
 // local binding and never a re-export — here in its wildcard form: no
 // declaration may be emitted under THIS module's prefix for a name it merely

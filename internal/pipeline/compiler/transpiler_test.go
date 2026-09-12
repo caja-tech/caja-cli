@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"caja-cli/internal/script"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -1262,6 +1264,24 @@ func TestIsExpressionOwnedWhenSourceIsOwned(t *testing.T) {
 	}
 }
 
+// transpileSource parses and transpiles an in-memory single-file script,
+// returning the generated Go with its //line directives stripped so callers
+// can assert on codegen shape alone. Fails the test on any parse or
+// transpile error, so callers only deal with the happy path.
+func transpileSource(t *testing.T, input string) string {
+	t.Helper()
+
+	program, _, a, err := script.ParseWithDir(input, "", "test.caja")
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+	return stripLineDirectives(goCode)
+}
+
 // stripLineDirectives removes every `//line file:N` directive Transpile
 // interleaves into the generated source (see lineDirective), so tests that
 // assert on codegen shape don't need to account for them appearing mid-block.
@@ -1354,5 +1374,176 @@ func TestPinRangeToLineCoversStreamPipeAndAsync(t *testing.T) {
 	unwrapDirective := "//line pipe_test.caja:12\n"
 	if n := strings.Count(goCode, unwrapDirective); n < 2 {
 		t.Errorf("expected %q to be repeated across the unwrap block (pinRangeToLine), found %d occurrence(s) in:\n%s", unwrapDirective, n, goCode)
+	}
+}
+
+// TestUFCSTranspilesLikeQualifiedCall pins the UFCS codegen branch added to
+// the CallExpression case in transpileExpressionInternal: a dot-call sugar
+// receiver.fn(args...) must emit exactly the same Go as the fully qualified
+// module.fn(receiver, args...) form, since both route through the same
+// transpileBuiltinCall helper with the receiver spliced into argument 0.
+func TestUFCSTranspilesLikeQualifiedCall(t *testing.T) {
+	ufcsInput := `
+		import "array"
+		let list = [1, 2, 3]
+		let result = list.push(4)
+	`
+	qualifiedInput := `
+		import "array"
+		let list = [1, 2, 3]
+		let result = array.push(list, 4)
+	`
+
+	ufcsCode := transpileSource(t, ufcsInput)
+	qualifiedCode := transpileSource(t, qualifiedInput)
+
+	wantCall := "caja_array_push(list, 4.0)"
+	if !strings.Contains(ufcsCode, wantCall) {
+		t.Errorf("expected UFCS call to emit %q, got:\n%s", wantCall, ufcsCode)
+	}
+	if !strings.Contains(qualifiedCode, wantCall) {
+		t.Errorf("expected qualified call to emit %q, got:\n%s", wantCall, qualifiedCode)
+	}
+	if ufcsCode != qualifiedCode {
+		t.Errorf("expected UFCS and qualified-call codegen to be identical.\nUFCS:\n%s\nQualified:\n%s", ufcsCode, qualifiedCode)
+	}
+}
+
+// TestUFCSOnStructReceiverCodegen pins the two shapes a struct receiver can
+// compile to, and the one observable behavioral difference between them.
+//
+// Resolving to the struct's own field emits a method-style `p.Field(args)`,
+// where the receiver is never an argument and so is never marked shared.
+// Resolving to a free function splices the receiver into argument 0, which
+// routes it through maybeShareValue and emits `cajaShare(p)` — correct, since
+// it matches what the equivalent `scale(p, ...)` call already does, but
+// invisible in the Caja source. A shared receiver is defensively cloned on a
+// later mutation, so this is a real semantic difference between two
+// resolutions of identical-looking syntax.
+func TestUFCSOnStructReceiverCodegen(t *testing.T) {
+	goCode := transpileSource(t, `
+		type Point struct {
+			x Number
+			scale fn(Number) -> Number
+		}
+		let scale = fn(p: Point, f: Number, o: Number) -> Number { return p.x * f + o }
+		let mag = fn(p: Point) -> Number { return p.x }
+		let p = Point { x: 1, scale: fn(f: Number) -> Number { return f } }
+		let viaField = p.scale(2)
+		let viaFunction = p.scale(2, 5)
+		let magnitude = p.mag()
+	`)
+
+	for _, want := range []string{
+		"var viaField float64 = p.Scale(2.0)",
+		"var viaFunction float64 = scale(cajaShare(p), 2.0, 5.0)",
+		"var magnitude float64 = mag(cajaShare(p))",
+	} {
+		if !strings.Contains(goCode, want) {
+			t.Errorf("expected emitted Go to contain %q, got:\n%s", want, goCode)
+		}
+	}
+
+	// The field call must not share the receiver — that is the difference
+	// this test exists to pin, so assert its absence explicitly.
+	if strings.Contains(goCode, "cajaShare(p).Scale") {
+		t.Errorf("field call must not mark the receiver shared, got:\n%s", goCode)
+	}
+}
+
+// TestUFCSLocalFunctionTranspilesLikePlainCall pins the codegen shape for
+// UFCS resolving to a plain top-level function declared in the same file
+// (not a builtin or real module): receiver.fn(args...) must emit exactly
+// the same Go as the direct fn(receiver, args...) call — the same bare Go
+// name the function's own `let` binding uses, via prefixIdentifier, not a
+// module-style sanitizeIdentifier(path)-prefixed name. (UFCS resolving to a
+// function exported by a real, separately-imported .caja module is covered
+// end-to-end by the multi-file `compiler/samples/ufcs/` fixture instead,
+// since that requires a real second file on disk.)
+func TestUFCSLocalFunctionTranspilesLikePlainCall(t *testing.T) {
+	ufcsInput := `
+		let double = fn(x: Number) -> Number { return x * 2 }
+		let n = 5
+		let result = n.double()
+	`
+	directInput := `
+		let double = fn(x: Number) -> Number { return x * 2 }
+		let n = 5
+		let result = double(n)
+	`
+
+	ufcsCode := transpileSource(t, ufcsInput)
+	directCode := transpileSource(t, directInput)
+
+	wantCall := "double(n)"
+	if !strings.Contains(ufcsCode, wantCall) {
+		t.Errorf("expected UFCS call to emit %q, got:\n%s", wantCall, ufcsCode)
+	}
+	if ufcsCode != directCode {
+		t.Errorf("expected UFCS and direct-call codegen to be identical.\nUFCS:\n%s\nDirect:\n%s", ufcsCode, directCode)
+	}
+}
+
+// TestUFCSMultiArgumentCallPreservesArgumentOrder guards the argument splice
+// itself: the receiver must become argument 0 with the written arguments kept
+// in order after it. TestUFCSTranspilesLikeQualifiedCall cannot see an
+// ordering bug beyond position 0 — array.push takes only one further argument
+// and both of its remaining slots are typed Number, so a swap would still
+// compile and still type-check. A three-parameter function whose arguments are
+// distinguishable (string.replace's search vs. replacement) is what makes a
+// misordered splice observable in the emitted Go.
+func TestUFCSMultiArgumentCallPreservesArgumentOrder(t *testing.T) {
+	ufcsCode := transpileSource(t, `
+		import "string"
+		let s = "hello"
+		let result = s.replace("l", "L")
+	`)
+	qualifiedCode := transpileSource(t, `
+		import "string"
+		let s = "hello"
+		let result = string.replace(s, "l", "L")
+	`)
+
+	wantCall := `strings.ReplaceAll(s, "l", "L")`
+	if !strings.Contains(ufcsCode, wantCall) {
+		t.Errorf("expected UFCS call to emit %q, got:\n%s", wantCall, ufcsCode)
+	}
+	if ufcsCode != qualifiedCode {
+		t.Errorf("expected UFCS and qualified-call codegen to be identical.\nUFCS:\n%s\nQualified:\n%s", ufcsCode, qualifiedCode)
+	}
+}
+
+// TestUFCSInsideModuleUsesModulePrefixedName pins the one case the
+// same-file-function branch of transpileUFCSCall can get wrong in a way that
+// does not show up in a single-file test: when the UFCS call is made from
+// inside a NON-entry module, the callee is emitted under that module's
+// flattened Go name (prefixIdentifier), not the bare name the entry script
+// would use. Emitting the bare name here produces Go that does not compile,
+// so this is checked against the real multi-file samples/ufcs fixture, whose
+// helpers module calls its own top-level 'triple' through the sugar.
+func TestUFCSInsideModuleUsesModulePrefixedName(t *testing.T) {
+	filePath := filepath.Join("samples", "ufcs", "ufcs.caja")
+	source, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read sample: %v", err)
+	}
+
+	baseDir, _ := filepath.Abs(filepath.Dir(filePath))
+	program, _, a, err := script.ParseWithDir(string(source), baseDir, filePath)
+	if err != nil {
+		t.Fatalf("failed to parse script: %v", err)
+	}
+
+	goCode, err := Transpile(program, a, TranspileOptions{})
+	if err != nil {
+		t.Fatalf("Transpile failed: %v", err)
+	}
+	goCode = stripLineDirectives(goCode)
+
+	// Derived rather than hardcoded, so the test follows a change to the
+	// module-name flattening scheme instead of breaking on it.
+	wantCall := sanitizeIdentifier("./helpers") + "_triple(x)"
+	if !strings.Contains(goCode, wantCall) {
+		t.Errorf("expected the in-module UFCS call to emit %q, got:\n%s", wantCall, goCode)
 	}
 }

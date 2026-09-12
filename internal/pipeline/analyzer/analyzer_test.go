@@ -1,6 +1,8 @@
 package analyzer
 
 import (
+	"caja-cli/internal/pipeline/analyzer/symbol"
+	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
 	"caja-cli/internal/pipeline/parser"
@@ -1254,7 +1256,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "charAt() rejects mismatched types",
 			input:          "import string\nreturn string.charAt(10, \"hello\")",
-			expectedErrors: []string{"type error: first argument to 'charAt' must be String, got Number", "type error: second argument to 'charAt' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "substring() works with correct types",
@@ -1263,7 +1265,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "substring() rejects mismatched types",
 			input:          "import string\nreturn string.substring(10, \"start\", \"end\")",
-			expectedErrors: []string{"type error: first argument to 'substring' must be String, got Number", "type error: second argument to 'substring' must be Number, got String", "type error: third argument to 'substring' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected Number, got String", "type error: argument 3 expected Number, got String"},
 		},
 		{
 			name:  "concat() works with correct types",
@@ -1272,7 +1274,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "concat() rejects mismatched types",
 			input:          "import string\nreturn string.concat(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'concat' must be String, got Number", "type error: second argument to 'concat' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected String, got Number"},
 		},
 		{
 			name:  "join() works with correct types",
@@ -1281,12 +1283,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "join() rejects mismatched types",
 			input:          "import string\nreturn string.join([10, 20], 20)",
-			expectedErrors: []string{"type error: array elements for 'join' must be String, got Number", "type error: second argument to 'join' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected [String], got [Number]", "type error: argument 2 expected String, got Number"},
 		},
 		{
 			name:           "join() rejects invalid array element types",
 			input:          "import string\nreturn string.join([10, 20], \",\")",
-			expectedErrors: []string{"type error: array elements for 'join' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected [String], got [Number]"},
 		},
 		{
 			name:  "split() works with correct types",
@@ -1295,7 +1297,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "split() rejects mismatched types",
 			input:          "import string\nreturn string.split(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'split' must be String, got Number", "type error: second argument to 'split' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected String, got Number"},
 		},
 		{
 			name:  "contains() works with correct types",
@@ -1304,7 +1306,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "contains() rejects mismatched types",
 			input:          "import string\nreturn string.contains(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'contains' must be String, got Number", "type error: second argument to 'contains' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected String, got Number"},
 		},
 		{
 			name:  "startsWith() works with correct types",
@@ -1313,7 +1315,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "startsWith() rejects mismatched types",
 			input:          "import string\nreturn string.startsWith(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'startsWith' must be String, got Number", "type error: second argument to 'startsWith' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected String, got Number"},
 		},
 		{
 			name:  "endsWith() works with correct types",
@@ -1322,7 +1324,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "endsWith() rejects mismatched types",
 			input:          "import string\nreturn string.endsWith(10, 20)",
-			expectedErrors: []string{"type error: first argument to 'endsWith' must be String, got Number", "type error: second argument to 'endsWith' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected String, got Number"},
 		},
 		{
 			name:  "replace() works with correct types",
@@ -1331,7 +1333,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "replace() rejects mismatched types",
 			input:          "import string\nreturn string.replace(10, 20, 30)",
-			expectedErrors: []string{"type error: first argument to 'replace' must be String, got Number", "type error: second argument to 'replace' must be String, got Number", "type error: third argument to 'replace' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number", "type error: argument 2 expected String, got Number", "type error: argument 3 expected String, got Number"},
 		},
 		{
 			name:  "toUpper() works with correct types",
@@ -1340,7 +1342,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "toUpper() rejects mismatched types",
 			input:          "import string\nreturn string.toUpper(10)",
-			expectedErrors: []string{"type error: first argument to 'toUpper' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number"},
 		},
 		{
 			name:  "toLower() works with correct types",
@@ -1349,7 +1351,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "toLower() rejects mismatched types",
 			input:          "import string\nreturn string.toLower(10)",
-			expectedErrors: []string{"type error: first argument to 'toLower' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number"},
 		},
 		{
 			name:  "trim() works with correct types",
@@ -1358,7 +1360,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "trim() rejects mismatched types",
 			input:          "import string\nreturn string.trim(10)",
-			expectedErrors: []string{"type error: first argument to 'trim' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number"},
 		},
 		{
 			name:  "string len() works with correct types",
@@ -1367,7 +1369,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "strlen() rejects mismatched types",
 			input:          "import string\nreturn string.len(10)",
-			expectedErrors: []string{"type error: first argument to 'len' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number"},
 		},
 		{
 			name:  "year() works with correct types",
@@ -1676,12 +1678,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "abs() rejects missing arguments",
 			input:          "import math\nreturn math.abs()",
-			expectedErrors: []string{"arity error: expected 1 arguments for 'abs', got 0"},
+			expectedErrors: []string{"arity error: expected 1 arguments, got 0"},
 		},
 		{
 			name:           "abs() rejects mismatched types",
 			input:          "import math\nreturn math.abs(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'abs' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:  "sqrt() works with correct types",
@@ -1690,7 +1692,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "sqrt() rejects mismatched types",
 			input:          "import math\nreturn math.sqrt(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'sqrt' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:  "floor() works with correct types",
@@ -1699,7 +1701,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "floor() rejects mismatched types",
 			input:          "import math\nreturn math.floor(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'floor' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:  "ceil() works with correct types",
@@ -1708,7 +1710,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "ceil() rejects mismatched types",
 			input:          "import math\nreturn math.ceil(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'ceil' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:  "round() works with correct types",
@@ -1717,7 +1719,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "round() rejects mismatched types",
 			input:          "import math\nreturn math.round(\"hello\")",
-			expectedErrors: []string{"type error: first argument to 'round' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:  "pow() works with correct types",
@@ -1726,17 +1728,17 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "pow() rejects missing arguments",
 			input:          "import math\nreturn math.pow(2)",
-			expectedErrors: []string{"arity error: expected 2 arguments for 'pow', got 1"},
+			expectedErrors: []string{"arity error: expected 2 arguments, got 1"},
 		},
 		{
 			name:           "pow() rejects mismatched first type",
 			input:          "import math\nreturn math.pow(\"2\", 3)",
-			expectedErrors: []string{"type error: first argument to 'pow' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:           "pow() rejects mismatched second type",
 			input:          "import math\nreturn math.pow(2, \"3\")",
-			expectedErrors: []string{"type error: second argument to 'pow' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "min() works with correct types",
@@ -1745,7 +1747,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "min() rejects mismatched second type",
 			input:          "import math\nreturn math.min(2, \"3\")",
-			expectedErrors: []string{"type error: second argument to 'min' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "max() works with correct types",
@@ -1754,7 +1756,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "max() rejects mismatched first type",
 			input:          "import math\nreturn math.max(\"2\", 3)",
-			expectedErrors: []string{"type error: first argument to 'max' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 1 expected Number, got String"},
 		},
 		{
 			name:  "log() works with correct types",
@@ -1763,7 +1765,7 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "log() rejects mismatched second type",
 			input:          "import math\nreturn math.log(100, \"10\")",
-			expectedErrors: []string{"type error: second argument to 'log' must be Number, got String"},
+			expectedErrors: []string{"type error: argument 2 expected Number, got String"},
 		},
 		{
 			name:  "rand() works with 0 arguments",
@@ -1772,22 +1774,22 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "rand() rejects number argument",
 			input:          "import math\nreturn math.rand(42)",
-			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+			expectedErrors: []string{"arity error: expected 0 arguments, got 1"},
 		},
 		{
 			name:           "rand() rejects string argument",
 			input:          "import math\nreturn math.rand(\"hello\")",
-			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+			expectedErrors: []string{"arity error: expected 0 arguments, got 1"},
 		},
 		{
 			name:           "rand() rejects boolean argument",
 			input:          "import math\nreturn math.rand(true)",
-			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+			expectedErrors: []string{"arity error: expected 0 arguments, got 1"},
 		},
 		{
 			name:           "rand() rejects date argument",
 			input:          "import math\nreturn math.rand(2026-08-12)",
-			expectedErrors: []string{"arity error: expected 0 arguments for 'rand', got 1"},
+			expectedErrors: []string{"arity error: expected 0 arguments, got 1"},
 		},
 		{
 			name:  "log.info() works with correct types",
@@ -1830,19 +1832,22 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 			input: "import map\nlet m: map[String]Number = {}\nreturn map.delete(m, \"key\")",
 		},
 		{
-			name:           "map.delete() rejects mismatched key type",
-			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m, 42)",
-			expectedErrors: []string{"type error: map index must be String, got Number"},
+			name:  "map.delete() rejects mismatched key type",
+			input: "import map\nlet m: map[String]Number = {}\nreturn map.delete(m, 42)",
+			expectedErrors: []string{
+				"type inference error: conflicting types for K: String and Number",
+				"type error: argument 2 expected String, got Number",
+			},
 		},
 		{
 			name:           "map.delete() rejects mismatched first argument type",
 			input:          "import map\nreturn map.delete(\"not a map\", \"key\")",
-			expectedErrors: []string{"type error: first argument to 'delete' must be Map, got String"},
+			expectedErrors: []string{"type error: argument 1 expected map[String]Any, got String"},
 		},
 		{
 			name:           "map.delete() rejects missing arguments",
 			input:          "import map\nlet m: map[String]Number = {}\nreturn map.delete(m)",
-			expectedErrors: []string{"arity error: expected 2 arguments for 'delete', got 1"},
+			expectedErrors: []string{"arity error: expected 2 arguments, got 1"},
 		},
 		{
 			name:  "map.keys() works with correct types",
@@ -1851,12 +1856,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "map.keys() rejects mismatched argument type",
 			input:          "import map\nreturn map.keys(\"not a map\")",
-			expectedErrors: []string{"type error: argument to 'keys' must be Map, got String"},
+			expectedErrors: []string{"type error: argument 1 expected map[K]V, got String"},
 		},
 		{
 			name:           "map.keys() rejects wrong arity",
 			input:          "import map\nlet m: map[String]Number = {}\nreturn map.keys(m, \"extra\")",
-			expectedErrors: []string{"arity error: expected 1 argument for 'keys', got 2"},
+			expectedErrors: []string{"arity error: expected 1 arguments, got 2"},
 		},
 		{
 			name:  "map.values() works with correct types",
@@ -1865,12 +1870,12 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "map.values() rejects mismatched argument type",
 			input:          "import map\nreturn map.values(\"not a map\")",
-			expectedErrors: []string{"type error: argument to 'values' must be Map, got String"},
+			expectedErrors: []string{"type error: argument 1 expected map[K]V, got String"},
 		},
 		{
 			name:           "map.values() rejects wrong arity",
 			input:          "import map\nlet m: map[String]Number = {}\nreturn map.values(m, \"extra\")",
-			expectedErrors: []string{"arity error: expected 1 argument for 'values', got 2"},
+			expectedErrors: []string{"arity error: expected 1 arguments, got 2"},
 		},
 		{
 			name:  "browser.log() works with a string argument",
@@ -2469,16 +2474,600 @@ func TestSemanticAnalysisBuiltins(t *testing.T) {
 		{
 			name:           "string.format() rejects a non-String first argument",
 			input:          "import string\nreturn string.format(5, \"x\")",
-			expectedErrors: []string{"type error: first argument to 'format' must be String, got Number"},
+			expectedErrors: []string{"type error: argument 1 expected String, got Number"},
 		},
 		{
 			name:           "string.format() rejects missing arguments",
 			input:          "import string\nreturn string.format(\"%d\")",
-			expectedErrors: []string{"arity error: expected 2 arguments for 'format', got 1"},
+			expectedErrors: []string{"arity error: expected 2 arguments, got 1"},
 		},
 	}
 
 	runTestScenarios(t, tests)
+}
+
+// TestSemanticAnalysisUFCS covers the extension-function / UFCS dot-call
+// sugar: receiver.fn(args...) resolving to a function whose first parameter
+// type matches the receiver, without requiring the fully qualified
+// module.fn(receiver, args...)/fn(receiver, args...) form. Candidates come
+// from three sources: builtin modules, real (user-written) imported
+// modules, and plain top-level functions declared in the same file.
+func TestSemanticAnalysisUFCS(t *testing.T) {
+	tests := []testScenario{
+		{
+			name:  "UFCS call on a variable receiver",
+			input: "import array\nlet arr = [1, 2]\nlet r = arr.push(3)",
+		},
+		{
+			name:  "UFCS call on a literal receiver",
+			input: "import array\nlet r = [1, 2, 3].push(4)",
+		},
+		{
+			name:  "UFCS call on a numeric literal receiver (math module)",
+			input: "import math\nreturn 5.abs()",
+		},
+		{
+			name:  "UFCS call on a string literal receiver (string module)",
+			input: "import string\nreturn \"hi\".toUpper()",
+		},
+		{
+			name:           "UFCS type mismatch reuses the direct-call generic inference/type errors",
+			input:          "import array\nlet arr = [1, 2]\nlet r = arr.push(\"x\")",
+			expectedErrors: []string{"type inference error: conflicting types for T: Number and String", "type error: argument 2 expected Number, got String"},
+		},
+		{
+			name:  "UFCS with an explicit move receiver marks it moved exactly once",
+			input: "import array\nlet data = [1, 2, 3]\nlet r = (move data).push(4)\ndata",
+			expectedErrors: []string{
+				"semantic error: use of moved variable 'data'",
+			},
+		},
+		{
+			name:           "UFCS rejected without the matching import",
+			input:          "let arr = [1, 2]\nlet r = arr.push(3)",
+			expectedErrors: []string{"type error: property access not supported for Array"},
+		},
+		{
+			name:  "struct field access is never shadowed by UFCS",
+			input: "import array\ntype Box struct { push Number }\nlet b = Box { push: 1 }\nlet x = b.push\nreturn x",
+		},
+		{
+			name:           "named arguments are rejected on a UFCS call",
+			input:          "import array\nlet arr = [1, 2]\nlet r = arr.push(item: 3)",
+			expectedErrors: []string{"type error: named arguments are not supported for method-call syntax 'push'"},
+		},
+		{
+			name:  "UFCS on a same-file top-level function",
+			input: "let double = fn(x: Number) -> Number { return x * 2 }\nlet n = 5\nlet r = n.double()",
+		},
+		{
+			name:  "UFCS via a named import (binds the function directly, not through a module alias)",
+			input: "import { push } from \"array\"\nlet arr = [1, 2]\nlet r = arr.push(3)",
+		},
+		{
+			name:  "named arguments are rejected on a UFCS call to a local function",
+			input: "let double = fn(x: Number, y: Number) -> Number { return x + y }\nlet n = 5\nlet r = n.double(y: 3)",
+			expectedErrors: []string{
+				"type error: named arguments are not supported for method-call syntax 'double'",
+			},
+		},
+		{
+			name: "ambiguous UFCS between a builtin module and a local function of the same name",
+			input: "import array\n" +
+				"let push = fn(x: [Number], y: Number) -> [Number] { return x }\n" +
+				"let arr = [1, 2]\n" +
+				"let r = arr.push(3)",
+			expectedErrors: []string{
+				"type error: ambiguous method call 'push'",
+			},
+		},
+		{
+			// The other half of reportUFCSAmbiguity: two *modules* matching,
+			// rather than a module and a directly-callable local function, so
+			// both descriptions take the moduleAlias branch. [String] matches
+			// array.join's generic [T] and string.join's concrete [String]
+			// alike. The full message is pinned here (the local-function case
+			// above only pins the prefix) because it is assembled lazily from
+			// each candidate's alias in scope-name-sorted order — the sort is
+			// what makes 'array' before 'string' deterministic rather than
+			// map-iteration luck.
+			name:  "ambiguous UFCS between two modules lists both aliases in sorted order",
+			input: "import array\nimport string\nlet xs = [\"a\", \"b\"]\nlet r = xs.join(\", \")",
+			expectedErrors: []string{
+				"type error: ambiguous method call 'join': matches 'array' and 'string'. Suggestion: call it explicitly (array.join(...) or string.join(...))",
+			},
+		},
+		{
+			// Reaching the same FunctionSymbol twice (once through the module
+			// alias, once through the named import) must NOT read as an
+			// ambiguity — ufcsCandidates dedupes by *symbol.FunctionSymbol.
+			name:  "the same function reached by both a module alias and a named import is not ambiguous",
+			input: "import array\nimport { push } from \"array\"\nlet arr = [1, 2]\nlet r = arr.push(3)",
+		},
+		{
+			// A generic first parameter (map[K]V) matches a concrete receiver,
+			// and the matched function's return type is inferred through that
+			// binding rather than degrading to Any: annotating the result with
+			// the WRONG element type is what proves keys() came back as
+			// [String] (an Any result would silently satisfy any annotation).
+			name:           "UFCS on a generic function infers the receiver's type parameters",
+			input:          "import map\nlet m: map[String]Number = {}\nlet ks: [Number] = m.keys()\nreturn ks",
+			expectedErrors: []string{"type error: cannot assign [String] to [Number]"},
+		},
+		{
+			name:  "UFCS on a generic function accepts the correctly inferred return type",
+			input: "import map\nlet m: map[String]Number = {}\nlet ks: [String] = m.keys()\nreturn ks",
+		},
+		{
+			// The receiver occupies parameter 0, so the arity reported to the
+			// user must be the function's arity MINUS the receiver, and the
+			// count compared against len(n.Arguments)+1.
+			name:           "UFCS arity error excludes the receiver from the expected count",
+			input:          "import array\nlet arr = [1, 2]\nlet r = arr.push()",
+			expectedErrors: []string{"arity error: expected 1 arguments, got 0"},
+		},
+		{
+			name:           "UFCS arity error also fires on too many arguments",
+			input:          "import array\nlet arr = [1, 2]\nlet r = arr.push(1, 2)",
+			expectedErrors: []string{"arity error: expected 1 arguments, got 2"},
+		},
+		{
+			// UFCS is call-syntax sugar only: analyzeCallExpression marks the
+			// PropertyExpression in propertyCallSites before analyzing it, and
+			// analyzePropertyExpression only attempts resolution for a marked
+			// node. A bare reference is never marked, so it stays rejected —
+			// there is no way to obtain `push` as a value this way.
+			name:           "a non-call property reference never resolves via UFCS",
+			input:          "import array\nlet arr = [1, 2]\nlet f = arr.push",
+			expectedErrors: []string{"type error: property access not supported for Array"},
+		},
+		{
+			// The `!isNullable` half of the same guard: optional chaining is
+			// about safely reaching a member of a possibly-nil value, not
+			// about extension functions, so `?.` never resolves via UFCS.
+			name:           "an optional-chaining receiver never resolves via UFCS",
+			input:          "import array\nlet arr: [Number]? = [1, 2]\nlet r = arr?.push(3)",
+			expectedErrors: []string{"type error: property access not supported for Array"},
+		},
+		{
+			// ufcsCandidates skips any function with no parameters at all —
+			// there is no parameter 0 for the receiver to bind to, and
+			// indexing ParamTypes()[0] would panic without this guard.
+			name:           "a zero-parameter function is never a UFCS candidate",
+			input:          "let f = fn() -> Number { return 1 }\nlet n = 5\nlet r = n.f()",
+			expectedErrors: []string{"type error: property access not supported for Number"},
+		},
+		{
+			// The whole point of the first-parameter match: a same-named
+			// function whose parameter 0 is a different type is not a
+			// candidate, so the receiver falls through to the generic error.
+			name:           "a function whose first parameter type differs is not a UFCS candidate",
+			input:          "let f = fn(s: String) -> String { return s }\nlet n = 5\nlet r = n.f()",
+			expectedErrors: []string{"type error: property access not supported for Number"},
+		},
+		{
+			// Only FunctionSymbol-backed module members can be candidates:
+			// BuiltinSymbol-backed modules (date/log/time/page/browser) carry
+			// only a doc string, not per-parameter types, so date.year(d)
+			// cannot be reached as d.year() even though it "looks" eligible.
+			name:           "a BuiltinSymbol-backed module function is not a UFCS candidate",
+			input:          "import date\nlet d = 2026-08-12\nlet r = d.year()",
+			expectedErrors: []string{"type error: property access not supported for Number"},
+		},
+		{
+			// Struct receivers DO reach UFCS. This inverts an earlier pin that
+			// recorded the opposite: extension functions on user-declared
+			// struct types are now part of the feature, and a struct's own
+			// members only take priority when they actually compete (see the
+			// field-vs-function cases below).
+			name: "a struct receiver falls back to UFCS when no field claims the name",
+			input: "type Point struct {\n x Number\n y Number\n}\n" +
+				"let mag = fn(p: Point) -> Number { return p.x + p.y }\n" +
+				"let p = Point { x: 1, y: 2 }\n" +
+				"let r = p.mag()",
+		},
+		{
+			// `let p: Point = ...` and struct-typed parameters resolve to a
+			// StructDefSymbol rather than a StructInstanceSymbol. That is the
+			// dominant shape in real code, and the two have different Equals
+			// behavior, so it is pinned separately from the instance case.
+			name: "UFCS on an annotated-let struct receiver (StructDefSymbol)",
+			input: "type Point struct {\n x Number\n y Number\n}\n" +
+				"let mag = fn(p: Point) -> Number { return p.x + p.y }\n" +
+				"let p: Point = Point { x: 1, y: 2 }\n" +
+				"let r = p.mag()",
+		},
+		{
+			name: "UFCS on a struct-typed function parameter receiver",
+			input: "type Point struct {\n x Number\n y Number\n}\n" +
+				"let mag = fn(p: Point) -> Number { return p.x + p.y }\n" +
+				"let describe = fn(q: Point) -> Number { return q.mag() }",
+		},
+		{
+			// The struct's own field and the free function differ in argument
+			// count, so each call picks unambiguously — the overloading the
+			// feature is built around. Field takes 1, function takes 2 beyond
+			// the receiver.
+			name: "struct field wins on argument count",
+			input: "type Point struct {\n scale fn(Number) -> Number\n}\n" +
+				"let scale = fn(p: Point, f: Number, o: Number) -> Number { return f + o }\n" +
+				"let p = Point { scale: fn(f: Number) -> Number { return f } }\n" +
+				"let r = p.scale(2)",
+		},
+		{
+			name: "free function wins on argument count",
+			input: "type Point struct {\n scale fn(Number) -> Number\n}\n" +
+				"let scale = fn(p: Point, f: Number, o: Number) -> Number { return f + o }\n" +
+				"let p = Point { scale: fn(f: Number) -> Number { return f } }\n" +
+				"let r = p.scale(2, 3)",
+		},
+		{
+			// Same argument count, distinguished only by type.
+			name: "free function wins on argument type",
+			input: "type Tag struct {\n at fn(String) -> String\n}\n" +
+				"let at = fn(t: Tag, i: Number) -> Number { return i }\n" +
+				"let t = Tag { at: fn(s: String) -> String { return s } }\n" +
+				"let r = t.at(1)",
+		},
+		{
+			name: "struct field wins on argument type",
+			input: "type Tag struct {\n at fn(String) -> String\n}\n" +
+				"let at = fn(t: Tag, i: Number) -> Number { return i }\n" +
+				"let t = Tag { at: fn(s: String) -> String { return s } }\n" +
+				"let r = t.at(\"x\")",
+		},
+		{
+			// cast.to's first parameter is an unconstrained generic, so it
+			// Equals-matches every struct. Without demoting such blanket
+			// candidates below the struct's own field, merely importing cast
+			// would make this program ambiguous.
+			name: "a blanket generic candidate does not contest a struct's own field",
+			input: "import cast\n" +
+				"type Box struct {\n to fn(String) -> String\n}\n" +
+				"let b = Box { to: fn(s: String) -> String { return s } }\n" +
+				"let r = b.to(\"x\")",
+		},
+		{
+			// Identical parameter lists once the receiver is dropped: no call
+			// could ever tell them apart, so this is rejected at the call.
+			name: "struct field and function with the same signature are ambiguous",
+			input: "type Point struct {\n scale fn(Number) -> Number\n}\n" +
+				"let scale = fn(p: Point, f: Number) -> Number { return f }\n" +
+				"let p = Point { scale: fn(f: Number) -> Number { return f } }\n" +
+				"let r = p.scale(2)",
+			expectedErrors: []string{"type error: ambiguous method call 'scale'"},
+		},
+		{
+			// The zero-argument tie: nothing to discriminate on, which is why
+			// the declared-signature check has to run before any argument
+			// inspection.
+			name: "zero-argument struct field and function are ambiguous",
+			input: "type Dog struct {\n bark fn() -> String\n}\n" +
+				"let bark = fn(d: Dog) -> String { return \"woof\" }\n" +
+				"let myDog = Dog { bark: fn() -> String { return \"woof\" } }\n" +
+				"let s = myDog.bark()",
+			expectedErrors: []string{"type error: ambiguous method call 'bark'"},
+		},
+		{
+			// An empty array literal needs the expected-type context to infer
+			// its element type, and resolution cannot supply that while the
+			// callee is still undecided — so it declines rather than guessing.
+			name: "argument needing expected-type context bails out rather than guessing",
+			input: "type Bag struct {\n put fn([Number]) -> Number\n}\n" +
+				"let put = fn(b: Bag, xs: [String]) -> Number { return 0 }\n" +
+				"let bag = Bag { put: fn(xs: [Number]) -> Number { return 0 } }\n" +
+				"let r = bag.put([])",
+			expectedErrors: []string{"type error: ambiguous method call 'put'"},
+		},
+		{
+			// The other half of that rule, and the reason needsExpectedType
+			// enumerates *ast.FunctionLiteral at all rather than letting it
+			// fall to the fail-safe `default: true`: a FULLY ANNOTATED function
+			// literal reads nothing from the expectation stack, so the tiebreak
+			// can analyze it and pick a winner. Delete that arm and this call —
+			// which resolves fine today — starts reporting a spurious "need a
+			// known target type" ambiguity. Nothing else in the suite fails on
+			// that deletion, so this case is the only thing pinning it.
+			name: "a fully annotated function literal argument does not bail out",
+			input: "type Runner struct {\n run fn(fn(Number) -> Number) -> Number\n}\n" +
+				"let run = fn(r: Runner, f: fn(String) -> String) -> Number { return 0 }\n" +
+				"let rr = Runner { run: fn(f: fn(Number) -> Number) -> Number { return 1 } }\n" +
+				"let out = rr.run(fn(x: Number) -> Number { return x })",
+		},
+		{
+			// Neither side fits the argument count, so the field wins and the
+			// ordinary arity check reports against it — a precise message
+			// rather than a vague "no such property".
+			name: "neither side arity-viable reports the field's arity error",
+			input: "type Point struct {\n scale fn(Number) -> Number\n}\n" +
+				"let scale = fn(p: Point, f: Number, o: Number) -> Number { return f }\n" +
+				"let p = Point { scale: fn(f: Number) -> Number { return f } }\n" +
+				"let r = p.scale(1, 2, 3)",
+			expectedErrors: []string{"arity error: expected 1 arguments, got 3"},
+		},
+		{
+			// No competing field at all, wrong argument count: this must stay
+			// the normal UFCS arity error, not degrade to "property not found".
+			name: "struct UFCS with wrong arity still reports an arity error",
+			input: "type Point struct {\n x Number\n}\n" +
+				"let mag = fn(p: Point) -> Number { return p.x }\n" +
+				"let p = Point { x: 1 }\n" +
+				"let r = p.mag(1, 2)",
+			expectedErrors: []string{"arity error: expected 0 arguments, got 2"},
+		},
+		{
+			// UFCS stays call-position-only, so a bare property reference is
+			// unchanged — and it is the escape hatch the ambiguity messages
+			// suggest for forcing the field.
+			name: "a bare struct property reference does not reach UFCS",
+			input: "type Point struct {\n x Number\n}\n" +
+				"let mag = fn(p: Point) -> Number { return p.x }\n" +
+				"let p = Point { x: 1 }\n" +
+				"let f = p.mag",
+			expectedErrors: []string{"semantic error: property 'mag' not found on struct 'Point'"},
+		},
+		{
+			// Nullable receivers keep their existing behavior and message.
+			name: "a nullable struct receiver does not reach UFCS",
+			input: "type Point struct {\n x Number\n}\n" +
+				"let mag = fn(p: Point) -> Number { return p.x }\n" +
+				"let p: Point? = nil\n" +
+				"let r = p?.mag()",
+			expectedErrors: []string{"semantic error: property 'mag' not found on struct 'Point'"},
+		},
+		{
+			// A non-function field of the same name does not block UFCS in
+			// call position: calling a String field is a hard error today, so
+			// falling through can only make more programs work.
+			name: "a non-function field of the same name does not block UFCS",
+			input: "type Point struct {\n mag String\n}\n" +
+				"let mag = fn(p: Point) -> Number { return 1 }\n" +
+				"let p = Point { mag: \"x\" }\n" +
+				"let r = p.mag()",
+		},
+		{
+			// ufcsCandidates scans the global scope as it is populated, so a
+			// function declared below the call site is invisible. Deterministic
+			// and consistent with the rest of UFCS, but pinned so it does not
+			// read as a bug.
+			name: "a function declared below the call site does not contest the field",
+			input: "type Point struct {\n scale fn(Number) -> Number\n}\n" +
+				"let p = Point { scale: fn(f: Number) -> Number { return f } }\n" +
+				"let r = p.scale(2)\n" +
+				"let scale = fn(q: Point, f: Number) -> Number { return f }",
+		},
+		{
+			// Explicit type arguments settle the contest before any argument
+			// is looked at, and they can only mean the function — a field's
+			// function type never declares type parameters. Pinned with a call
+			// the FIELD would otherwise win outright (a String argument its
+			// fn(String) -> String accepts), so this asserts the priority, not
+			// merely that something resolved. It detects a regression by
+			// asserting zero diagnostics: whichever side won, a non-generic
+			// winner would draw "expected 0 generic type arguments" — that
+			// message is identical either way, so it cannot itself tell the
+			// two apart.
+			name: "explicit type arguments pick the function over a field that would match",
+			input: "type Box struct {\n to fn(String) -> String\n}\n" +
+				"let to = fn<T>(b: Box, x: T) -> T { return x }\n" +
+				"let b = Box { to: fn(s: String) -> String { return s } }\n" +
+				"let r = b.to::<String>(\"x\")",
+		},
+		{
+			// The expected-type bail-out is recursive: nested analysis does
+			// not mask the expectation stack, so a bare [] buried inside an
+			// argument reads the outer expectation just as a top-level one
+			// would. Checking only the argument's own node kind would wrongly
+			// let this through and then pick an overload on a guessed type.
+			name: "an empty array nested inside an argument still bails out",
+			input: "type Bag struct {\n put fn([Number]) -> Number\n}\n" +
+				"let put = fn(b: Bag, xs: [String]) -> Number { return 0 }\n" +
+				"let id = fn(xs: [Number]) -> [Number] { return xs }\n" +
+				"let bag = Bag { put: fn(xs: [Number]) -> Number { return 0 } }\n" +
+				"let r = bag.put(id([]))",
+			expectedErrors: []string{"this call's arguments need a known target type to choose between them"},
+		},
+		{
+			// The deliberate cost of needsExpectedType's fail-safe `default:
+			// true`: an interpolated string is not one of the enumerated node
+			// kinds, so it is *assumed* to need expected-type context even
+			// though it does not. `t.at("x")` (above) resolves to the field
+			// while `t.at("hi ${n}")` does not — over-reporting a recoverable
+			// diagnostic is the intended trade against silently picking the
+			// wrong overload. A future optimization that flips the default to
+			// false must break this test rather than pass it quietly.
+			name: "an argument of an unenumerated node kind conservatively bails out",
+			input: "type Tag struct {\n at fn(String) -> String\n}\n" +
+				"let at = fn(t: Tag, i: Number) -> Number { return i }\n" +
+				"let t = Tag { at: fn(s: String) -> String { return s } }\n" +
+				"let n = 1\n" +
+				"let r = t.at(\"hi ${n}\")",
+			expectedErrors: []string{"this call's arguments need a known target type to choose between them"},
+		},
+		{
+			// The argument-type tiebreak has to analyze the arguments itself,
+			// and analysis is NOT side-effect free: it reports diagnostics and
+			// mutates move state. The symbols it produces are handed to the
+			// checking loop rather than re-derived, so this must report the
+			// moved-variable error exactly once — a duplicate here means the
+			// preArgs hand-off broke and every diagnostic inside a tiebroken
+			// call is doubled.
+			name: "an argument analyzed by the tiebreak is not analyzed a second time",
+			input: "type Tag struct {\n at fn(String) -> String\n}\n" +
+				"let at = fn(t: Tag, i: Number) -> Number { return i }\n" +
+				"let t = Tag { at: fn(s: String) -> String { return s } }\n" +
+				"let s = \"x\"\n" +
+				"let a = move s\n" +
+				"let r = t.at(move s)",
+			expectedErrors: []string{"semantic error: use of moved variable 's'"},
+		},
+		{
+			// Both sides are arity-viable but neither accepts the argument
+			// types. Resolution falls back to the field so the ordinary
+			// checking path reports a precise per-argument error against the
+			// member the call most likely meant, instead of an ambiguity or a
+			// "no such property".
+			name: "neither side accepting the argument types reports the field's type error",
+			input: "type Tag struct {\n at fn(String) -> String\n}\n" +
+				"let at = fn(t: Tag, i: Number) -> Number { return i }\n" +
+				"let t = Tag { at: fn(s: String) -> String { return s } }\n" +
+				"let b = true\n" +
+				"let r = t.at(b)",
+			expectedErrors: []string{"type error: argument 1 expected String, got Boolean"},
+		},
+		{
+			// A constraint type is a fourth receiver shape, alongside the
+			// instance/annotated-let/parameter cases above:
+			// analyzePropertyExpression unwraps ConstraintSymbol to its base
+			// type before computing structDef, so the contest must be found
+			// and settled against the BASE struct. Two arguments fit only the
+			// free function — if the unwrap regressed, the field would be
+			// consulted and report an arity error instead.
+			name: "a constraint-typed receiver resolves the field/function contest",
+			input: "type Point struct { scale fn(Number) -> Number }\n" +
+				"define Major constraints Point with: fn(p: Point) -> Boolean { return true }\n" +
+				"let scale = fn(p: Point, f: Number, o: Number) -> Number { return f + o }\n" +
+				"let use = fn(m: Major) -> Number { return m.scale(2, 3) }",
+		},
+		{
+			// The result of a UFCS call is an ordinary expression, so it can
+			// itself be the receiver of the next one — each PropertyExpression
+			// is keyed independently in ufcsMatches.
+			name:  "UFCS calls chain on the previous call's result",
+			input: "import array\nlet arr = [1, 2]\nlet r = arr.push(3).push(4)",
+		},
+		{
+			// UFCS inside a function body: the callee is a top-level function
+			// reached from an enclosing scope, which is exactly what purity
+			// analysis polices for *variables* — calling another top-level
+			// function is still allowed, and the sugar must not change that.
+			name:  "UFCS resolves to a top-level function from inside a function body",
+			input: "let triple = fn(x: Number) -> Number { return x * 3 }\nlet boost = fn(x: Number) -> Number { return x.triple() }\nreturn boost(2)",
+		},
+	}
+
+	runTestScenarios(t, tests)
+}
+
+// analyzeLastLetValue parses and analyzes input — which must be error-free
+// and end in a `let` statement — and returns the analyzer alongside that
+// final statement's value expression, the node these tests interrogate the
+// analyzer's recorded state about.
+func analyzeLastLetValue(t *testing.T, input string) (*Analyzer, ast.Expression) {
+	t.Helper()
+
+	p := parser.New(lexer.New(input))
+	program := p.Parse()
+	if p.HasErrors() {
+		t.Fatalf("parser errors occurred during setup: %v", p.Errors())
+	}
+
+	a := New(environment.NewEnvironment("", "", false))
+	a.analyze(program)
+	if errs := a.Errors(); len(errs) != 0 {
+		t.Fatalf("expected no analysis errors, got: %v", errs)
+	}
+
+	last := program.Statements[len(program.Statements)-1]
+	letStmt, ok := last.(*ast.LetStatement)
+	if !ok {
+		t.Fatalf("expected the last statement to be a let statement, got %T", last)
+	}
+	return a, letStmt.Value
+}
+
+// TestUFCSRecordsResolutionForConsumers covers what the error-count-based
+// table above structurally cannot: the two pieces of state a successful UFCS
+// resolution leaves behind for everything downstream.
+//
+//  1. The method-name node is bound to the matched FunctionSymbol, which is
+//     what lets the LSP hover/go-to-definition on `push` in `arr.push(3)`
+//     land on array.push rather than on nothing.
+//  2. GetUFCSModulePath reports the owning module. Its two-value shape is
+//     load-bearing and easy to regress: the module path is a plain string
+//     whose "" value is a *meaningful* answer (a same-file top-level
+//     function), so only the boolean distinguishes that from "this property
+//     expression was never resolved via UFCS at all". A consumer that
+//     collapsed the two would route a local function's codegen through the
+//     module path (or vice versa).
+func TestUFCSRecordsResolutionForConsumers(t *testing.T) {
+	tests := []struct {
+		name string
+		// input must end with a statement of the form `let r = <recv>.<fn>(...)`.
+		input string
+		// wantModulePath is the module owning the matched function; "" means a
+		// same-file top-level function.
+		wantModulePath string
+		// wantFunctionName is the matched function's own name.
+		wantFunctionName string
+	}{
+		{
+			name:             "builtin module function",
+			input:            "import array\nlet arr = [1, 2]\nlet r = arr.push(3)",
+			wantModulePath:   "array",
+			wantFunctionName: "push",
+		},
+		{
+			name:             "same-file top-level function",
+			input:            "let double = fn(x: Number) -> Number { return x * 2 }\nlet n = 5\nlet r = n.double()",
+			wantModulePath:   "",
+			wantFunctionName: "double",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, lastValue := analyzeLastLetValue(t, tt.input)
+
+			call, ok := lastValue.(*ast.CallExpression)
+			if !ok {
+				t.Fatalf("expected the let value to be a call expression, got %T", lastValue)
+			}
+			prop, ok := call.Function.(*ast.PropertyExpression)
+			if !ok {
+				t.Fatalf("expected the callee to be a property expression, got %T", call.Function)
+			}
+
+			modulePath, isUFCS := a.GetUFCSModulePath(prop)
+			if !isUFCS {
+				t.Fatalf("expected %q to be recorded as a UFCS call", prop.String())
+			}
+			if modulePath != tt.wantModulePath {
+				t.Errorf("expected module path %q, got %q", tt.wantModulePath, modulePath)
+			}
+
+			propSym, ok := a.GetSymbol(prop.Property)
+			if !ok {
+				t.Fatalf("expected the method name node to be bound to a symbol (hover/go-to-definition depends on it)")
+			}
+			fnSym, ok := propSym.(*symbol.FunctionSymbol)
+			if !ok {
+				t.Fatalf("expected the method name to resolve to a function symbol, got %T", propSym)
+			}
+			if fnSym.Name != tt.wantFunctionName {
+				t.Errorf("expected the method name to resolve to function %q, got %q", tt.wantFunctionName, fnSym.Name)
+			}
+		})
+	}
+
+	t.Run("a non-UFCS property expression is not reported as one", func(t *testing.T) {
+		// The negative control for the boolean above: a struct field access
+		// resolves through the ordinary property path, so GetUFCSModulePath
+		// must return false — not a bare "" that a caller could mistake for
+		// "a same-file top-level function".
+		input := "type Box struct {\n value Number\n}\nlet b = Box { value: 1 }\nlet r = b.value"
+
+		a, lastValue := analyzeLastLetValue(t, input)
+
+		prop, ok := lastValue.(*ast.PropertyExpression)
+		if !ok {
+			t.Fatalf("expected the let value to be a property expression, got %T", lastValue)
+		}
+
+		if modulePath, isUFCS := a.GetUFCSModulePath(prop); isUFCS {
+			t.Errorf("expected a struct field access not to be recorded as a UFCS call, got module path %q", modulePath)
+		}
+	})
 }
 
 func TestSemanticAnalysisHTTP(t *testing.T) {
@@ -3853,6 +4442,80 @@ let c: Client = newClient("http://example.com", {})
 				}
 			} else if len(a.DiagnosticErrors()) > 0 {
 				t.Fatalf("expected no errors, got: %v", a.DiagnosticErrors())
+			}
+		})
+	}
+}
+
+// TestAmbiguityMessageFormatters pins the exact rendered text of the two
+// diagnostic formatters that build the wildcard-import ambiguity messages
+// (analyzeIdentifier's "ambiguous reference to ..." and checkAmbiguousTypeUse's
+// "ambiguous type ..."). Both now delegate their list-joining to the shared
+// joinWithLastSep helper, which is also used by the UFCS ambiguity message —
+// so a change made for UFCS can silently reword these two unrelated
+// pre-existing diagnostics.
+//
+// The end-to-end tests below and in internal/script only ever exercise the
+// two-module case, because a collision needs two wildcard imports of modules
+// that export the same name. The three-or-more case is reachable in real code
+// (three wildcard imports of colliding modules) but is pinned nowhere else,
+// and it is exactly where the "', ' between all but the last, ' and '/' or '
+// before the last" rule can regress into a uniform join. The zero- and
+// one-item cases are unreachable through the call sites (both are guarded by
+// len > 1), but are pinned anyway so the helper's degenerate branch cannot
+// start emitting a stray separator.
+func TestAmbiguityMessageFormatters(t *testing.T) {
+	tests := []struct {
+		name string
+		// modules is the wildcard-import origin list, as the call sites pass it.
+		modules []string
+		// wantModuleList is the "wildcard-imported from %s" fragment: each
+		// origin single-quoted, joined with "and" before the last.
+		wantModuleList string
+		// wantQualified is the "Suggestion: qualify it (%s)" fragment: each
+		// origin turned into a module.name form, joined with "or" before the
+		// last. Note it is NOT quoted, unlike wantModuleList.
+		wantQualified string
+	}{
+		{
+			name:           "no modules render as empty fragments",
+			modules:        nil,
+			wantModuleList: "",
+			wantQualified:  "",
+		},
+		{
+			name:           "a single module gets no separator at all",
+			modules:        []string{"array"},
+			wantModuleList: "'array'",
+			wantQualified:  "array.len",
+		},
+		{
+			name:           "two modules are joined by the word separator only",
+			modules:        []string{"array", "string"},
+			wantModuleList: "'array' and 'string'",
+			wantQualified:  "array.len or string.len",
+		},
+		{
+			name:           "three modules use commas before the final word separator",
+			modules:        []string{"array", "string", "time"},
+			wantModuleList: "'array', 'string' and 'time'",
+			wantQualified:  "array.len, string.len or time.len",
+		},
+		{
+			name:           "four modules keep commas between every earlier item",
+			modules:        []string{"array", "string", "time", "math"},
+			wantModuleList: "'array', 'string', 'time' and 'math'",
+			wantQualified:  "array.len, string.len, time.len or math.len",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatModuleList(tt.modules); got != tt.wantModuleList {
+				t.Errorf("formatModuleList(%v) = %q, want %q", tt.modules, got, tt.wantModuleList)
+			}
+			if got := formatQualifiedSuggestions(tt.modules, "len"); got != tt.wantQualified {
+				t.Errorf("formatQualifiedSuggestions(%v, \"len\") = %q, want %q", tt.modules, got, tt.wantQualified)
 			}
 		})
 	}

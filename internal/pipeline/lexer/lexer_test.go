@@ -711,6 +711,93 @@ func TestLeadingDecimalNumber(t *testing.T) {
 	}
 }
 
+// TestNumberDotMethodCall ensures a numeric literal immediately followed by a
+// dot-call (e.g. "5.abs()") lexes as NUMBER + DOT + IDENT + LPAREN + RPAREN,
+// rather than mis-scanning "5." as a single malformed number token.
+func TestNumberDotMethodCall(t *testing.T) {
+	input := "5.abs()"
+	tokens, errors := Lex(input)
+
+	if len(errors) != 0 {
+		t.Fatalf("expected 0 errors, got %d: %v", len(errors), errors)
+	}
+
+	expectedTypes := []TokenType{NUMBER, DOT, IDENT, LPAREN, RPAREN, EOF}
+	if len(tokens) != len(expectedTypes) {
+		t.Fatalf("expected %d tokens, got %d: %v", len(expectedTypes), len(tokens), tokens)
+	}
+	for i, expected := range expectedTypes {
+		if tokens[i].Type != expected {
+			t.Errorf("token %d: expected %q, got %q", i, expected, tokens[i].Type)
+		}
+	}
+	if tokens[0].Literal != "5" {
+		t.Errorf("expected NUMBER literal %q, got %q", "5", tokens[0].Literal)
+	}
+	if tokens[2].Literal != "abs" {
+		t.Errorf("expected IDENT literal %q, got %q", "abs", tokens[2].Literal)
+	}
+}
+
+// TestDecimalNumberStillLexesAsOneToken is a regression guard: an ordinary
+// decimal literal ("15.5") must still lex as a single NUMBER token, not be
+// split at the decimal point by the readNumber fix for dot-calls.
+func TestDecimalNumberStillLexesAsOneToken(t *testing.T) {
+	input := "15.5"
+	tokens, errors := Lex(input)
+
+	if len(errors) != 0 {
+		t.Fatalf("expected 0 errors, got %d: %v", len(errors), errors)
+	}
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 tokens (NUMBER + EOF), got %d: %v", len(tokens), tokens)
+	}
+	if tokens[0].Type != NUMBER || tokens[0].Literal != "15.5" {
+		t.Errorf("expected NUMBER %q, got %q %q", "15.5", tokens[0].Type, tokens[0].Literal)
+	}
+}
+
+// TestDecimalNumberDotMethodCall combines both halves of the readNumber rule
+// in one literal: the FIRST dot is consumed as a decimal point (a digit
+// follows it) while the SECOND is handed back as a DOT for the dot-call. The
+// old "consume every '.'" loop would have swallowed both into a single
+// malformed "1.5.abs" number, so this is the case that pins the lookahead,
+// not just the presence of a dot. Positions are asserted because the fix
+// changes how far the number token advances the cursor.
+func TestDecimalNumberDotMethodCall(t *testing.T) {
+	input := "1.5.abs()"
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Decimal number value", Token{NUMBER, "1.5", 1, 1}},
+		{"Dot before the method name", Token{DOT, ".", 1, 4}},
+		{"Method name", Token{IDENT, "abs", 1, 5}},
+		{"Left parenthesis", Token{LPAREN, "(", 1, 8}},
+		{"Right parenthesis", Token{RPAREN, ")", 1, 9}},
+		{"End of file", Token{EOF, "", 1, 10}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
+// TestNumberWithTrailingDotAtEndOfInput exercises the boundary of the same
+// lookahead: readNumber peeks at the character after the '.', and at the very
+// end of input there is none. The dot must still be released as its own DOT
+// token (leaving the "missing property name" complaint to the parser) rather
+// than being absorbed into the number or tripping a lexer error.
+func TestNumberWithTrailingDotAtEndOfInput(t *testing.T) {
+	input := "5."
+	tknzr := New(input)
+
+	tests := []testScenario{
+		{"Number value", Token{NUMBER, "5", 1, 1}},
+		{"Trailing dot", Token{DOT, ".", 1, 2}},
+		{"End of file", Token{EOF, "", 1, 3}},
+	}
+
+	runTestsOnTokens(tknzr, tests, t)
+}
+
 // TestUnderscoreIdentifier verifies that identifiers containing an underscore
 // (e.g. "my_rate") are tokenized as a single IDENT token with the full literal
 // preserved, and that the EOF position immediately follows the last character.

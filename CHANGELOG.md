@@ -2,6 +2,13 @@
 
 All notable changes to the Caja Language and CLI will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **UFCS / Extension-Function Dot-Call Sugar**: any function can now be called as if it were a method on its first argument, e.g. `list.push(4)` instead of `array.push(list, 4)`. The receiver's static type is matched against a function's first parameter, and candidates come from any imported builtin module (`array`, `string`, `math`, `map`, `cast`, `http`), any imported real/user-written `.caja` module, or a plain top-level function declared in the same file — the function must already be reachable by name (imported or declared above the call site). An ambiguous match (two or more equally-eligible functions) is a compile error suggesting the explicit call form(s) to use instead. Works with variable, literal, and numeric-literal receivers (`5.abs()`), and composes with `move` (`(move list).push(4)`).
+- **UFCS on struct receivers, with overloading against the struct's own fields**: `p.mag()` now resolves to a free `mag(p: Point)`. When a struct has a function-typed field of the same name, the two coexist and each call picks, in this order: named arguments mean the field (a method-call form cannot take them) and explicit type arguments mean the function (a field's type has no type parameters); then argument count; then, when counts tie, argument types. Two cases are rejected rather than guessed — a field and a function with the same parameter list (indistinguishable at every call, which is what the rule is for), and a tie whose arguments would need a known target type to infer (a bare `[]` or an unannotated lambda). Both errors name each candidate and suggest either the explicit call or binding the property first. A function whose first parameter is an unconstrained generic (`cast.to`) never contests a struct's own field.
+- **`string`/`math`/`map` type-checking overhaul**: these builtin modules now carry structured per-parameter types (like `array`/`cast` already did) instead of doc-string-only signatures, enabling the UFCS matching above and giving `map`'s functions genuine `K`/`V` generic inference.
+
 ## [v0.1.0-alpha.5] - 2026-08-29
 
 ### Added

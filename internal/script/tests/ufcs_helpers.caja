@@ -1,0 +1,22 @@
+# Helper module for the UFCS (extension-function) tests: 'triple' is exported
+# and so is a UFCS candidate from another file, while 'secretDouble' is
+# private and must never be reachable as 5.secretDouble().
+private let secretDouble = fn(x: Number) -> Number {
+	return x * 2
+}
+
+let triple = fn(x: Number) -> Number {
+	return x * 3
+}
+
+# 'Tag' and 'at' together give an importing file a struct receiver whose own
+# 'at' field is contested by a UFCS candidate declared in ANOTHER file, which
+# is the only way to get more than one candidate competing with a field (a
+# single file cannot declare two functions of the same name).
+type Tag struct {
+	at fn(String) -> String
+}
+
+let at = fn(t: Tag, i: Number) -> Number {
+	return i
+}

@@ -1830,6 +1830,53 @@ func TestPipeOperatorParsing(t *testing.T) {
 	}
 }
 
+// TestMethodCallSugarParsesLikeQualifiedCall documents the invariant the
+// UFCS/extension-function analyzer feature depends on: the parser has no
+// notion of "module" vs. "value" receivers, so `list.push(4)` and
+// `array.push(list, 4)` must produce structurally identical CallExpression
+// shapes — a CallExpression whose Function is a PropertyExpression{Object,
+// Property}. Disambiguating an arbitrary identifier receiver from a real
+// module is deferred entirely to the analyzer's symbol table.
+func TestMethodCallSugarParsesLikeQualifiedCall(t *testing.T) {
+	input := "list.push(4)"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.Parse()
+
+	if p.HasErrors() {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+	}
+
+	callExpr, ok := stmt.Expression.(*ast.CallExpression)
+	if !ok {
+		t.Fatalf("expression is not ast.CallExpression. got=%T", stmt.Expression)
+	}
+
+	propExpr, ok := callExpr.Function.(*ast.PropertyExpression)
+	if !ok {
+		t.Fatalf("CallExpression.Function is not ast.PropertyExpression. got=%T", callExpr.Function)
+	}
+
+	objIdent, ok := propExpr.Object.(*ast.Identifier)
+	if !ok || objIdent.Value != "list" {
+		t.Errorf("expected PropertyExpression.Object to be Identifier 'list', got %#v", propExpr.Object)
+	}
+	if propExpr.Property.Value != "push" {
+		t.Errorf("expected PropertyExpression.Property to be 'push', got %q", propExpr.Property.Value)
+	}
+	if len(callExpr.Arguments) != 1 {
+		t.Fatalf("expected 1 argument, got %d", len(callExpr.Arguments))
+	}
+	if callExpr.Arguments[0].String() != "4" {
+		t.Errorf("expected argument '4', got %q", callExpr.Arguments[0].String())
+	}
+}
+
 // TestMultipleStatementsOnSameLineError verifies that consecutive statements
 // on the same line without a newline produce a syntax error.
 func TestMultipleStatementsOnSameLineError(t *testing.T) {

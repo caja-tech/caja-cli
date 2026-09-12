@@ -1,0 +1,4 @@
+import "ufcs_helpers"
+import "ufcs_helpers_alt"
+let n = 5
+return n.triple()
