@@ -1,0 +1,6 @@
+# A second module exporting a function with the same name and the same first
+# parameter type as ufcs_helpers.triple, so importing both makes n.triple()
+# ambiguous between two modules.
+let triple = fn(x: Number) -> Number {
+	return x + x + x
+}

@@ -3,6 +3,7 @@ package script
 import (
 	"bytes"
 	"caja-cli/internal/pipeline/analyzer"
+	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/compiler"
 	"caja-cli/internal/pipeline/environment"
 	"caja-cli/internal/pipeline/lexer"
@@ -438,6 +439,57 @@ func TestModules(t *testing.T) {
 	}
 }
 
+// analyzeFixture runs lexer→parser→analyzer over the fixture at
+// testsDir/file and returns the analyzer's diagnostics. It deliberately drives
+// the stages directly instead of going through ParseWithDir, which only prints
+// diagnostics as a side effect and returns a generic error — the tests below
+// assert the exact message.
+//
+// A parser error is a fatal setup failure: these are semantic-diagnostic
+// tests, so a syntactically broken fixture must never look like a passing
+// negative case.
+func analyzeFixture(t *testing.T, testsDir, file string) []ast.DiagnosticError {
+	t.Helper()
+
+	path := filepath.Join(testsDir, file)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read test file: %v", err)
+	}
+
+	p := parser.New(lexer.New(string(content)))
+	program := p.Parse()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+
+	a := analyzer.New(environment.NewEnvironment(testsDir, path, false))
+	a.Run(program)
+
+	return a.DiagnosticErrors()
+}
+
+// assertFirstDiagnostic checks diags against wantError: an empty wantError
+// demands a clean analysis, otherwise the FIRST diagnostic must match exactly.
+// Only the first is pinned because most rejections legitimately cascade a
+// recovery-time follow-on error.
+func assertFirstDiagnostic(t *testing.T, diags []ast.DiagnosticError, wantError string) {
+	t.Helper()
+
+	if wantError == "" {
+		if len(diags) > 0 {
+			t.Fatalf("expected no errors, got: %v", diags)
+		}
+		return
+	}
+	if len(diags) == 0 {
+		t.Fatalf("expected error %q, got none", wantError)
+	}
+	if diags[0].Message != wantError {
+		t.Errorf("expected error %q, got %q", wantError, diags[0].Message)
+	}
+}
+
 // TestImportIsNotReexported pins the exact diagnostic behind each way an
 // import can fail to be re-exported. TestModules cannot do this: ParseWithDir
 // prints diagnostics as a side effect and returns a nil analyzer plus a generic
@@ -566,37 +618,79 @@ func TestImportIsNotReexported(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(testsDir, tc.file)
-			content, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("failed to read test file: %v", err)
-			}
-
-			p := parser.New(lexer.New(string(content)))
-			program := p.Parse()
-			if len(p.Errors()) > 0 {
-				t.Fatalf("parser errors: %v", p.Errors())
-			}
-
-			a := analyzer.New(environment.NewEnvironment(testsDir, path, false))
-			a.Run(program)
-
-			diags := a.DiagnosticErrors()
-			if tc.wantError == "" {
-				if len(diags) > 0 {
-					t.Fatalf("expected no errors, got: %v", diags)
-				}
-				return
-			}
-			if len(diags) == 0 {
-				t.Fatalf("expected error %q, got none", tc.wantError)
-			}
-			if diags[0].Message != tc.wantError {
-				t.Errorf("expected error %q, got %q", tc.wantError, diags[0].Message)
-			}
+			diags := analyzeFixture(t, testsDir, tc.file)
+			assertFirstDiagnostic(t, diags, tc.wantError)
 			if tc.wantErrorCount != 0 && len(diags) != tc.wantErrorCount {
 				t.Errorf("expected exactly %d diagnostic(s), got %d: %v", tc.wantErrorCount, len(diags), diags)
 			}
+		})
+	}
+}
+
+// TestUFCSAcrossRealModules covers the parts of UFCS resolution that only a
+// real, separately-analyzed .caja module on disk can exercise — the analyzer's
+// own table-driven tests are single-file and in-memory, so they can only reach
+// the builtin-module and same-file branches of ufcsCandidates.
+//
+// What is module-specific here: a module's *private* members must be invisible
+// to UFCS exactly as they are to a qualified `mod.name` access (the visibility
+// rule cannot be sidestepped by using the sugar), and two real modules can
+// collide the same way a module and a local function already do.
+func TestUFCSAcrossRealModules(t *testing.T) {
+	testsDir := "tests"
+
+	testCases := []struct {
+		name string
+		file string
+		// wantError is the exact first diagnostic; empty means the file must
+		// analyze cleanly.
+		wantError string
+	}{
+		{
+			// Positive control for the two rejections below: without it, a
+			// broken fixture (wrong path, wrong type) would make them pass for
+			// the wrong reason, since both expect the same generic fallthrough
+			// error that an unresolvable receiver produces.
+			name: "an exported module function resolves via UFCS",
+			file: "test_ufcs_module_public.caja",
+		},
+		{
+			// ufcsCandidates consults ModuleSymbol.IsPrivate before looking the
+			// name up, so a private member is never a candidate and the call
+			// falls through to the generic property-access error — the same
+			// outcome as if the function did not exist at all, which is the
+			// point: the sugar leaks no more than qualified access does.
+			name:      "a private module function is not a UFCS candidate",
+			file:      "test_ufcs_module_private.caja",
+			wantError: "type error: property access not supported for Number",
+		},
+		{
+			// Two real modules exporting the same name with the same first
+			// parameter type. Both aliases are named in the message, ordered by
+			// scope name, and the suggestion is the explicit qualified form for
+			// each.
+			name:      "two modules exporting the same function make the call ambiguous",
+			file:      "test_ufcs_module_ambiguous.caja",
+			wantError: "type error: ambiguous method call 'triple': matches 'ufcs_helpers' and 'ufcs_helpers_alt'. Suggestion: call it explicitly (ufcs_helpers.triple(...) or ufcs_helpers_alt.triple(...))",
+		},
+		{
+			// The struct-receiver contest with MORE THAN ONE surviving UFCS
+			// candidate, which no single-file test can build: two functions of
+			// the same name need two files. The struct's own 'at' field drops
+			// out on argument type, and the two remaining candidates are then
+			// judged against each other — so the message must be the plain
+			// two-function one, NOT the struct-specific "matches the property
+			// 'at' on struct 'Tag'..." form, and the field must not appear in
+			// it at all now that it has lost.
+			name:      "two functions surviving a struct field contest report the plain ambiguity",
+			file:      "test_ufcs_struct_ambiguous.caja",
+			wantError: "type error: ambiguous method call 'at': matches the directly-callable function 'at' and 'ufcs_helpers'. Suggestion: call it explicitly (at(...) or ufcs_helpers.at(...))",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertFirstDiagnostic(t, analyzeFixture(t, testsDir, tc.file), tc.wantError)
 		})
 	}
 }

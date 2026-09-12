@@ -86,3 +86,38 @@ Run it using the CLI:
 ```bash
 caja run -f test.caja
 ```
+
+### Extension-Function ("UFCS") Syntax
+
+Any function whose first parameter's type matches a value's type can be
+called as if it were a method on that value — a builtin module's function,
+a function exported by one of your own imported `.caja` modules, or a
+plain top-level function declared in the same file:
+
+```caja
+import "array"
+
+let numbers = [1, 2, 3]
+let updated = numbers.push(4) # same as array.push(numbers, 4)
+
+let double = fn(x: Number) -> Number { return x * 2 }
+let ten = 5.double()          # same as double(5) — works for your own functions too
+```
+
+This includes your own struct types, so extension functions read like methods:
+
+```caja
+type Point struct { x Number, y Number }
+
+let mag = fn(p: Point) -> Number { return p.x + p.y }
+
+let p = Point { x: 1, y: 2 }
+let m = p.mag()               # same as mag(p)
+```
+
+If the struct already has a function-typed field of that name, both stay
+available and the call picks by argument count, then by argument types — so a
+field `scale fn(Number)` and a function `scale(p: Point, f: Number, o: Number)`
+coexist, and `p.scale(2)` calls the field while `p.scale(2, 3)` calls the
+function. Only a genuinely indistinguishable pair — the same parameter list —
+is rejected, with a suggestion of how to say which one you meant.

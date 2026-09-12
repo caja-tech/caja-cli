@@ -1,0 +1,14 @@
+# A real, user-written module (not a builtin) — used to prove UFCS also
+# reaches functions exported by an imported project module, not just stdlib
+# ones.
+let triple = fn(x: Number) -> Number {
+	return x * 3
+}
+
+# A UFCS call made from INSIDE a non-entry module, resolving to that module's
+# own top-level function. Codegen must reach it through prefixIdentifier — the
+# module-prefixed Go name its definition is emitted under — not the bare name
+# the entry script would use, or the generated Go would not compile.
+let boost = fn(x: Number) -> Number {
+	return x.triple()
+}

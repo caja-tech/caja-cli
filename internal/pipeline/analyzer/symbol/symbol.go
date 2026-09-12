@@ -54,35 +54,41 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 		}, nil, true
 
 	case "string":
+		strSym := NewBasicSymbol(environment.STRING_OBJ)
+		numSym := NewBasicSymbol(environment.NUMBER_OBJ)
+		boolSym := NewBasicSymbol(environment.BOOLEAN_OBJ)
+		strArrSym := NewArraySymbol(strSym)
+
 		return map[string]Symbol{
-			"join":       NewBuiltinSymbol(moduleName, 2, "join(elements: Array<String>, separator: String) -> String", "elements: Array<String>", "separator: String"),
-			"charAt":     NewBuiltinSymbol(moduleName, 2, "charAt(str: String, index: Number) -> String", "str: String", "index: Number"),
-			"substring":  NewBuiltinSymbol(moduleName, 3, "substring(str: String, start: Number, end: Number) -> String", "str: String", "start: Number", "end: Number"),
-			"concat":     NewBuiltinSymbol(moduleName, 2, "concat(str1: String, str2: String) -> String", "str1: String", "str2: String"),
-			"split":      NewBuiltinSymbol(moduleName, 2, "split(str: String, separator: String) -> Array<String>", "str: String", "separator: String"),
-			"contains":   NewBuiltinSymbol(moduleName, 2, "contains(str: String, search: String) -> Boolean", "str: String", "search: String"),
-			"startsWith": NewBuiltinSymbol(moduleName, 2, "startsWith(str: String, prefix: String) -> Boolean", "str: String", "prefix: String"),
-			"endsWith":   NewBuiltinSymbol(moduleName, 2, "endsWith(str: String, suffix: String) -> Boolean", "str: String", "suffix: String"),
-			"replace":    NewBuiltinSymbol(moduleName, 3, "replace(str: String, search: String, replace: String) -> String", "str: String", "search: String", "replace: String"),
-			"toUpper":    NewBuiltinSymbol(moduleName, 1, "toUpper(str: String) -> String", "str: String"),
-			"toLower":    NewBuiltinSymbol(moduleName, 1, "toLower(str: String) -> String", "str: String"),
-			"trim":       NewBuiltinSymbol(moduleName, 1, "trim(str: String) -> String", "str: String"),
-			"len":        NewBuiltinSymbol(moduleName, 1, "len(str: String) -> Number", "str: String"),
-			"format":     NewBuiltinSymbol(moduleName, 2, "format(fmt: String, value: Any) -> String", "fmt: String", "value: Any"),
+			"join":       NewFunctionSymbol(moduleName, "join", []string{"elements", "separator"}, nil, 2, []Symbol{strArrSym, strSym}, strSym),
+			"charAt":     NewFunctionSymbol(moduleName, "charAt", []string{"str", "index"}, nil, 2, []Symbol{strSym, numSym}, strSym),
+			"substring":  NewFunctionSymbol(moduleName, "substring", []string{"str", "start", "end"}, nil, 3, []Symbol{strSym, numSym, numSym}, strSym),
+			"concat":     NewFunctionSymbol(moduleName, "concat", []string{"str1", "str2"}, nil, 2, []Symbol{strSym, strSym}, strSym),
+			"split":      NewFunctionSymbol(moduleName, "split", []string{"str", "separator"}, nil, 2, []Symbol{strSym, strSym}, strArrSym),
+			"contains":   NewFunctionSymbol(moduleName, "contains", []string{"str", "search"}, nil, 2, []Symbol{strSym, strSym}, boolSym),
+			"startsWith": NewFunctionSymbol(moduleName, "startsWith", []string{"str", "prefix"}, nil, 2, []Symbol{strSym, strSym}, boolSym),
+			"endsWith":   NewFunctionSymbol(moduleName, "endsWith", []string{"str", "suffix"}, nil, 2, []Symbol{strSym, strSym}, boolSym),
+			"replace":    NewFunctionSymbol(moduleName, "replace", []string{"str", "search", "replace"}, nil, 3, []Symbol{strSym, strSym, strSym}, strSym),
+			"toUpper":    NewFunctionSymbol(moduleName, "toUpper", []string{"str"}, nil, 1, []Symbol{strSym}, strSym),
+			"toLower":    NewFunctionSymbol(moduleName, "toLower", []string{"str"}, nil, 1, []Symbol{strSym}, strSym),
+			"trim":       NewFunctionSymbol(moduleName, "trim", []string{"str"}, nil, 1, []Symbol{strSym}, strSym),
+			"len":        NewFunctionSymbol(moduleName, "len", []string{"str"}, nil, 1, []Symbol{strSym}, numSym),
+			"format":     NewFunctionSymbol(moduleName, "format", []string{"fmt", "value"}, nil, 2, []Symbol{strSym, AnySymbol()}, strSym),
 		}, nil, true
 
 	case "math":
+		numSym := NewBasicSymbol(environment.NUMBER_OBJ)
 		return map[string]Symbol{
-			"abs":    NewBuiltinSymbol(moduleName, 1, "abs(num: Number) -> Number", "num: Number"),
-			"sqrt":   NewBuiltinSymbol(moduleName, 1, "sqrt(num: Number) -> Number", "num: Number"),
-			"pow":    NewBuiltinSymbol(moduleName, 2, "pow(base: Number, exp: Number) -> Number", "base: Number", "exp: Number"),
-			"floor":  NewBuiltinSymbol(moduleName, 1, "floor(num: Number) -> Number", "num: Number"),
-			"ceil":   NewBuiltinSymbol(moduleName, 1, "ceil(num: Number) -> Number", "num: Number"),
-			"round":  NewBuiltinSymbol(moduleName, 1, "round(num: Number) -> Number", "num: Number"),
-			"min":    NewBuiltinSymbol(moduleName, 2, "min(a: Number, b: Number) -> Number", "a: Number", "b: Number"),
-			"max":    NewBuiltinSymbol(moduleName, 2, "max(a: Number, b: Number) -> Number", "a: Number", "b: Number"),
-			"log":    NewBuiltinSymbol(moduleName, 2, "log(num: Number, base: Number) -> Number", "num: Number", "base: Number"),
-			"rand":   NewBuiltinSymbol(moduleName, 0, "rand() -> Number"),
+			"abs":    NewFunctionSymbol(moduleName, "abs", []string{"num"}, nil, 1, []Symbol{numSym}, numSym),
+			"sqrt":   NewFunctionSymbol(moduleName, "sqrt", []string{"num"}, nil, 1, []Symbol{numSym}, numSym),
+			"pow":    NewFunctionSymbol(moduleName, "pow", []string{"base", "exp"}, nil, 2, []Symbol{numSym, numSym}, numSym),
+			"floor":  NewFunctionSymbol(moduleName, "floor", []string{"num"}, nil, 1, []Symbol{numSym}, numSym),
+			"ceil":   NewFunctionSymbol(moduleName, "ceil", []string{"num"}, nil, 1, []Symbol{numSym}, numSym),
+			"round":  NewFunctionSymbol(moduleName, "round", []string{"num"}, nil, 1, []Symbol{numSym}, numSym),
+			"min":    NewFunctionSymbol(moduleName, "min", []string{"a", "b"}, nil, 2, []Symbol{numSym, numSym}, numSym),
+			"max":    NewFunctionSymbol(moduleName, "max", []string{"a", "b"}, nil, 2, []Symbol{numSym, numSym}, numSym),
+			"log":    NewFunctionSymbol(moduleName, "log", []string{"num", "base"}, nil, 2, []Symbol{numSym, numSym}, numSym),
+			"rand":   NewFunctionSymbol(moduleName, "rand", nil, nil, 0, nil, numSym),
 			"PI":     &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 			"E":      &BasicSymbol{symbolType: environment.NUMBER_OBJ},
 			"SQRT2":  &BasicSymbol{symbolType: environment.NUMBER_OBJ},
@@ -101,11 +107,16 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 		}, nil, true
 
 	case "map":
+		kSym := NewGenericSymbol("K")
+		vSym := NewGenericSymbol("V")
+		mapKV := NewMapSymbol(kSym, vSym)
+		boolSym := NewBasicSymbol(environment.BOOLEAN_OBJ)
+
 		return map[string]Symbol{
-				"containsKey": NewBuiltinSymbol(moduleName, 2, "containsKey(map: Map, key: String) -> Boolean", "map: Map", "key: String"),
-				"delete":      NewBuiltinSymbol(moduleName, 2, "delete(map: Map, key: String) -> Nil", "map: Map", "key: String"),
-				"keys":        NewBuiltinSymbol(moduleName, 1, "keys(map: Map) -> Array", "map: Map"),
-				"values":      NewBuiltinSymbol(moduleName, 1, "values(map: Map) -> Array", "map: Map"),
+				"containsKey": NewFunctionSymbol(moduleName, "containsKey", []string{"map", "key"}, []string{"K", "V"}, 2, []Symbol{mapKV, kSym}, boolSym),
+				"delete":      NewFunctionSymbol(moduleName, "delete", []string{"map", "key"}, []string{"K", "V"}, 2, []Symbol{mapKV, kSym}, mapKV),
+				"keys":        NewFunctionSymbol(moduleName, "keys", []string{"map"}, []string{"K", "V"}, 1, []Symbol{mapKV}, NewArraySymbol(kSym)),
+				"values":      NewFunctionSymbol(moduleName, "values", []string{"map"}, []string{"K", "V"}, 1, []Symbol{mapKV}, NewArraySymbol(vSym)),
 			}, map[string]Symbol{
 				"KeyFunc": NewFunctionSymbol(moduleName, "KeyFunc", nil, nil, 0, nil, NewBasicSymbol(environment.STRING_OBJ)),
 			}, true

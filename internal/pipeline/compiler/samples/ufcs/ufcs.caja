@@ -1,0 +1,72 @@
+import "array"
+import "string"
+import "math"
+import "log"
+import "./helpers" as helpers
+
+# UFCS ("extension function") dot-call sugar: receiver.fn(args...) desugars to
+# fn(receiver, args...), where fn can come from a builtin module, a real
+# imported .caja module, or a plain top-level function in this same file.
+
+let double = fn(x: Number) -> Number {
+	return x * 2
+}
+
+let arr = [1, 2, 3]
+let a1 = arr.push(4)          # UFCS: same as array.push(arr, 4)
+let a2 = [10, 20].push(30)    # UFCS on a literal receiver
+let a3 = array.push(arr, 4)   # equivalent qualified-call form, for comparison
+
+let data = [1, 2, 3]
+let moved = (move data).push(4)   # UFCS with an explicit move receiver: mutated in-place
+
+let greeting = "hi".toUpper()     # UFCS on a string literal receiver
+let n = 5
+let absN = n.abs()                # UFCS on a variable Number receiver
+
+let doubled = n.double()          # UFCS on a same-file top-level function
+let tripled = n.triple()          # UFCS on a real (non-builtin) module's function
+let tripledQualified = helpers.triple(n)   # equivalent qualified-call form, for comparison
+let boosted = helpers.boost(n)             # helpers.boost itself uses UFCS internally
+
+# UFCS on a user-declared struct, competing with the struct's own fields.
+type Point struct {
+	x Number
+	y Number
+	scale fn(Number) -> Number
+}
+
+# Reads two DIFFERENT fields, so a receiver spliced into the wrong argument
+# position would change the result rather than merely still compiling.
+let mag = fn(p: Point) -> Number {
+	return p.x * 10 + p.y
+}
+
+# Shares its name with Point's own `scale` field but takes one more argument,
+# so the two coexist and each call site picks by argument count.
+let scale = fn(p: Point, f: Number, o: Number) -> Number {
+	return p.x * f + o
+}
+
+let pt = Point { x: 3, y: 4, scale: fn(f: Number) -> Number { return f * 100 } }
+let annotated: Point = pt
+
+let magnitude = pt.mag()            # UFCS on a struct instance receiver
+let magAnnotated = annotated.mag()  # annotated let -> StructDefSymbol receiver
+let viaField = pt.scale(2)          # 1 argument  -> the struct's own field
+let viaFunction = pt.scale(2, 5)    # 2 arguments -> the free function
+
+log.info("a1:", a1)
+log.info("a2:", a2)
+log.info("a3:", a3)
+log.info("moved:", moved)
+log.info("greeting:", greeting)
+log.info("absN:", absN)
+log.info("doubled:", doubled)
+log.info("tripled:", tripled)
+log.info("tripledQualified:", tripledQualified)
+log.info("boosted:", boosted)
+log.info("magnitude:", magnitude)
+log.info("magAnnotated:", magAnnotated)
+log.info("viaField:", viaField)
+log.info("viaFunction:", viaFunction)

@@ -1,0 +1,12 @@
+import "ufcs_helpers"
+
+# Two UFCS candidates named 'at' take a Tag first: the one this file declares
+# and the one ufcs_helpers exports. Neither is the struct's own 'at' field,
+# which takes a String and so cannot accept this call — leaving the two
+# functions to contest it between themselves.
+let at = fn(t: ufcs_helpers.Tag, i: Number) -> Number {
+	return i + 1
+}
+
+let t = ufcs_helpers.Tag { at: fn(s: String) -> String { return s } }
+return t.at(1)
