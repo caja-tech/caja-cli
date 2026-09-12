@@ -3,6 +3,7 @@ package lsp
 import (
 	"reflect"
 
+	"caja-cli/internal/lsp/posmap"
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/lexer"
 )
@@ -268,15 +269,16 @@ func containsPosition(node ast.Node, line, col int) bool {
 		return false // Many nodes span multiple lines. For exact hover we only care about terminal tokens usually.
 	}
 
-	length := len(t.Literal)
+	// posmap.TokenByteLen, not len(t.Literal): the lexer strips the delimiters from a
+	// quoted literal, so `"abc"` reports a literal of `abc`. Measuring the span with the
+	// literal's own length leaves the last character and the closing quote outside the
+	// node, and hovering there finds nothing.
+	length := posmap.TokenByteLen(t)
 	if length == 0 {
 		length = 1
 	}
 
-	if t.Line == line && col >= t.Column && col < t.Column+length {
-		return true
-	}
-	return false
+	return t.Line == line && col >= t.Column && col < t.Column+length
 }
 
 // FindCallExpressionAtPosition recursively searches the AST for the tightest CallExpression
@@ -296,102 +298,45 @@ func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
 		return nil
 	}
 
-	var bestCall *ast.CallExpression
-
-	switch n := node.(type) {
-	case *ast.Program:
-		for _, s := range n.Statements {
-			if child := findCallExpression(s, line, col); child != nil {
-				bestCall = child
-			}
-		}
-	case *ast.BlockStatement:
-		for _, s := range n.Statements {
-			if child := findCallExpression(s, line, col); child != nil {
-				bestCall = child
-			}
-		}
-	case *ast.ExpressionStatement:
-		if child := findCallExpression(n.Expression, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.SafePipeExpression:
-		if child := findCallExpression(n.Left, line, col); child != nil {
-			bestCall = child
-		} else if child := findCallExpression(n.Call, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.LetStatement:
-		if child := findCallExpression(n.Value, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.AssignStatement:
-		if child := findCallExpression(n.Value, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.ReturnStatement:
-		if child := findCallExpression(n.ReturnValue, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.CallExpression:
-		// Check arguments first
-		for _, arg := range n.Arguments {
-			if child := findCallExpression(arg, line, col); child != nil {
-				return child
-			}
-		}
-		
-		// If not inside arguments, check if we are inside this call's parentheses
-		startTok := n.Token
-		endTok := n.RParenToken
-		
-		if startTok.Line == 0 || endTok.Line == 0 {
-			break
-		}
-		
-		// Multi-line call
-		if line > startTok.Line && line < endTok.Line {
-			return n
-		}
-		// Single-line call
-		if startTok.Line == endTok.Line && line == startTok.Line {
-			if col >= startTok.Column && col <= endTok.Column {
-				return n
-			}
-		}
-		// Multi-line start boundary
-		if line == startTok.Line && line < endTok.Line {
-			if col >= startTok.Column {
-				return n
-			}
-		}
-		// Multi-line end boundary
-		if line > startTok.Line && line == endTok.Line {
-			if col <= endTok.Column {
-				return n
-			}
-		}
-	case *ast.InfixExpression:
-		if child := findCallExpression(n.Left, line, col); child != nil {
-			bestCall = child
-		} else if child := findCallExpression(n.Right, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.IfExpression:
-		if child := findCallExpression(n.Condition, line, col); child != nil {
-			bestCall = child
-		} else if child := findCallExpression(n.Consequence, line, col); child != nil {
-			bestCall = child
-		} else if child := findCallExpression(n.Alternative, line, col); child != nil {
-			bestCall = child
-		}
-	case *ast.IsExpression:
-		if child := findCallExpression(n.Left, line, col); child != nil {
-			bestCall = child
+	// Depth-first, children before self, so the innermost enclosing call wins. The
+	// previous implementation carried its own partial type switch and assigned the last
+	// match rather than the innermost, so signature help went missing inside const
+	// bindings, array/map/struct literals, trailing lambdas, property chains and string
+	// interpolation — every expression position its switch had never been taught about.
+	for _, child := range childNodes(node) {
+		if found := findCallExpression(child, line, col); found != nil {
+			return found
 		}
 	}
 
-	return bestCall
+	if call, ok := node.(*ast.CallExpression); ok && callSpansPosition(call, line, col) {
+		return call
+	}
+	return nil
+}
+
+// callSpansPosition reports whether line/col falls within a call's parentheses, which is
+// the region where signature help applies. Token is the opening paren and RParenToken the
+// closing one; either may be zero in a partially-typed buffer, in which case the call has
+// no usable span.
+func callSpansPosition(call *ast.CallExpression, line, col int) bool {
+	start, end := call.Token, call.RParenToken
+	if start.Line == 0 || end.Line == 0 {
+		return false
+	}
+
+	switch {
+	case line < start.Line || line > end.Line:
+		return false
+	case start.Line == end.Line:
+		return col >= start.Column && col <= end.Column
+	case line == start.Line:
+		return col >= start.Column
+	case line == end.Line:
+		return col <= end.Column
+	default: // strictly between the two boundary lines
+		return true
+	}
 }
 
 // GetNodeToken extracts the starting token of an AST node.

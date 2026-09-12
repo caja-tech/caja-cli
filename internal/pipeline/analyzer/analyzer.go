@@ -214,6 +214,22 @@ func (a *Analyzer) GetImportedModule(node ast.Node) string {
 	return a.nodeImportedFiles[node]
 }
 
+// recordDeclarationName makes the identifier being bound resolvable in its own right.
+// Identifier *references* get their symbol when they resolve through the scope chain, but
+// a declaration's Name node is deliberately never analyzed as a reference — so without
+// this, hovering `x` in `let x = 5`, or invoking go-to-definition on it, answers with
+// nothing even though the name is the most obvious thing to ask about. Type aliases,
+// unions and constraints already record their own Name; this is the same step for
+// let/const bindings. The definition points at the name itself, which is what makes
+// go-to-definition idempotent once you have arrived at the declaration.
+func (a *Analyzer) recordDeclarationName(name *ast.Identifier, sym symbol.Symbol) {
+	if name == nil {
+		return
+	}
+	a.nodeSymbols[name] = sym
+	a.nodeDefinitions[name] = name.Token
+}
+
 // HasErrors returns true if any semantic errors were found.
 func (a *Analyzer) HasErrors() bool {
 	return len(a.diagnosticErrors) > 0
@@ -906,6 +922,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 	}
 
 	a.declare(n.Name.Value, valType, false, n.Name.Token)
+	a.recordDeclarationName(n.Name, valType)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -1013,6 +1030,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	}
 
 	a.declare(n.Name.Value, valType, true, n.Name.Token)
+	a.recordDeclarationName(n.Name, valType)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {

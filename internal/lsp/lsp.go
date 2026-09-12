@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"caja-cli/internal/lsp/posmap"
 	"caja-cli/internal/pipeline/analyzer"
 	"caja-cli/internal/pipeline/analyzer/symbol"
 	"caja-cli/internal/pipeline/ast"
@@ -10,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -175,6 +177,8 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 		return
 	}
 
+	ix := posmap.New(text)
+
 	tknzr := lexer.New(text)
 	p := parser.New(tknzr)
 	prog := p.WithContext(ctx).Parse()
@@ -184,7 +188,7 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 
 	diagnostics := make([]lsp.Diagnostic, 0)
 	for _, err := range p.DiagnosticErrors() {
-		diagnostics = append(diagnostics, toLSPDiagnostic(err))
+		diagnostics = append(diagnostics, toLSPDiagnostic(ix, err))
 	}
 
 	var a *analyzer.Analyzer
@@ -199,7 +203,7 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 		}
 
 		for _, err := range a.DiagnosticErrors() {
-			diagnostics = append(diagnostics, toLSPDiagnostic(err))
+			diagnostics = append(diagnostics, toLSPDiagnostic(ix, err))
 		}
 	} else {
 		filePath := uriToPath(uri)
@@ -228,32 +232,34 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 	}
 }
 
-func toLSPDiagnostic(err ast.DiagnosticError) lsp.Diagnostic {
-	line := err.Token.Line
-	if line > 0 {
-		line-- // LSP lines are 0-indexed
-	}
-	col := err.Token.Column
-	if col > 0 {
-		col-- // LSP cols are 0-indexed
-	}
-
-	length := len(err.Token.Literal)
-	if length == 0 {
-		length = 1
-	}
-
+func toLSPDiagnostic(ix *posmap.LineIndex, err ast.DiagnosticError) lsp.Diagnostic {
 	severity := lsp.SeverityError
 
 	return lsp.Diagnostic{
-		Range: lsp.Range{
-			Start: lsp.Position{Line: line, Character: col},
-			End:   lsp.Position{Line: line, Character: col + length},
-		},
+		Range:    ix.TokenRange(err.Token),
 		Severity: &severity,
 		Source:   lsName,
 		Message:  err.Message,
 	}
+}
+
+// indexFor returns the coordinate index for a document, falling back to reading the file
+// from disk. The fallback matters for go-to-definition, which routinely targets a module
+// the editor has never opened — without it, a cross-file jump would land using the
+// *source* file's line lengths to interpret the *target* file's token columns.
+func (h *CajaHandler) indexFor(uri lsp.DocumentURI) *posmap.LineIndex {
+	h.mu.RLock()
+	text, ok := h.docs.Text(uri)
+	h.mu.RUnlock()
+
+	if !ok {
+		data, err := os.ReadFile(uriToPath(string(uri)))
+		if err != nil {
+			return posmap.New("")
+		}
+		text = string(data)
+	}
+	return posmap.New(text)
 }
 
 func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (res *lsp.Hover, err error) {
@@ -269,7 +275,8 @@ func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (res *ls
 	prog := state.Prog
 	a := state.Analyzer
 
-	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
+	byteCol := h.indexFor(params.TextDocument.URI).ByteColumn(params.Position)
+	node := FindNodeAtPosition(prog, params.Position.Line, byteCol)
 	if node == nil {
 		return nil, nil
 	}
@@ -302,7 +309,8 @@ func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams
 	filePath := uriToPath(string(params.TextDocument.URI))
 	baseDir := filepath.Dir(filePath)
 
-	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
+	byteCol := h.indexFor(params.TextDocument.URI).ByteColumn(params.Position)
+	node := FindNodeAtPosition(prog, params.Position.Line, byteCol)
 	if node == nil {
 		return nil, nil
 	}
@@ -364,7 +372,8 @@ func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelp
 	prog := state.Prog
 	a := state.Analyzer
 
-	callExpr := FindCallExpressionAtPosition(prog, params.Position.Line, params.Position.Character)
+	sigByteCol := h.indexFor(params.TextDocument.URI).ByteColumn(params.Position)
+	callExpr := FindCallExpressionAtPosition(prog, params.Position.Line, sigByteCol)
 	if callExpr == nil {
 		return nil, nil
 	}
