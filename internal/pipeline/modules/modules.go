@@ -60,29 +60,36 @@ func resolveNodeModule(baseDir string, moduleName string) (string, error) {
 	return "", fmt.Errorf("module '%s' not found in local paths or node_modules", moduleName)
 }
 
+// Resolve locates the on-disk file an import names, without reading or parsing it.
+//
+// Load is the usual entry point, but a caller that only needs to know which file an
+// import points at — building a dependency graph, for instance — would otherwise have to
+// parse every module just to learn its path.
+func Resolve(baseDir string, moduleName string) (string, error) {
+	// 1. Try local file resolution first
+	modPath := filepath.Join(baseDir, filepath.FromSlash(moduleName)+file.EXTENSION)
+	if _, err := os.Stat(modPath); err == nil {
+		return modPath, nil
+	}
+
+	// 2. Try node_modules resolution
+	return resolveNodeModule(baseDir, moduleName)
+}
+
 // Load reads and parses a module file, returning its abstract syntax tree
 // (AST) along with the resolved on-disk path it was loaded from (which
 // callers need for accurate error/source-location reporting, since it can
 // differ from moduleName+baseDir when resolved via node_modules).
 // It constructs the absolute file path by joining the baseDir, moduleName, and file.EXTENSION.
 func Load(baseDir string, moduleName string) (*ast.Program, string, error) {
-	osPath := filepath.FromSlash(moduleName)
-
-	// 1. Try local file resolution first
-	modPath := filepath.Join(baseDir, osPath+file.EXTENSION)
-	binModcontent, err := os.ReadFile(modPath)
-
+	modPath, err := Resolve(baseDir, moduleName)
 	if err != nil {
-		// 2. Try node_modules resolution
-		resolvedModPath, resolveErr := resolveNodeModule(baseDir, moduleName)
-		if resolveErr != nil {
-			return nil, "", resolveErr
-		}
-		modPath = resolvedModPath
-		binModcontent, err = os.ReadFile(modPath)
-		if err != nil {
-			return nil, "", fmt.Errorf("unable to read module %s at %s: %s", moduleName, modPath, err)
-		}
+		return nil, "", err
+	}
+
+	binModcontent, err := os.ReadFile(modPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("unable to read module %s at %s: %s", moduleName, modPath, err)
 	}
 
 	modContent := string(binModcontent)

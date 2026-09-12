@@ -35,6 +35,10 @@ var (
 
 	_ server.CodeActionHandler         = (*CajaHandler)(nil)
 	_ server.SemanticTokensFullHandler = (*CajaHandler)(nil)
+
+	_ server.TextDocumentSaveHandler      = (*CajaHandler)(nil)
+	_ server.DidChangeWatchedFilesHandler = (*CajaHandler)(nil)
+	_ server.WorkspaceSymbolHandler       = (*CajaHandler)(nil)
 )
 
 // TestInitializeDeclaresWhatCannotBeDerived covers the two capabilities the server has to

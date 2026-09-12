@@ -38,6 +38,10 @@ type CajaHandler struct {
 	workers  map[lsp.DocumentURI]chan context.Context
 	cancels  map[lsp.DocumentURI]context.CancelFunc
 	astCache map[lsp.DocumentURI]*DocumentState
+
+	// index is what the server knows about files the editor has not opened: what each
+	// declares, and which files import which.
+	index *workspaceIndex
 }
 
 func NewCajaHandler() *CajaHandler {
@@ -46,6 +50,7 @@ func NewCajaHandler() *CajaHandler {
 		workers:  make(map[lsp.DocumentURI]chan context.Context),
 		cancels:  make(map[lsp.DocumentURI]context.CancelFunc),
 		astCache: make(map[lsp.DocumentURI]*DocumentState),
+		index:    newWorkspaceIndex(),
 	}
 }
 
@@ -58,7 +63,14 @@ func Run(version string) error {
 	return srv.Run(context.Background(), server.RunStdio())
 }
 
-func (h *CajaHandler) Initialize(_ context.Context, _ *lsp.InitializeParams) (*lsp.InitializeResult, error) {
+func (h *CajaHandler) Initialize(_ context.Context, params *lsp.InitializeParams) (*lsp.InitializeResult, error) {
+	if params != nil {
+		h.index.setRoots(params)
+		// Scanning happens in the background: a large workspace takes long enough that
+		// blocking initialize would leave the editor waiting before it can send anything.
+		go h.index.scan()
+	}
+
 	return &lsp.InitializeResult{
 		ServerInfo: &lsp.ServerInfo{
 			Name:    lsName,
@@ -99,20 +111,7 @@ func (h *CajaHandler) DidOpen(_ context.Context, params *lsp.DidOpenTextDocument
 			go h.documentWorkerLoop(uri, ch)
 		}
 
-		ch := h.workers[uri]
-
-		if cancel, ok := h.cancels[uri]; ok {
-			cancel()
-		}
-
-		ctx, cancelFunc := context.WithCancel(context.Background())
-		h.cancels[uri] = cancelFunc
-
-		select {
-		case <-ch: // pop old context if full
-		default:
-		}
-		ch <- ctx
+		h.queueValidationLocked(uri)
 	}
 	h.mu.Unlock()
 	return err
@@ -123,19 +122,8 @@ func (h *CajaHandler) DidChange(_ context.Context, params *lsp.DidChangeTextDocu
 	_, err := h.docs.Change(params)
 	if err == nil {
 		uri := params.TextDocument.URI
-		if ch, ok := h.workers[uri]; ok {
-			if cancel, hasCancel := h.cancels[uri]; hasCancel {
-				cancel()
-			}
-
-			ctx, cancelFunc := context.WithCancel(context.Background())
-			h.cancels[uri] = cancelFunc
-
-			select {
-			case <-ch:
-			default:
-			}
-			ch <- ctx
+		if _, running := h.workers[uri]; running {
+			h.queueValidationLocked(uri)
 		}
 	}
 	h.mu.Unlock()
@@ -159,6 +147,47 @@ func (h *CajaHandler) DidClose(_ context.Context, params *lsp.DidCloseTextDocume
 	delete(h.astCache, uri)
 	h.mu.Unlock()
 	return nil
+}
+
+// queueValidationLocked schedules a fresh validation of a document, cancelling any pass
+// already in flight. The worker channel holds one context: a pending request is dropped
+// in favour of the newer one, so a burst of keystrokes costs one analysis, not a queue of
+// stale ones. Callers hold h.mu.
+func (h *CajaHandler) queueValidationLocked(uri lsp.DocumentURI) {
+	ch, running := h.workers[uri]
+	if !running {
+		return
+	}
+
+	if cancel, ok := h.cancels[uri]; ok {
+		cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	h.cancels[uri] = cancel
+
+	select {
+	case <-ch: // drop the superseded request
+	default:
+	}
+	ch <- ctx
+}
+
+// requestValidation is queueValidationLocked for callers that do not already hold the
+// lock, such as the file-change notifications.
+func (h *CajaHandler) requestValidation(uri lsp.DocumentURI) {
+	h.mu.Lock()
+	h.queueValidationLocked(uri)
+	h.mu.Unlock()
+}
+
+// pathToURI builds a file URI from an on-disk path, escaping it properly. Concatenating
+// "file://" with a path breaks on spaces and non-ASCII characters.
+func pathToURI(path string) lsp.DocumentURI {
+	if path == "" {
+		return ""
+	}
+	u := url.URL{Scheme: "file", Path: path}
+	return lsp.DocumentURI(u.String())
 }
 
 func (h *CajaHandler) documentWorkerLoop(uri lsp.DocumentURI, ch chan context.Context) {
@@ -199,30 +228,27 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 		diagnostics = append(diagnostics, toLSPDiagnostic(ix, err))
 	}
 
-	var a *analyzer.Analyzer
-	if !p.HasErrors() {
-		filePath := uriToPath(uri)
-		baseDir := filepath.Dir(filePath)
-		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-		a = analyzer.New(globalEnv)
-		a.WithContext(ctx).Run(prog)
-		if ctx.Err() != nil {
-			return
-		}
+	filePath := uriToPath(uri)
+	globalEnv := environment.NewEnvironment(filepath.Dir(filePath), filePath, false)
 
+	a := analyzer.New(globalEnv)
+	a.WithContext(ctx).Run(prog)
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Semantic errors are reported only when the file parsed. A broken parse produces
+	// cascading nonsense downstream, and burying the one real syntax error under it helps
+	// nobody. Analysis still runs, because hover and completion work off its symbol table.
+	if !p.HasErrors() {
 		for _, err := range a.DiagnosticErrors() {
 			diagnostics = append(diagnostics, toLSPDiagnostic(ix, err))
 		}
-	} else {
-		filePath := uriToPath(uri)
-		baseDir := filepath.Dir(filePath)
-		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-		a = analyzer.New(globalEnv)
-		a.WithContext(ctx).Run(prog)
-		if ctx.Err() != nil {
-			return
-		}
 	}
+
+	// Join the dependency graph, so an open file participates even if it was created
+	// after the workspace scan.
+	h.indexOpenDocument(filePath, prog)
 
 	// Safely cache the AST and Analyzer
 	h.mu.Lock()

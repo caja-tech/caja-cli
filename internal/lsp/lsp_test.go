@@ -1,17 +1,16 @@
 package lsp
 
 import (
-	"strings"
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
-	"context"
 
 	"github.com/owenrumney/go-lsp/lsp"
 	"github.com/owenrumney/go-lsp/servertest"
 )
-
 
 func TestTextDocumentHover(t *testing.T) {
 	tests := []struct {
@@ -24,9 +23,9 @@ func TestTextDocumentHover(t *testing.T) {
 		expectedString string
 	}{
 		{
-			name:           "Type Constraint Hover Base Type",
-			uri:            "file:///test_tc_hover_base.caja",
-			input:          `type Customer struct { age Number }
+			name: "Type Constraint Hover Base Type",
+			uri:  "file:///test_tc_hover_base.caja",
+			input: `type Customer struct { age Number }
 define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { return true }`,
 			queryLine:      1,
 			queryChar:      35,
@@ -34,9 +33,9 @@ define MajorCustomer constraints Customer with: fn(c: Customer) -> Boolean { ret
 			expectedString: "Customer",
 		},
 		{
-			name:           "Named Import Hover",
-			uri:            "file:///test_named_import_hover.caja",
-			input:          `import { max } from "math"
+			name: "Named Import Hover",
+			uri:  "file:///test_named_import_hover.caja",
+			input: `import { max } from "math"
 max(1, 2)`,
 			queryLine:      1,
 			queryChar:      1,
@@ -53,20 +52,20 @@ max(1, 2)`,
 			expectedString: "Number",
 		},
 		{
-			name:           "Unopened Document",
-			uri:            "file:///test_unopened.caja",
-			input:          "",
-			queryLine:      0,
-			queryChar:      0,
-			expectedNil:    true,
+			name:        "Unopened Document",
+			uri:         "file:///test_unopened.caja",
+			input:       "",
+			queryLine:   0,
+			queryChar:   0,
+			expectedNil: true,
 		},
 		{
-			name:           "Whitespace",
-			uri:            "file:///test_whitespace.caja",
-			input:          "let x = 10\n    \nx",
-			queryLine:      1,
-			queryChar:      2,
-			expectedNil:    true,
+			name:        "Whitespace",
+			uri:         "file:///test_whitespace.caja",
+			input:       "let x = 10\n    \nx",
+			queryLine:   1,
+			queryChar:   2,
+			expectedNil: true,
 		},
 		{
 			name:           "Complex Type (Function)",
@@ -87,9 +86,9 @@ max(1, 2)`,
 			expectedString: "Any",
 		},
 		{
-			name:           "Array push function hover",
-			uri:            "file:///test_array_push_hover.caja",
-			input:          `import array
+			name: "Array push function hover",
+			uri:  "file:///test_array_push_hover.caja",
+			input: `import array
 let arr = [1, 2]
 array.push(arr, 3)`,
 			queryLine:      2,
@@ -98,9 +97,9 @@ array.push(arr, 3)`,
 			expectedString: "push(arr: [T], item: T) -> [T]",
 		},
 		{
-			name:           "cast.to function hover",
-			uri:            "file:///test_cast_to_hover.caja",
-			input:          `import cast
+			name: "cast.to function hover",
+			uri:  "file:///test_cast_to_hover.caja",
+			input: `import cast
 cast.to(123, 0)`,
 			queryLine:      1,
 			queryChar:      6,
@@ -108,9 +107,9 @@ cast.to(123, 0)`,
 			expectedString: "to(value: T, fallback: R) -> R",
 		},
 		{
-			name:           "map.KeyFunc function hover",
-			uri:            "file:///test_map_keyfunc_hover.caja",
-			input:          `import map
+			name: "map.KeyFunc function hover",
+			uri:  "file:///test_map_keyfunc_hover.caja",
+			input: `import map
 type MyStruct struct { key map.KeyFunc }
 let s = MyStruct{ key: fn() -> String { return "a" } }
 s.key()`,
@@ -138,9 +137,9 @@ s.key()`,
 			expectedString: "Number",
 		},
 		{
-			name:           "Anonymous function parameter hover (CallExpression)",
-			uri:            "file:///test_anon_func_param_call.caja",
-			input:          `let applyOp = fn(op: fn(Number, String) -> Number) -> Number { return op(1, "a") }
+			name: "Anonymous function parameter hover (CallExpression)",
+			uri:  "file:///test_anon_func_param_call.caja",
+			input: `let applyOp = fn(op: fn(Number, String) -> Number) -> Number { return op(1, "a") }
 applyOp((x, y) => 1)`,
 			queryLine:      1,
 			queryChar:      12, // hovering over 'y' in '(x, y)'
@@ -148,8 +147,8 @@ applyOp((x, y) => 1)`,
 			expectedString: "String",
 		},
 		{
-			name:           "Union variant name hover resolves to its struct type",
-			uri:            "file:///test_union_variant_hover.caja",
+			name: "Union variant name hover resolves to its struct type",
+			uri:  "file:///test_union_variant_hover.caja",
 			input: `type Cat struct { name String }
 type Dog struct { name String }
 union Animal = Cat | Dog`,
@@ -219,9 +218,9 @@ func TestTextDocumentDefinition(t *testing.T) {
 	}{
 
 		{
-			name:         "Named Import Definition",
-			uri:          "file:///test_named_import_def.caja",
-			input:        `import { max } from "math"
+			name: "Named Import Definition",
+			uri:  "file:///test_named_import_def.caja",
+			input: `import { max } from "math"
 max(1, 2)`,
 			queryLine:    1,
 			queryChar:    1,
@@ -240,12 +239,12 @@ max(1, 2)`,
 			expectedCol:  4,
 		},
 		{
-			name:         "Built-in Function",
-			uri:          "file:///test_def_builtin.caja",
-			input:        "std.math.abs(-5)",
-			queryLine:    0,
-			queryChar:    9,
-			expectedNil:  true,
+			name:        "Built-in Function",
+			uri:         "file:///test_def_builtin.caja",
+			input:       "std.math.abs(-5)",
+			queryLine:   0,
+			queryChar:   9,
+			expectedNil: true,
 		},
 		{
 			name:         "Function Call Definition",
@@ -258,12 +257,12 @@ max(1, 2)`,
 			expectedCol:  4,
 		},
 		{
-			name:         "Undeclared Variable",
-			uri:          "file:///test_def_undeclared.caja",
-			input:        "undefined_var",
-			queryLine:    0,
-			queryChar:    0,
-			expectedNil:  true,
+			name:        "Undeclared Variable",
+			uri:         "file:///test_def_undeclared.caja",
+			input:       "undefined_var",
+			queryLine:   0,
+			queryChar:   0,
+			expectedNil: true,
 		},
 		{
 			name:         "Anonymous Function Parameter Definition",
@@ -322,7 +321,7 @@ max(1, 2)`,
 
 func TestModuleLSPFeatures(t *testing.T) {
 	h := NewCajaHandler()
-			s := servertest.New(t, h)
+	s := servertest.New(t, h)
 
 	// Create a temporary directory for our physical workspace
 	tempDir := t.TempDir()
@@ -330,7 +329,7 @@ func TestModuleLSPFeatures(t *testing.T) {
 	modulePath := filepath.Join(tempDir, "calculus.caja")
 	moduleURI := "file://" + modulePath
 	moduleText := `let add = fn(x: Number, y: Number) -> Number { return x + y }`
-	
+
 	// Physically write the file because modules.Load reads from disk
 	err := os.WriteFile(modulePath, []byte(moduleText), 0644)
 	if err != nil {
@@ -339,7 +338,7 @@ func TestModuleLSPFeatures(t *testing.T) {
 
 	// Tell LSP client we opened it
 	s.DidOpen(lsp.DocumentURI(moduleURI), "caja", moduleText)
-				_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(moduleURI))
+	_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(moduleURI))
 
 	mainPath := filepath.Join(tempDir, "main.caja")
 	mainURI := "file://" + mainPath
@@ -347,7 +346,7 @@ func TestModuleLSPFeatures(t *testing.T) {
 calculus.add(1, 2)`
 
 	s.DidOpen(lsp.DocumentURI(mainURI), "caja", mainText)
-				_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(mainURI))
+	_, _ = s.WaitForDiagnostics(context.Background(), lsp.DocumentURI(mainURI))
 
 	// Test Hover on 'add'
 	hover, err := s.Hover(lsp.DocumentURI(mainURI), 1, 10) // 'a' in 'add'
@@ -369,7 +368,7 @@ calculus.add(1, 2)`
 	if len(locs) == 0 {
 		t.Fatalf("Expected definition response, got none")
 	}
-	
+
 	if string(locs[0].URI) != moduleURI {
 		t.Errorf("Expected definition URI %s, got %s", moduleURI, locs[0].URI)
 	}
@@ -380,10 +379,10 @@ calculus.add(1, 2)`
 
 func TestDiagnosticsAreClearedOnFix(t *testing.T) {
 	h := NewCajaHandler()
-			s := servertest.New(t, h)
+	s := servertest.New(t, h)
 
 	mainURI := lsp.DocumentURI("file:///main.caja")
-	
+
 	// 1. Open document with an error
 	badText := `let x = 5 +` // Missing right operand
 	s.DidOpen(mainURI, "caja", badText)
@@ -412,7 +411,7 @@ func TestLowercaseTypeDiagnostic(t *testing.T) {
 	s := servertest.New(t, h)
 
 	mainURI := lsp.DocumentURI("file:///main.caja")
-	
+
 	badText := `type money Number`
 	s.DidOpen(mainURI, "caja", badText)
 	diags, _ := s.WaitForDiagnostics(context.Background(), mainURI)
@@ -438,10 +437,10 @@ func TestLowercaseTypeDiagnostic(t *testing.T) {
 
 func TestMultipleStatementsOnSameLine(t *testing.T) {
 	h := NewCajaHandler()
-			s := servertest.New(t, h)
+	s := servertest.New(t, h)
 
 	mainURI := lsp.DocumentURI("file:///main.caja")
-	
+
 	// Open document with missing operator, which creates two statements on the same line
 	badText := `let area = calculus.PI 10 * 10`
 	s.DidOpen(mainURI, "caja", badText)
@@ -610,7 +609,7 @@ func TestIncompleteLetStatementDoesNotPanic(t *testing.T) {
 	incompleteText := validText + "\nlet "
 	s.ClearDiagnostics()
 	s.DidChange(mainURI, 2, incompleteText)
-	
+
 	// If the server panics, WaitForDiagnostics will hang or the test will fail
 	diags, _ := s.WaitForDiagnostics(context.Background(), mainURI)
 
@@ -630,18 +629,18 @@ func TestCompletion(t *testing.T) {
 		missingLabels  []string
 	}{
 		{
-			name: "Keywords and Local Variables",
-			text: "let myVar = 10\nmyVar",
-			line: 1,
-			col:  5,
+			name:           "Keywords and Local Variables",
+			text:           "let myVar = 10\nmyVar",
+			line:           1,
+			col:            5,
 			expectedLabels: []string{"let", "fn", "async", "await", "unwrap", "union", "is", "myVar"},
 			missingLabels:  []string{"otherVar"},
 		},
 		{
-			name: "Struct Properties",
-			text: "type User struct { age Number name String }\nlet u = User{age: 20, name: \"Alice\"}\nu.",
-			line: 2,
-			col:  2,
+			name:           "Struct Properties",
+			text:           "type User struct { age Number name String }\nlet u = User{age: 20, name: \"Alice\"}\nu.",
+			line:           2,
+			col:            2,
 			expectedLabels: []string{"age", "name"},
 			missingLabels:  []string{"let", "myVar"},
 		},
@@ -650,9 +649,9 @@ func TestCompletion(t *testing.T) {
 			setupFiles: map[string]string{
 				"math_mod.caja": "let add = fn(x: Number, y: Number) -> Number { return x + y }\n",
 			},
-			text: "import \"./math_mod\"\nmath_mod.",
-			line: 1,
-			col:  9,
+			text:           "import \"./math_mod\"\nmath_mod.",
+			line:           1,
+			col:            9,
 			expectedLabels: []string{"add"},
 		},
 		{
