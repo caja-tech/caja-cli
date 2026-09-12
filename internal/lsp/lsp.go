@@ -246,8 +246,12 @@ func toLSPDiagnostic(ix *posmap.LineIndex, err ast.DiagnosticError) lsp.Diagnost
 	return lsp.Diagnostic{
 		Range:    ix.TokenRange(err.Token),
 		Severity: &severity,
-		Source:   lsName,
-		Message:  err.Message,
+		// A stable code lets clients group, filter and search diagnostics, and it is what
+		// a quick fix keys off. It is derived from the message's own taxonomy prefix
+		// rather than threaded through the 200-plus sites that report one.
+		Code:    diagnosticCode(err.Message),
+		Source:  lsName,
+		Message: err.Message,
 	}
 }
 

@@ -232,6 +232,22 @@ func TestCorpusPositionSweep(t *testing.T) {
 			ctx := context.Background()
 			uri := f.uri()
 
+			if _, err := h.DocumentSymbol(ctx, &lsp.DocumentSymbolParams{
+				TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			}); err != nil {
+				t.Errorf("DocumentSymbol: %v", err)
+			}
+			if _, err := h.FoldingRange(ctx, &lsp.FoldingRangeParams{
+				TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			}); err != nil {
+				t.Errorf("FoldingRange: %v", err)
+			}
+			if _, err := h.SemanticTokensFull(ctx, &lsp.SemanticTokensParams{
+				TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			}); err != nil {
+				t.Errorf("SemanticTokensFull: %v", err)
+			}
+
 			for _, pos := range probePositions(f.text) {
 				sweep.at(f.name, pos)
 
@@ -255,6 +271,28 @@ func TestCorpusPositionSweep(t *testing.T) {
 				}); err != nil {
 					t.Errorf("SignatureHelp at %d:%d: %v", pos.Line, pos.Character, err)
 				}
+				if _, err := h.DocumentHighlight(ctx, &lsp.DocumentHighlightParams{
+					TextDocumentPositionParams: textDocPos(uri, pos),
+				}); err != nil {
+					t.Errorf("DocumentHighlight at %d:%d: %v", pos.Line, pos.Character, err)
+				}
+				if _, err := h.References(ctx, &lsp.ReferenceParams{
+					TextDocumentPositionParams: textDocPos(uri, pos),
+					Context:                    lsp.ReferenceContext{IncludeDeclaration: true},
+				}); err != nil {
+					t.Errorf("References at %d:%d: %v", pos.Line, pos.Character, err)
+				}
+				if _, err := h.SelectionRange(ctx, &lsp.SelectionRangeParams{
+					TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+					Positions:    []lsp.Position{pos},
+				}); err != nil {
+					t.Errorf("SelectionRange at %d:%d: %v", pos.Line, pos.Character, err)
+				}
+				// PrepareRename legitimately refuses names it cannot rename, so an error
+				// here is a valid answer; the sweep only cares that it does not crash.
+				_, _ = h.PrepareRename(ctx, &lsp.PrepareRenameParams{
+					TextDocumentPositionParams: textDocPos(uri, pos),
+				})
 			}
 		})
 	}
