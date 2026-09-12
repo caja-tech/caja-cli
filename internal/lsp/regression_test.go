@@ -266,3 +266,90 @@ func hasLabel(items []lsp.CompletionItem, want string) bool {
 	}
 	return false
 }
+
+// TestScopeChainOffersFunctionParameters covers what the collapsed walkers unlocked:
+// inside a function body, the function's own parameters are in scope and must be offered.
+// The previous walkers never descended into a body at all, so they never were.
+func TestScopeChainOffersFunctionParameters(t *testing.T) {
+	src := `let outer = 1
+let calc = fn(price: Number, discount: Number) -> Number {
+    return price
+}
+`
+	h, _, uri := openInline(t, "main.caja", src)
+
+	res, err := h.Completion(context.Background(), &lsp.CompletionParams{
+		// Inside the body, on the `return` line.
+		TextDocumentPositionParams: textDocPos(uri, lsp.Position{Line: 2, Character: 11}),
+	})
+	if err != nil {
+		t.Fatalf("Completion: %v", err)
+	}
+
+	for _, want := range []string{"price", "discount", "outer"} {
+		if !hasLabel(res.Items, want) {
+			t.Errorf("completion inside the function body did not offer %q; got %v",
+				want, labels(res.Items))
+		}
+	}
+}
+
+// TestDotCompletionOnParameter covers dot-completion where the receiver is a parameter
+// rather than a local. The walker this replaced gave up on parameters explicitly.
+func TestDotCompletionOnParameter(t *testing.T) {
+	src := `type User struct {
+    name String
+    age Number
+}
+let describe = fn(u: User) -> String {
+    return u.
+}
+`
+	h, _, uri := openInline(t, "main.caja", src)
+
+	res, err := h.Completion(context.Background(), &lsp.CompletionParams{
+		TextDocumentPositionParams: textDocPos(uri, lsp.Position{Line: 5, Character: 13}),
+	})
+	if err != nil {
+		t.Fatalf("Completion: %v", err)
+	}
+
+	for _, want := range []string{"name", "age"} {
+		if !hasLabel(res.Items, want) {
+			t.Errorf("dot-completion on parameter `u` did not offer field %q; got %v",
+				want, labels(res.Items))
+		}
+	}
+}
+
+// TestHoverReachesEveryConstruct walks the language's more exotic syntax and asserts the
+// cursor resolves to something at each marked position. Before Children became the single
+// traversal, containsPosition answered only for a whitelist of terminal token types and
+// returned false for everything else, so most of these were unreachable.
+func TestHoverReachesEveryConstruct(t *testing.T) {
+	cases := []struct {
+		name       string
+		src        string
+		line, char int
+	}{
+		{"named argument value", "let f = fn(a: Number, b: Number) -> Number { return a }\nlet r = f(a: 1, b: 2)\n", 1, 13},
+		{"named argument name", "let f = fn(a: Number, b: Number) -> Number { return a }\nlet r = f(a: 1, b: 2)\n", 1, 10},
+		{"struct field declaration", "type P struct {\n    width Number\n}\n", 1, 5},
+		{"async expression operand", "let f = fn(n: Number) -> Number { return n }\nlet p = async f(1)\n", 1, 14},
+		{"unwrap operand", "let f = fn(n: Number) -> Number { return n }\nlet p = async f(1)\nlet v = unwrap p\n", 2, 15},
+		{"await pipeline", "let f = fn(n: Number) -> Number { return n }\nlet p = async f(1)\nawait p\n", 2, 6},
+		{"index expression target", "let xs = [1, 2, 3]\nlet first = xs[0]\n", 1, 12},
+		{"prefix move operand", "import \"array\"\nlet xs = [1]\nlet ys = array.push(move xs, 2)\n", 2, 25},
+		{"interpolation expression", "let name = \"a\"\nlet msg = \"hi ${name}\"\n", 1, 16},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, s, uri := openInline(t, "main.caja", tc.src)
+
+			if got := hoverText(t, s, uri, tc.line, tc.char); got == "" {
+				t.Errorf("hover at %d:%d resolved to nothing", tc.line, tc.char)
+			}
+		})
+	}
+}

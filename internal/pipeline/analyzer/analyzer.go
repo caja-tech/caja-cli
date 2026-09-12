@@ -1536,6 +1536,10 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 				Type:       fieldSym,
 				IsConstant: field.IsConstant,
 			}
+			// The field name is the obvious thing to hover in a struct body; without
+			// this it resolves to nothing, because a field declaration is never
+			// analyzed as an identifier reference.
+			a.recordDeclarationName(field.Name, fieldSym)
 		}
 	} else if n.TargetType != "" {
 		resolvedSymbol, ok := a.resolveTypeRef(n.Token, n.TargetType)
@@ -2017,6 +2021,11 @@ func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *sy
 			a.reportError(na.Token, fmt.Sprintf("type error: duplicate named argument '%s'", na.Name.Value))
 			ok = false
 			continue
+		}
+		// `f(width: 10)` — the label names a parameter, so hovering it should report
+		// that parameter's type rather than nothing.
+		if pos < len(fnSymbol.ParamTypes()) {
+			a.nodeSymbols[na.Name] = fnSymbol.ParamTypes()[pos]
 		}
 		seen[na.Name.Value] = true
 		// Naming an argument documents it; it does not license reordering the
