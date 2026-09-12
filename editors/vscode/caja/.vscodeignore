@@ -1,4 +1,13 @@
+# Only the compiled output, the grammar and the assets belong in the VSIX.
 .vscode/**
 .vscode-test/**
 .gitignore
+.vscodeignore
 vsc-extension-quickstart.md
+
+# Sources and build inputs: the extension runs from out/.
+src/**
+tsconfig.json
+tsconfig.tsbuildinfo
+package-lock.json
+**/*.map

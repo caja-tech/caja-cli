@@ -1,28 +1,43 @@
 {
-    "comments": {
-        // symbol used for single line comment. Remove this entry if your language does not support line comments
-        "lineComment": "#",
-    },
-    // symbols used as brackets
-    "brackets": [
-        ["{", "}"],
-        ["[", "]"],
-        ["(", ")"]
-    ],
-    // symbols that are auto closed when typing
-    "autoClosingPairs": [
-        ["{", "}"],
-        ["[", "]"],
-        ["(", ")"],
-        ["\"", "\""],
-        ["'", "'"]
-    ],
-    // symbols that can be used to surround a selection
-    "surroundingPairs": [
-        ["{", "}"],
-        ["[", "]"],
-        ["(", ")"],
-        ["\"", "\""],
-        ["'", "'"]
-    ]
+  // Caja has line comments only; there is no block comment form in the lexer.
+  "comments": {
+    "lineComment": "#"
+  },
+  "brackets": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  // Quotes must not auto-close inside a comment or an existing string, where the closing
+  // character is almost always unwanted. Single quotes delimit date literals in Caja, not
+  // strings, but they pair the same way.
+  "autoClosingPairs": [
+    { "open": "{", "close": "}" },
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] },
+    { "open": "'", "close": "'", "notIn": ["string", "comment"] }
+  ],
+  "surroundingPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["\"", "\""],
+    ["'", "'"]
+  ],
+  // Identifiers are ASCII letters, digits and underscores, and never start with a digit.
+  // Without this, double-click selection and word-wise motion use VS Code's default,
+  // which treats punctuation such as `?` and `|` as part of a word.
+  "wordPattern": "[A-Za-z_][A-Za-z0-9_]*",
+  "indentationRules": {
+    "increaseIndentPattern": "[{\\[(]\\s*$",
+    "decreaseIndentPattern": "^\\s*[}\\])]"
+  },
+  "onEnterRules": [
+    {
+      // Continue a comment block when Enter is pressed at the end of a commented line.
+      "beforeText": "^\\s*#.*$",
+      "action": { "indent": "none", "appendText": "# " }
+    }
+  ]
 }

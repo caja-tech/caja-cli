@@ -10,3 +10,6 @@ dist/
 
 # Packaged extension files
 *.vsix
+
+# TypeScript incremental build state
+tsconfig.tsbuildinfo
