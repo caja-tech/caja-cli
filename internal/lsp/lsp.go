@@ -153,8 +153,17 @@ func (h *CajaHandler) DidClose(_ context.Context, params *lsp.DidCloseTextDocume
 
 func (h *CajaHandler) documentWorkerLoop(uri lsp.DocumentURI, ch chan context.Context) {
 	for ctx := range ch {
-		h.validateDocument(ctx, string(uri))
+		h.safeValidate(ctx, uri)
 	}
+}
+
+// safeValidate runs one validation pass with panic recovery scoped to this iteration, so
+// a parser or analyzer panic on half-typed source costs a single stale pass rather than
+// the whole worker. This goroutine sits outside the go-lsp transport's own recover, so
+// without this an uncaught panic here takes down the entire language server process.
+func (h *CajaHandler) safeValidate(ctx context.Context, uri lsp.DocumentURI) {
+	defer recoverWorker("validateDocument", uri)
+	h.validateDocument(ctx, string(uri))
 }
 
 func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
@@ -247,7 +256,9 @@ func toLSPDiagnostic(err ast.DiagnosticError) lsp.Diagnostic {
 	}
 }
 
-func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Hover, error) {
+func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (res *lsp.Hover, err error) {
+	defer recoverInto("hover", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, ok := h.astCache[params.TextDocument.URI]
 	h.mu.RUnlock()
@@ -275,7 +286,9 @@ func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Ho
 	}, nil
 }
 
-func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams) ([]lsp.Location, error) {
+func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams) (res []lsp.Location, err error) {
+	defer recoverInto("definition", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, ok := h.astCache[params.TextDocument.URI]
 	h.mu.RUnlock()
@@ -334,7 +347,9 @@ func uriToPath(uri string) string {
 }
 
 // SignatureHelp provides signature information for a function call at the cursor position.
-func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelpParams) (*lsp.SignatureHelp, error) {
+func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelpParams) (res *lsp.SignatureHelp, err error) {
+	defer recoverInto("signatureHelp", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, stateOk := h.astCache[params.TextDocument.URI]
 	text, textOk := h.docs.Text(params.TextDocument.URI)
@@ -348,11 +363,6 @@ func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelp
 	}
 	prog := state.Prog
 	a := state.Analyzer
-
-	if prog == nil {
-		fmt.Println("PROG IS NIL")
-		return nil, nil
-	}
 
 	callExpr := FindCallExpressionAtPosition(prog, params.Position.Line, params.Position.Character)
 	if callExpr == nil {

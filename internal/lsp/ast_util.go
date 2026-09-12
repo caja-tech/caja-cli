@@ -1,14 +1,34 @@
 package lsp
 
 import (
+	"reflect"
+
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/lexer"
 )
 
+// isNilNode reports whether node carries no value, including the typed-nil case that a
+// plain `node == nil` misses: the parser leaves optional children as a nil concrete
+// pointer boxed in a non-nil ast.Node interface — IfExpression.Alternative on an `if`
+// without `else` is the common one. Without this guard the type switches below match the
+// concrete case and dereference nil, so hover, definition and signature help crash
+// anywhere in a file containing an unpaired `if`.
+func isNilNode(node ast.Node) bool {
+	if node == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(node); v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Slice, reflect.Map, reflect.Func:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
 // FindNodeAtPosition traverses the AST and returns the innermost Node
 // that encapsulates the given line and column (0-indexed).
 func FindNodeAtPosition(node ast.Node, line, col int) ast.Node {
-	if node == nil {
+	if isNilNode(node) {
 		return nil
 	}
 
@@ -20,7 +40,7 @@ func FindNodeAtPosition(node ast.Node, line, col int) ast.Node {
 }
 
 func findTightestNode(node ast.Node, line, col int) ast.Node {
-	if node == nil {
+	if isNilNode(node) {
 		return nil
 	}
 
@@ -214,6 +234,10 @@ func findTightestNode(node ast.Node, line, col int) ast.Node {
 }
 
 func containsPosition(node ast.Node, line, col int) bool {
+	if isNilNode(node) {
+		return false
+	}
+
 	var t lexer.Token
 	// Since node interface only has TokenLiteral(), we need to use type assertion or reflection
 	// to get the actual token line and column.
@@ -258,7 +282,7 @@ func containsPosition(node ast.Node, line, col int) bool {
 // FindCallExpressionAtPosition recursively searches the AST for the tightest CallExpression
 // that encapsulates the given line and column, including the area between the '(' and ')'.
 func FindCallExpressionAtPosition(node ast.Node, line, col int) *ast.CallExpression {
-	if node == nil {
+	if isNilNode(node) {
 		return nil
 	}
 	targetLine := line + 1
@@ -268,7 +292,7 @@ func FindCallExpressionAtPosition(node ast.Node, line, col int) *ast.CallExpress
 }
 
 func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
-	if node == nil {
+	if isNilNode(node) {
 		return nil
 	}
 
@@ -373,6 +397,10 @@ func findCallExpression(node ast.Node, line, col int) *ast.CallExpression {
 // GetNodeToken extracts the starting token of an AST node.
 func GetNodeToken(node ast.Node) lexer.Token {
 	var t lexer.Token
+	if isNilNode(node) {
+		return t
+	}
+
 	switch n := node.(type) {
 	case *ast.TypeConstraintStatement:
 		t = n.Token

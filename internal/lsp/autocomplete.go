@@ -6,13 +6,14 @@ import (
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/lexer"
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/owenrumney/go-lsp/lsp"
 )
 
-func (h *CajaHandler) Completion(_ context.Context, params *lsp.CompletionParams) (*lsp.CompletionList, error) {
+func (h *CajaHandler) Completion(_ context.Context, params *lsp.CompletionParams) (res *lsp.CompletionList, err error) {
+	defer recoverInto("completion", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, stateOk := h.astCache[params.TextDocument.URI]
 	text, textOk := h.docs.Text(params.TextDocument.URI)
@@ -116,7 +117,6 @@ func resolveSymbolByName(state *DocumentState, name string, line, col int) (symb
 		declNode := findDeclarationNode(state.Prog, name, line, col)
 		if declNode != nil {
 			if sym, ok := state.Analyzer.GetSymbol(declNode); ok {
-				fmt.Printf("resolved symbol: %T\n", sym)
 				return sym, true
 			}
 		}
