@@ -4,7 +4,9 @@ import (
 	goast "go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"caja-cli/internal/pipeline/lexer"
@@ -55,6 +57,8 @@ var allNodes = []Node{
 	&AsyncExpression{},
 	&UnwrapExpression{},
 	&AwaitStatement{},
+	&TypeExpr{},
+	&TypeRef{},
 }
 
 // nonNodeHelpers are the structs in this package that deliberately do not implement Node.
@@ -65,7 +69,8 @@ var nonNodeHelpers = map[string]string{
 	"InterpolatedStringSegment": "a text run inside a string has no token; Children yields the segment's embedded expression instead",
 	"StructField":               "field declarations have no token of their own; Children yields the field-name identifier",
 	"StructDefinition":          "a struct body is addressed through its owning TypeAliasStatement",
-	"FunctionSignature":         "a function type carries no token; its parameter types are still plain strings",
+	"FunctionSignature":         "a function type carries no token; Children reaches through to its parameter and return annotations",
+	"DiagnosticError":           "a positioned error message, not a syntax node",
 }
 
 // TestAllNodesListIsComplete cross-checks allNodes against the structs actually declared
@@ -77,13 +82,23 @@ func TestAllNodesListIsComplete(t *testing.T) {
 		listed[reflect.TypeOf(n).Elem().Name()] = true
 	}
 
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "ast.go", nil, 0)
+	sources, err := filepath.Glob("*.go")
 	if err != nil {
-		t.Fatalf("parsing ast.go: %v", err)
+		t.Fatalf("listing sources: %v", err)
 	}
 
-	declared := structNames(file)
+	fset := token.NewFileSet()
+	var declared []string
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", path, err)
+		}
+		declared = append(declared, structNames(file)...)
+	}
 	if len(declared) == 0 {
 		t.Fatal("found no struct declarations in ast.go; the scan is broken")
 	}
@@ -93,7 +108,7 @@ func TestAllNodesListIsComplete(t *testing.T) {
 		case listed[name]:
 		case nonNodeHelpers[name] != "":
 		default:
-			t.Errorf("ast.go declares %s but it is neither in allNodes nor in nonNodeHelpers.\n"+
+			t.Errorf("%s is declared but it is neither in allNodes nor in nonNodeHelpers.\n"+
 				"Add it to allNodes and teach Children about it, or record why it carries no position.", name)
 		}
 	}

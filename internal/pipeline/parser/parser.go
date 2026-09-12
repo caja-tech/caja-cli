@@ -472,14 +472,14 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	lit.Parameters = p.parseFunctionParameters()
 
 	if p.peekToken.Type == lexer.LBRACE {
-		lit.ReturnType = "Nothing"
+		lit.ReturnType = implicitNothingType()
 		p.nextToken() // move to LBRACE
 	} else {
 		if !p.expectPeek(lexer.ARROW) {
 			p.reportError(p.peekToken, fmt.Sprintf("expected '->' or '{', got %s", p.peekToken.Type))
 			return nil
 		}
-		lit.ReturnType = p.parseTypeSignature()
+		lit.ReturnType = p.parseTypeExpr()
 		if !p.expectPeek(lexer.LBRACE) {
 			p.reportError(p.peekToken, fmt.Sprintf("expected '{', got %s", p.peekToken.Type))
 			return nil
@@ -551,8 +551,8 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 			return nil
 		}
 
-		param.Type = p.parseTypeSignature()
-		if param.Type == "" {
+		param.Type = p.parseTypeExpr()
+		if param.Type.Text() == "" {
 			return nil
 		}
 
@@ -871,11 +871,11 @@ func (p *Parser) parseImportStatement() *ast.ImportStatement {
 			}
 			statement.NamedImports = append(statement.NamedImports, &ast.Identifier{Token: p.currToken, Value: p.currToken.Literal})
 		}
-		
+
 		if !p.expectPeek(lexer.RBRACE) {
 			return nil
 		}
-		
+
 		if !p.expectPeek(lexer.IDENT) || p.currToken.Literal != "from" {
 			p.reportError(p.currToken, "expected 'from' after named imports")
 			return nil
@@ -949,7 +949,7 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 
 	if p.peekToken.Type == lexer.COLON {
 		p.nextToken() // move to colon
-		statement.ValueType = p.parseTypeSignature()
+		statement.ValueType = p.parseTypeExpr()
 	}
 
 	if !p.expectPeek(lexer.ASSIGN) {
@@ -980,7 +980,7 @@ func (p *Parser) parseConstStatement() *ast.ConstStatement {
 
 	if p.peekToken.Type == lexer.COLON {
 		p.nextToken() // move to colon
-		statement.ValueType = p.parseTypeSignature()
+		statement.ValueType = p.parseTypeExpr()
 	}
 
 	if !p.expectPeek(lexer.ASSIGN) {
@@ -1118,14 +1118,14 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 		}
 
 		if p.peekToken.Type != lexer.RPAREN {
-			paramType := p.parseTypeSignature()
-			if paramType != "" {
+			paramType := p.parseTypeExpr()
+			if paramType.Text() != "" {
 				statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
 			}
 			for p.peekToken.Type == lexer.COMMA {
 				p.nextToken() // move to comma
-				paramType := p.parseTypeSignature()
-				if paramType != "" {
+				paramType := p.parseTypeExpr()
+				if paramType.Text() != "" {
 					statement.Signature.ParamTypes = append(statement.Signature.ParamTypes, paramType)
 				}
 			}
@@ -1138,9 +1138,9 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 
 		if p.peekToken.Type == lexer.ARROW {
 			p.nextToken() // consume '->'
-			statement.Signature.ReturnType = p.parseTypeSignature()
+			statement.Signature.ReturnType = p.parseTypeExpr()
 		} else {
-			statement.Signature.ReturnType = "Nothing"
+			statement.Signature.ReturnType = implicitNothingType()
 		}
 	} else if p.peekToken.Type == lexer.STRUCT {
 		p.nextToken() // move to struct
@@ -1174,8 +1174,8 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 				IsConstant: isConstant,
 			}
 
-			field.Type = p.parseTypeSignature()
-			if field.Type == "" {
+			field.Type = p.parseTypeExpr()
+			if field.Type.Text() == "" {
 				p.reportError(p.currToken, "expected type signature")
 				return nil
 			}
@@ -1188,43 +1188,80 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 			return nil
 		}
 	} else {
-		statement.TargetType = p.parseTypeSignature()
+		statement.TargetType = p.parseTypeExpr()
 	}
 
 	return statement
 }
 
 // parseTypeSignature parses a type identifier or array type like [Number] or [[Number]].
+// parseTypeSignature renders a type annotation as its canonical string. It is a thin
+// wrapper so the many call sites that only want the text stay unchanged; parseTypeExpr is
+// the real parse and additionally records source positions.
+// implicitNothingType builds the return type for a function written without `-> T`. The
+// type is real as far as the analyzer is concerned, but it has no source text, so its
+// tokens are left empty: nothing in the editor should be able to point at it.
+func implicitNothingType() *ast.TypeExpr {
+	return &ast.TypeExpr{Name: "Nothing"}
+}
+
 func (p *Parser) parseTypeSignature() string {
+	return p.parseTypeExpr().Text()
+}
+
+// parseTypeExpr parses a type annotation into a positioned node.
+//
+// The string-building below is the original implementation, unchanged: TypeExpr.Name must
+// stay byte-identical to what the old parseTypeSignature returned, because the analyzer
+// and compiler compare, key maps by, and substitute into those strings. What is new is
+// that each leaf identifier is also captured as a *ast.TypeRef, which is what lets the
+// language server resolve `Money` inside `[Money]` or `fn(Money) -> Boolean`.
+func (p *Parser) parseTypeExpr() *ast.TypeExpr {
+	start := p.peekToken
+	te := &ast.TypeExpr{Token: start}
+
+	// finish stamps the accumulated text and the closing token onto the node.
+	finish := func(name string) *ast.TypeExpr {
+		te.Name = name
+		te.End = p.currToken
+		return te
+	}
+	// absorb folds a nested type's leaf references into this one.
+	absorb := func(child *ast.TypeExpr) string {
+		if child == nil {
+			return ""
+		}
+		te.Refs = append(te.Refs, child.Refs...)
+		return child.Name
+	}
+
 	if p.peekToken.Type == lexer.FN {
 		p.nextToken() // move to fn
 		if !p.expectPeek(lexer.LPAREN) {
-			return ""
+			return nil
 		}
 
 		var params []string
 		if p.peekToken.Type != lexer.RPAREN {
-			paramType := p.parseTypeSignature()
-			if paramType != "" {
+			if paramType := absorb(p.parseTypeExpr()); paramType != "" {
 				params = append(params, paramType)
 			}
 			for p.peekToken.Type == lexer.COMMA {
 				p.nextToken() // move to comma
-				paramType := p.parseTypeSignature()
-				if paramType != "" {
+				if paramType := absorb(p.parseTypeExpr()); paramType != "" {
 					params = append(params, paramType)
 				}
 			}
 		}
 
 		if !p.expectPeek(lexer.RPAREN) {
-			return ""
+			return nil
 		}
 
 		returnType := "Nothing"
 		if p.peekToken.Type == lexer.ARROW {
 			p.nextToken() // move to ->
-			returnType = p.parseTypeSignature()
+			returnType = absorb(p.parseTypeExpr())
 		}
 
 		typeName := "fn(" + strings.Join(params, ", ") + ") -> " + returnType
@@ -1232,14 +1269,14 @@ func (p *Parser) parseTypeSignature() string {
 			p.nextToken() // move to ?
 			typeName += "?"
 		}
-		return typeName
+		return finish(typeName)
 	}
 
 	if p.peekToken.Type == lexer.LBRACKET {
 		p.nextToken() // move to [
-		innerType := p.parseTypeSignature()
+		innerType := absorb(p.parseTypeExpr())
 		if !p.expectPeek(lexer.RBRACKET) {
-			return ""
+			return nil
 		}
 
 		typeName := "[" + innerType + "]"
@@ -1247,19 +1284,21 @@ func (p *Parser) parseTypeSignature() string {
 			p.nextToken() // move to ?
 			typeName += "?"
 		}
-		return typeName
+		return finish(typeName)
 	}
 
 	if p.expectPeek(lexer.IDENT) {
+		leadToken := p.currToken
 		typeName := p.currToken.Literal
+		ref := &ast.TypeRef{Token: leadToken, Name: typeName}
+		te.Refs = append(te.Refs, ref)
 
 		if p.peekToken.Type == lexer.LT {
 			p.nextToken() // move to <
 			var typeArgs []string
 			if p.peekToken.Type != lexer.GT {
 				for {
-					typeArg := p.parseTypeSignature()
-					if typeArg != "" {
+					if typeArg := absorb(p.parseTypeExpr()); typeArg != "" {
 						typeArgs = append(typeArgs, typeArg)
 					}
 					if p.peekToken.Type == lexer.COMMA {
@@ -1270,27 +1309,34 @@ func (p *Parser) parseTypeSignature() string {
 				}
 			}
 			if !p.expectPeek(lexer.GT) {
-				return ""
+				return nil
 			}
 			typeName += "<" + strings.Join(typeArgs, ", ") + ">"
+			ref.Name = typeName
 		}
 
 		if typeName == "map" && p.peekToken.Type == lexer.LBRACKET {
 			p.nextToken() // move to [
-			keyType := p.parseTypeSignature()
+			keyType := absorb(p.parseTypeExpr())
 			if !p.expectPeek(lexer.RBRACKET) {
-				return ""
+				return nil
 			}
-			valueType := p.parseTypeSignature()
-			return "map[" + keyType + "]" + valueType
+			valueType := absorb(p.parseTypeExpr())
+			return finish("map[" + keyType + "]" + valueType)
 		}
 
 		if p.peekToken.Type == lexer.DOT {
 			p.nextToken() // move to .
 			if p.expectPeek(lexer.IDENT) {
 				typeName += "." + p.currToken.Literal
+				// A qualified type is one reference, not two: the qualifier names the
+				// module and Token names the type, so go-to-definition works on either.
+				qualifier := leadToken
+				ref.Qualifier = &qualifier
+				ref.Token = p.currToken
+				ref.Name = typeName
 			} else {
-				return ""
+				return nil
 			}
 		}
 
@@ -1298,15 +1344,15 @@ func (p *Parser) parseTypeSignature() string {
 			if typeName == "Number" || typeName == "String" || typeName == "Boolean" || typeName == "Date" {
 				p.reportError(p.peekToken, fmt.Sprintf("syntax error: primitive type '%s' cannot be nullable", typeName))
 				p.nextToken() // consume ?
-				return typeName
+				return finish(typeName)
 			}
 			p.nextToken() // move to ?
 			typeName += "?"
 		}
-		return typeName
+		return finish(typeName)
 	}
 	p.reportError(p.peekToken, fmt.Sprintf("expected type identifier, got %s", p.peekToken.Type))
-	return ""
+	return nil
 }
 
 // parseMapLiteral parses a map/dictionary definition, e.g., {"key": "value"}.
@@ -1509,7 +1555,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 				p.nextToken() // consume the parameter identifier
 				p.nextToken() // consume FAT_ARROW
 				fn := &ast.FunctionLiteral{Token: paramTok}
-				fn.Parameters = []*ast.Parameter{{Token: paramTok, Name: paramTok.Literal, Type: ""}}
+				fn.Parameters = []*ast.Parameter{{Token: paramTok, Name: paramTok.Literal}} // type inferred
 				fn.Body = p.parseArrowFunctionBody()
 				call.Arguments = append(call.Arguments, fn)
 				call.HasTrailingArgument = true
@@ -1531,7 +1577,7 @@ func (p *Parser) parseIdentifier() ast.Expression {
 func (p *Parser) parseIdentifierOrAnonymousFunction() ast.Expression {
 	if p.peekToken.Type == lexer.FAT_ARROW {
 		lit := &ast.FunctionLiteral{Token: p.currToken}
-		param := &ast.Parameter{Token: p.currToken, Name: p.currToken.Literal, Type: ""}
+		param := &ast.Parameter{Token: p.currToken, Name: p.currToken.Literal} // type inferred
 		lit.Parameters = []*ast.Parameter{param}
 
 		p.nextToken() // move to FAT_ARROW
@@ -1717,9 +1763,9 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 // isAnonymousFunctionLookahead checks if the parens enclose a parameter list followed by FAT_ARROW
 func (p *Parser) isAnonymousFunctionLookahead() bool {
 	tmpLexer := p.tknzr.Clone()
-	
+
 	depth := 1 // currently at '('
-	
+
 	for {
 		tok := tmpLexer.NextToken()
 		if tok.Type == lexer.EOF {
@@ -1835,7 +1881,7 @@ func asJoinCall(expr ast.Expression) *ast.CallExpression {
 
 func (p *Parser) parseAnonymousFunction() ast.Expression {
 	lit := &ast.FunctionLiteral{Token: p.currToken} // Token is '('
-	
+
 	lit.Parameters = p.parseAnonymousFunctionParameters()
 
 	if !p.expectPeek(lexer.FAT_ARROW) {
@@ -1864,9 +1910,9 @@ func (p *Parser) parseAnonymousFunctionParameters() []*ast.Parameter {
 
 		if p.peekToken.Type == lexer.COLON {
 			p.nextToken() // move to colon
-			param.Type = p.parseTypeSignature()
+			param.Type = p.parseTypeExpr()
 		} else {
-			param.Type = "" // inferred
+			param.Type = nil // inferred
 		}
 
 		return param
@@ -1894,7 +1940,7 @@ func (p *Parser) parseAnonymousFunctionParameters() []*ast.Parameter {
 // parsePipeExpression rewrites A |> f(B) to f(A, B)
 func (p *Parser) parsePipeExpression(left ast.Expression) ast.Expression {
 	token := p.currToken // The '|>' token
-	p.nextToken()         // Move past '|>'
+	p.nextToken()        // Move past '|>'
 
 	if _, ok := left.(*ast.StreamPipeExpression); ok {
 		p.reportError(token, "syntax error: a stream pipe chain (|>>/?>>) cannot feed into a regular pipe (|>) — chain further stream stages or bind the result to a variable first")
@@ -2000,7 +2046,7 @@ func (p *Parser) WithContext(ctx context.Context) *Parser {
 // parseSafePipeExpression rewrites A ?> f(B) into a SafePipeExpression with Left=A, Call=f(A, B)
 func (p *Parser) parseSafePipeExpression(left ast.Expression) ast.Expression {
 	token := p.currToken // The '?>' token
-	p.nextToken() // Move past '?>'
+	p.nextToken()        // Move past '?>'
 
 	if _, ok := left.(*ast.StreamPipeExpression); ok {
 		p.reportError(token, "syntax error: a stream pipe chain (|>>/?>>) cannot feed into a regular pipe (?>) — chain further stream stages or bind the result to a variable first")
@@ -2049,7 +2095,7 @@ func (p *Parser) parseSafeStreamPipeExpression(left ast.Expression) ast.Expressi
 // nullability boundary.
 func (p *Parser) parseStreamPipeExpressionCommon(left ast.Expression, safe bool) ast.Expression {
 	token := p.currToken // The '|>>' or '?>>' token
-	p.nextToken()         // Move past the operator
+	p.nextToken()        // Move past the operator
 
 	right := p.parseExpression(lexer.PIPE_PRECEDENCE)
 

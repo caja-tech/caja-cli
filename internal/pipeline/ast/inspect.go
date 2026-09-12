@@ -46,12 +46,14 @@ func Children(n Node) []Node {
 
 	// --- declarations ---
 	case *LetStatement:
-		add(n.Name, n.Value)
+		add(n.Name, n.ValueType, n.Value)
 	case *ConstStatement:
-		add(n.Name, n.Value)
+		add(n.Name, n.ValueType, n.Value)
 	case *TypeAliasStatement:
 		add(n.Name)
-		add(structFieldNames(n.StructDefinition)...)
+		add(signatureTypes(n.Signature)...)
+		add(n.TargetType)
+		add(structFieldNodes(n.StructDefinition)...)
 	case *TypeConstraintStatement:
 		add(n.Name, n.BaseType, n.Predicate)
 	case *UnionStatement:
@@ -142,6 +144,7 @@ func Children(n Node) []Node {
 		for _, p := range n.Parameters {
 			add(p)
 		}
+		add(n.ReturnType)
 		add(n.Body)
 	case *InterpolatedStringLiteral:
 		for _, seg := range n.Segments {
@@ -150,27 +153,56 @@ func Children(n Node) []Node {
 			add(seg.Expr)
 		}
 
+	// --- type annotations ---
+	case *Parameter:
+		add(n.Type)
+	case *TypeExpr:
+		for _, ref := range n.Refs {
+			add(ref)
+		}
+
 		// --- leaves ---
-		// Identifier, Parameter, and the scalar literals have no child nodes.
+		// Identifier, TypeRef and the scalar literals have no child nodes.
 	}
 
 	return out
 }
 
-// structFieldNames reaches through StructDefinition and StructField, neither of which
-// implements Node (they carry no token of their own), to the field-name identifiers that
-// do. Without this, struct field declarations would be unaddressable.
-func structFieldNames(def *StructDefinition) []Node {
+// structFieldNodes reaches through StructDefinition and StructField, neither of which
+// implements Node (they carry no token of their own), to the field names and type
+// annotations that do. Without this, struct field declarations would be unaddressable.
+func structFieldNodes(def *StructDefinition) []Node {
 	if def == nil {
 		return nil
 	}
-	names := make([]Node, 0, len(def.Fields))
+	out := make([]Node, 0, len(def.Fields)*2)
 	for i := range def.Fields {
 		if def.Fields[i].Name != nil {
-			names = append(names, def.Fields[i].Name)
+			out = append(out, def.Fields[i].Name)
+		}
+		if def.Fields[i].Type != nil {
+			out = append(out, def.Fields[i].Type)
 		}
 	}
-	return names
+	return out
+}
+
+// signatureTypes reaches through FunctionSignature, which is likewise not a Node, to the
+// parameter and return annotations inside a `type Name fn(A, B) -> C` alias.
+func signatureTypes(sig *FunctionSignature) []Node {
+	if sig == nil {
+		return nil
+	}
+	out := make([]Node, 0, len(sig.ParamTypes)+1)
+	for _, pt := range sig.ParamTypes {
+		if pt != nil {
+			out = append(out, pt)
+		}
+	}
+	if sig.ReturnType != nil {
+		out = append(out, sig.ReturnType)
+	}
+	return out
 }
 
 // Inspect walks the tree rooted at n in depth-first, source order, calling f for every

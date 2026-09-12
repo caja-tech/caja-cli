@@ -353,3 +353,54 @@ func TestHoverReachesEveryConstruct(t *testing.T) {
 		})
 	}
 }
+
+// TestHoverOnTypeReference is the payoff of replacing the type-as-string fields with
+// positioned nodes. Every one of these positions previously resolved to nothing, because
+// a type annotation had no AST node and therefore no position to look up.
+func TestHoverOnTypeReference(t *testing.T) {
+	prelude := "type Money Number\ntype Customer struct {\n    age Number\n}\n"
+
+	cases := []struct {
+		name       string
+		code       string
+		line, char int // line is relative to the end of the prelude
+	}{
+		{"let annotation", "let price: Money = 1\n", 0, 11},
+		{"const annotation", "const fee: Money = 1\n", 0, 11},
+		{"inside an array type", "let prices: [Money] = []\n", 0, 13},
+		{"parameter annotation", "let f = fn(c: Customer) -> Money { return 1 }\n", 0, 14},
+		{"return annotation", "let f = fn(c: Customer) -> Money { return 1 }\n", 0, 27},
+		{"struct field annotation", "type Order struct {\n    total Money\n}\n", 1, 10},
+		{"type alias target", "type Cents Money\n", 0, 11},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, s, uri := openInline(t, "main.caja", prelude+tc.code)
+
+			if got := hoverText(t, s, uri, 4+tc.line, tc.char); got == "" {
+				t.Errorf("hover on the type reference at %d:%d resolved to nothing", 4+tc.line, tc.char)
+			}
+		})
+	}
+}
+
+// TestDefinitionOnTypeReference checks that a type reference jumps to where the type was
+// declared — the other half of what positioned type annotations unlock.
+func TestDefinitionOnTypeReference(t *testing.T) {
+	src := "type Money Number\n" +
+		"let price: Money = 1\n"
+
+	_, s, uri := openInline(t, "main.caja", src)
+
+	locs, err := s.Definition(uri, 1, 11) // on `Money` in the annotation
+	if err != nil {
+		t.Fatalf("Definition: %v", err)
+	}
+	if len(locs) == 0 {
+		t.Fatal("go-to-definition on a type reference resolved to nothing")
+	}
+	if locs[0].Range.Start.Line != 0 {
+		t.Errorf("expected the declaration of Money on line 0, got line %d", locs[0].Range.Start.Line)
+	}
+}

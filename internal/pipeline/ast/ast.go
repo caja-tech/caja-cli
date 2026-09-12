@@ -167,13 +167,13 @@ func (al *ArrayLiteral) String() string {
 type Parameter struct {
 	Token lexer.Token // The token for the parameter name
 	Name  string
-	Type  string
+	Type  *TypeExpr
 }
 
 func (p *Parameter) TokenLiteral() string { return p.Token.Literal }
 
 func (p *Parameter) String() string {
-	return p.Name + ": " + p.Type
+	return p.Name + ": " + p.Type.Text()
 }
 
 // FunctionLiteral is an expression node that represents a function definition.
@@ -182,7 +182,7 @@ type FunctionLiteral struct {
 	Token          lexer.Token
 	TypeParameters []string
 	Parameters     []*Parameter
-	ReturnType     string
+	ReturnType     *TypeExpr
 	Body           *BlockStatement
 	IsMemo         bool
 }
@@ -212,8 +212,8 @@ func (fl *FunctionLiteral) String() string {
 	}
 
 	out += ")"
-	if fl.ReturnType != "" {
-		out += " -> " + fl.ReturnType
+	if fl.ReturnType.Text() != "" {
+		out += " -> " + fl.ReturnType.Text()
 	}
 	out += " { ... }"
 	return out
@@ -255,7 +255,7 @@ type LetStatement struct {
 	Value     Expression
 	IsPrivate bool
 	IsActive  bool
-	ValueType string
+	ValueType *TypeExpr
 }
 
 func (ls *LetStatement) statementNode()       {}
@@ -271,8 +271,8 @@ func (ls *LetStatement) String() string {
 	}
 	out += ls.Name.String()
 
-	if ls.ValueType != "" {
-		out += ": " + ls.ValueType
+	if ls.ValueType.Text() != "" {
+		out += ": " + ls.ValueType.Text()
 	}
 
 	out += " = "
@@ -291,7 +291,7 @@ type ConstStatement struct {
 	Name      *Identifier
 	Value     Expression
 	IsPrivate bool
-	ValueType string
+	ValueType *TypeExpr
 }
 
 func (cs *ConstStatement) statementNode()       {}
@@ -303,8 +303,8 @@ func (cs *ConstStatement) String() string {
 	}
 	out += cs.TokenLiteral() + " " + cs.Name.String()
 
-	if cs.ValueType != "" {
-		out += ": " + cs.ValueType
+	if cs.ValueType.Text() != "" {
+		out += ": " + cs.ValueType.Text()
 	}
 
 	out += " = "
@@ -431,8 +431,8 @@ func (bs *BlockStatement) String() string {
 // FunctionSignature represents the expected type signature of a function,
 // including its parameter types and optional return type.
 type FunctionSignature struct {
-	ParamTypes []string
-	ReturnType string
+	ParamTypes []*TypeExpr
+	ReturnType *TypeExpr
 }
 
 func (fs *FunctionSignature) String() string {
@@ -440,7 +440,7 @@ func (fs *FunctionSignature) String() string {
 
 	if len(fs.ParamTypes) > 0 {
 		for i, param := range fs.ParamTypes {
-			out += param
+			out += param.Text()
 			if i != len(fs.ParamTypes)-1 {
 				out += ", "
 			}
@@ -448,8 +448,8 @@ func (fs *FunctionSignature) String() string {
 	}
 
 	out += ")"
-	if fs.ReturnType != "" {
-		out += " -> " + fs.ReturnType
+	if fs.ReturnType.Text() != "" {
+		out += " -> " + fs.ReturnType.Text()
 	}
 
 	return out
@@ -459,15 +459,15 @@ func (fs *FunctionSignature) String() string {
 // holding the field's name, expected type string, and constant modifier.
 type StructField struct {
 	Name       *Identifier
-	Type       string
+	Type       *TypeExpr
 	IsConstant bool
 }
 
 func (sf *StructField) String() string {
 	if sf.IsConstant {
-		return "const " + sf.Name.String() + " " + sf.Type
+		return "const " + sf.Name.String() + " " + sf.Type.Text()
 	}
-	return sf.Name.String() + " " + sf.Type
+	return sf.Name.String() + " " + sf.Type.Text()
 }
 
 // StructDefinition represents the body of a struct type declaration,
@@ -539,7 +539,7 @@ type TypeAliasStatement struct {
 	Name             *Identifier
 	TypeParameters   []string           // Used for generic aliases like type Map<K, V> ...
 	Signature        *FunctionSignature // Used for fn(...) types
-	TargetType       string             // Used for simple alias types like Number, [String], etc.
+	TargetType       *TypeExpr          // Used for simple alias types like Number, [String], etc.
 	StructDefinition *StructDefinition  // Used for struct types
 	IsPrivate        bool
 }
@@ -562,7 +562,7 @@ func (ts *TypeAliasStatement) String() string {
 	} else if ts.StructDefinition != nil {
 		out += ts.TokenLiteral() + " " + namePart + " " + ts.StructDefinition.String()
 	} else {
-		out += ts.TokenLiteral() + " " + namePart + " " + ts.TargetType
+		out += ts.TokenLiteral() + " " + namePart + " " + ts.TargetType.Text()
 	}
 
 	return out
@@ -711,7 +711,7 @@ func (ce *CallExpression) expressionNode()      {}
 func (ce *CallExpression) TokenLiteral() string { return ce.Token.Literal }
 func (ce *CallExpression) String() string {
 	out := ce.Function.String()
-	
+
 	if len(ce.TypeArguments) > 0 {
 		out += "::<"
 		for i, t := range ce.TypeArguments {
@@ -722,7 +722,7 @@ func (ce *CallExpression) String() string {
 		}
 		out += ">"
 	}
-	
+
 	out += "("
 
 	parts := []string{}
