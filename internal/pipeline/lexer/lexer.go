@@ -281,15 +281,30 @@ func (l *Lexer) readIdentifier() string {
 	return l.input[position:l.position]
 }
 
-// readNumber consumes a sequence of digit characters, optionally containing a
-// single decimal point, and returns it as a string. The Lexer is left
-// positioned at the first character that does not belong to the number literal.
+// readNumber consumes a sequence of digit characters, optionally followed by
+// a decimal point and more digits, and returns it as a string. The decimal
+// point is only consumed when a digit follows it — a trailing dot with no
+// fractional digits (e.g. the "." in "5.abs()") is left for the next token,
+// so a numeric literal can be immediately followed by a dot-call. The Lexer
+// is left positioned at the first character that does not belong to the
+// number literal.
 func (l *Lexer) readNumber() string {
 	position := l.position
-	for l.isCurrentCharADigit() || l.ch == '.' {
+	for l.isCurrentCharADigit() {
 		l.readChar()
 	}
+	if l.ch == '.' && isASCIIDigit(l.peekChar()) {
+		l.readChar()
+		for l.isCurrentCharADigit() {
+			l.readChar()
+		}
+	}
 	return l.input[position:l.position]
+}
+
+// isASCIIDigit reports whether ch is an ASCII decimal digit (0-9).
+func isASCIIDigit(ch rune) bool {
+	return '0' <= ch && ch <= '9'
 }
 
 // isCurrentCharALetter reports whether the current character is an ASCII letter
@@ -301,7 +316,7 @@ func (l *Lexer) isCurrentCharALetter() bool {
 // isCurrentCharADigit reports whether the current character is an ASCII decimal
 // digit (0–9).
 func (l *Lexer) isCurrentCharADigit() bool {
-	return '0' <= l.ch && l.ch <= '9'
+	return isASCIIDigit(l.ch)
 }
 
 // isCurrentCharANewLine reports whether the current character represents a

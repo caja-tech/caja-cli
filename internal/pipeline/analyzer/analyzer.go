@@ -52,6 +52,26 @@ type Analyzer struct {
 	// statements resolve the same annotation more than once, and the analyzer
 	// tests assert an exact error count.
 	reportedAmbiguousTypes map[string]bool
+	// propertyCallSites marks a *ast.PropertyExpression as being the
+	// immediate Function of an enclosing CallExpression, set by
+	// analyzeCallExpression before it analyzes n.Function. UFCS resolution in
+	// analyzePropertyExpression only fires when this is true, so a bare
+	// non-call reference (`let f = list.push`) stays rejected exactly as
+	// before — UFCS is call-syntax sugar only.
+	propertyCallSites map[*ast.PropertyExpression]bool
+	// ufcsMatches records, for a PropertyExpression resolved via UFCS
+	// (receiver.fn(...) sugar), the module path owning the function it
+	// resolved to ("" for a same-file top-level function). Read by
+	// analyzeCallExpression (to know the effective argument list includes
+	// the receiver) and by the compiler (via GetUFCSModulePath) to route
+	// codegen to the right callee.
+	ufcsMatches map[*ast.PropertyExpression]string
+	// pendingOverloads records struct-receiver property calls where the
+	// struct's own function-typed field and one or more UFCS candidates both
+	// claim the name. analyzePropertyExpression cannot settle that — it can't
+	// see the call's arguments — so it records the contest here and
+	// analyzeCallExpression resolves it via resolveStructOverload.
+	pendingOverloads map[*ast.PropertyExpression]*pendingOverload
 }
 
 // New creates and returns a new Analyzer with an initial global scope.
@@ -77,6 +97,9 @@ func New(globalEnv *environment.Environment) *Analyzer {
 		wildcardTypes:          make(map[string][]string),
 		importedTypes:          make(map[string]bool),
 		reportedAmbiguousTypes: make(map[string]bool),
+		propertyCallSites:      make(map[*ast.PropertyExpression]bool),
+		ufcsMatches:            make(map[*ast.PropertyExpression]string),
+		pendingOverloads:       make(map[*ast.PropertyExpression]*pendingOverload),
 	}
 
 	// Inject Nothing as a global builtin type
@@ -1243,6 +1266,15 @@ func appendModuleOrigin(origins []string, moduleName string) []string {
 	return append(next, moduleName)
 }
 
+// joinWithLastSep joins items with ", " except before the final item, which
+// gets lastSep ("and"/"or") instead — "a", "a and b", "a, b and c".
+func joinWithLastSep(items []string, lastSep string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " " + lastSep + " " + items[len(items)-1]
+}
+
 // formatModuleList renders module names for a diagnostic: "'a'", "'a' and 'b'",
 // or "'a', 'b' and 'c'".
 func formatModuleList(modules []string) string {
@@ -1250,10 +1282,7 @@ func formatModuleList(modules []string) string {
 	for i, m := range modules {
 		quoted[i] = fmt.Sprintf("'%s'", m)
 	}
-	if len(quoted) < 2 {
-		return strings.Join(quoted, "")
-	}
-	return strings.Join(quoted[:len(quoted)-1], ", ") + " and " + quoted[len(quoted)-1]
+	return joinWithLastSep(quoted, "and")
 }
 
 // formatQualifiedSuggestions renders the qualified forms that resolve an
@@ -1263,10 +1292,7 @@ func formatQualifiedSuggestions(modules []string, name string) string {
 	for i, m := range modules {
 		qualified[i] = m + "." + name
 	}
-	if len(qualified) < 2 {
-		return strings.Join(qualified, "")
-	}
-	return strings.Join(qualified[:len(qualified)-1], ", ") + " or " + qualified[len(qualified)-1]
+	return joinWithLastSep(qualified, "or")
 }
 
 // analyzeReturnStatement recursively analyzes the return value expression, if any.
@@ -1781,7 +1807,23 @@ func (a *Analyzer) analyzeIfExpression(n *ast.IfExpression) symbol.Symbol {
 // verifies the number of arguments matches the function's arity, and checks
 // the types of the provided arguments against the function's parameters.
 func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
+	propFn, _ := n.Function.(*ast.PropertyExpression)
+	if propFn != nil {
+		a.propertyCallSites[propFn] = true
+	}
 	sym := a.analyze(n.Function)
+
+	// Settle a struct-receiver contest between the struct's own function field
+	// and a same-named free function before anything downstream reads sym.
+	// preArgs carries any arguments resolution had to analyze, so the checking
+	// loop below consumes them instead of analyzing them a second time.
+	var preArgs []symbol.Symbol
+	if propFn != nil {
+		if pending, ok := a.pendingOverloads[propFn]; ok {
+			delete(a.pendingOverloads, propFn)
+			sym, preArgs = a.resolveStructOverload(n, propFn, pending)
+		}
+	}
 
 	_, isBuiltin := sym.(*symbol.BuiltinSymbol)
 	if isBuiltin {
@@ -1832,13 +1874,46 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 		return symbol.AnySymbol()
 	}
 
+	isUFCS := false
+	if propFn != nil {
+		_, isUFCS = a.ufcsMatches[propFn]
+	}
+
+	// A UFCS call never supports named arguments, regardless of whether the
+	// matched function is a builtin/real module's or a plain local function
+	// (which would otherwise legitimately support them on a normal call) —
+	// resolveNamedCallArguments has no concept of "argument 0 is implicit",
+	// so rather than silently dropping named args for a local-function UFCS
+	// call, reject uniformly up front.
+	if isUFCS && len(n.NamedArguments) > 0 {
+		a.reportError(n.Token, fmt.Sprintf("type error: named arguments are not supported for method-call syntax '%s'", propFn.Property.Value))
+		return symbol.AnySymbol()
+	}
+
+	// A standard-module function (array.push, string.toUpper, ...) called in
+	// its direct qualified form never supports named arguments either — this
+	// used to only be checked for BuiltinSymbol-backed modules (above);
+	// FunctionSymbol is otherwise indistinguishable from a user-declared
+	// function, so ModuleName is what identifies it as a standard-module call
+	// here.
+	if len(n.NamedArguments) > 0 && fnSymbol.ModuleName != "" {
+		a.reportError(n.Token, fmt.Sprintf("type error: named arguments are not supported for builtin module function '%s'", fnSymbol.ModuleName+"."+fnSymbol.Name))
+		return symbol.AnySymbol()
+	}
+
 	var argsToCheck []ast.Expression
-	if len(n.NamedArguments) == 0 {
+	switch {
+	case isUFCS:
+		if fnSymbol.Type() != environment.ANY_OBJ && len(n.Arguments)+1 != fnSymbol.Arity() {
+			a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity()-1, len(n.Arguments)))
+		}
+		argsToCheck = append([]ast.Expression{propFn.Object}, n.Arguments...)
+	case len(n.NamedArguments) == 0:
 		if fnSymbol.Type() != environment.ANY_OBJ && len(n.Arguments) != fnSymbol.Arity() {
 			a.reportError(n.Token, fmt.Sprintf("arity error: expected %d arguments, got %d", fnSymbol.Arity(), len(n.Arguments)))
 		}
 		argsToCheck = n.Arguments
-	} else {
+	default:
 		plan, ok := a.resolveNamedCallArguments(n, fnSymbol)
 		if !ok {
 			return symbol.AnySymbol()
@@ -1860,7 +1935,26 @@ func (a *Analyzer) analyzeCallExpression(n *ast.CallExpression) symbol.Symbol {
 			a.pushExpectedType(expectedArgType)
 		}
 
-		argSymbols[i] = a.analyze(arg)
+		// preArgs holds arguments a struct-overload tiebreak already analyzed;
+		// its index 0 is the first EXPLICIT argument, so on a UFCS win (where
+		// slot 0 is the receiver) it is offset by one.
+		preIdx := i
+		if isUFCS {
+			preIdx = i - 1
+		}
+
+		switch {
+		case isUFCS && i == 0:
+			// arg is ufcsProp.Object, already analyzed by analyzePropertyExpression
+			// (which is how a `move`/`react` receiver already got its side effects
+			// applied) — re-analyzing here would duplicate diagnostics and, for a
+			// `(move x).push(...)` receiver, double-mark the move.
+			argSymbols[i], _ = a.GetSymbol(arg)
+		case preIdx >= 0 && preIdx < len(preArgs):
+			argSymbols[i] = preArgs[preIdx]
+		default:
+			argSymbols[i] = a.analyze(arg)
+		}
 
 		if expectedArgType != nil {
 			a.popExpectedType()
@@ -2134,6 +2228,11 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 	}
 
 	if leftSymbol.Type() != environment.MODULE_OBJ && structDef == nil {
+		if !isNullable && a.propertyCallSites[n] {
+			if matched, resolved := a.resolveUFCS(n, leftSymbol); resolved {
+				return matched
+			}
+		}
 		a.reportError(n.Token, fmt.Sprintf("type error: property access not supported for %s", leftSymbol.Type()))
 		return symbol.AnySymbol()
 	}
@@ -2157,7 +2256,19 @@ func (a *Analyzer) analyzePropertyExpression(n *ast.PropertyExpression) symbol.S
 			return symbol.AnySymbol()
 		}
 	} else if structDef != nil {
-		if fieldSym, exists := structDef.Fields[n.Property.Value]; exists {
+		fieldSym, exists := structDef.Fields[n.Property.Value]
+		var fieldFn *symbol.FunctionSymbol
+		if exists {
+			fieldFn, _ = fieldSym.Type.(*symbol.FunctionSymbol)
+		}
+
+		if !isNullable && a.propertyCallSites[n] {
+			if matched, resolved := a.resolveStructReceiverUFCS(n, structDef, leftSymbol, fieldFn); resolved {
+				return matched
+			}
+		}
+
+		if exists {
 			propType = fieldSym.Type
 			a.nodeSymbols[n.Property] = propType
 			// We could also store definition if StructDefSymbol tracked it, but we don't have it yet.
