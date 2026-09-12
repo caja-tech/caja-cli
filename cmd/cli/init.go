@@ -113,13 +113,23 @@ func detectPackageManager() (string, bool) {
 	return "", false
 }
 
+// scaffoldHasPackageJSON reports whether the freshly-rendered scaffold in
+// dir declares npm dependencies — i.e. whether its template tree included a
+// package.json.tmpl. This is the install gate, in preference to testing the
+// project type: the two would have to be kept in agreement by hand, and the
+// package.json is the thing `npm install` actually reads anyway.
+func scaffoldHasPackageJSON(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "package.json"))
+	return err == nil
+}
+
 // installDependencies runs the detected package manager's install command
-// inside dir to fetch whatever package.json there declares (currently just
-// @caja/acerola for a scaffolded http-api project). Failure here — no
-// package manager on PATH, no network, or any other install error — is
-// reported as a warning, not a fatal init error: the scaffolded project is
-// still valid and usable, and the user can retry the install manually once
-// whatever blocked it is resolved.
+// inside dir to fetch whatever package.json there declares (@caja/acerola
+// for an http-api project; @caja/siriguela and @caja/ui for a static-page).
+// Failure here — no package manager on PATH, no network, or any other
+// install error — is reported as a warning, not a fatal init error: the
+// scaffolded project is still valid and usable, and the user can retry the
+// install manually once whatever blocked it is resolved.
 func installDependencies(dir string, out io.Writer) {
 	bin, ok := detectPackageManager()
 	if !ok {
@@ -201,10 +211,12 @@ func NewInitCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'skip-install' flag: %w", err)
 			}
-			// http-api is the only project type that depends on a package
-			// today (@caja/acerola, declared in its package.json.tmpl) —
-			// static-page/web-app have nothing to install.
-			if projectType == project.TypeHTTPAPI && !skipInstall {
+			// Whether to install is decided by what the scaffold actually
+			// produced, not by a list of project types kept in sync by hand:
+			// a template tree that ships a package.json.tmpl has dependencies
+			// to fetch, and one that doesn't, doesn't. Adding npm deps to a
+			// project type is then purely a template change.
+			if !skipInstall && scaffoldHasPackageJSON(targetDir) {
 				installDependencies(targetDir, cmd.OutOrStdout())
 			}
 
@@ -217,7 +229,7 @@ func NewInitCmd() (*cobra.Command, error) {
 	cmd.Flags().String("name", "", "Name of the project to create")
 	cmd.Flags().String("type", "", "Project type: static-page, http-api, or web-app")
 	cmd.Flags().String("dir", "", "Directory to create the project in (defaults to ./<name>)")
-	cmd.Flags().Bool("skip-install", false, "Skip automatically installing npm dependencies for http-api projects")
+	cmd.Flags().Bool("skip-install", false, "Skip automatically installing npm dependencies for project types that declare them")
 
 	return cmd, nil
 }

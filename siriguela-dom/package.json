@@ -1,6 +1,0 @@
-{
-  "name": "@caja/siriguela-dom",
-  "version": "0.1.0",
-  "description": "mount() for siriguela View trees — the web-app half of @caja/siriguela, kept in a separate package so a static-page project (renderToString only) never pulls in the browser/wasm build path.",
-  "main": "index.caja"
-}

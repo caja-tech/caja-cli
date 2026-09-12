@@ -259,6 +259,31 @@ func TestModules(t *testing.T) {
 			errorMsg:    "semantic error: module 'second_types' has no exported member 'Hidden'",
 		},
 		{
+			// Regression test: a named-imported enum used to bind only as a
+			// value (Size.Small resolving), never as a type (s: Size failing
+			// to resolve) — an enum's name is deliberately registered in
+			// BOTH the value scope and the type registry, but the named-
+			// import resolution used to be an if/else-if chain that only
+			// ever reached one of the two. classify's `s: Size` parameter
+			// exercises the type form; `Size.Small` exercises the value form.
+			name:        "Named Imports Enum Test",
+			file:        "test_named_imports_enum.caja",
+			expectError: false,
+			expectVal:   1.0,
+		},
+		{
+			// Regression test: re-exporting a named-imported enum through a
+			// facade module used to emit `var facade_Size T = origin_Size`,
+			// referencing a Go symbol that never exists — an enum emits no
+			// Go declaration at all, and a member access inlines its literal.
+			// This is the exact shape @caja/siriguela uses to forward
+			// @caja/ui's CSSProperty to its own consumers.
+			name:        "Named Imports Enum Re-export Test",
+			file:        "test_named_imports_enum_reexport.caja",
+			expectError: false,
+			expectVal:   30.0,
+		},
+		{
 			name:        "Wildcard Imports Builtin Test",
 			file:        "test_wildcard_imports_builtin.caja",
 			expectError: false,

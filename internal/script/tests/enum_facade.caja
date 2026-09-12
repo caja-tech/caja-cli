@@ -1,0 +1,12 @@
+# A facade that named-imports Size purely to re-export it, the shape
+# @caja/siriguela uses to forward @caja/ui's CSSProperty. An enum has
+# no Go declaration of its own, so the re-export must NOT emit a forwarding
+# var for it.
+import { Size } from "second_types"
+
+const describe = fn(s: Size) -> Number {
+	if (s == Size.Large) {
+		return 10
+	}
+	return 20
+}

@@ -1,0 +1,254 @@
+import * from "@caja/ui"
+import browser
+import array
+import string
+
+# mount() lives in its own package, separate from @caja/ui's View/
+# view/attr/style/renderToString, because merely IMPORTING a module that
+# contains ANY browser-touching code — even a function nothing in the
+# consuming program ever calls — forces the whole compiled binary into
+# wasm-only mode (confirmed directly: internal/pipeline/compiler's
+# UsesBrowserModule just greps the transpiled Go source for the literal
+# "syscall/js" import string, which lands there because cross-module
+# transpilation emits every top-level statement of an imported module
+# unconditionally, not just the ones actually called). A static-page
+# project that only ever calls renderToString() must never end up needing
+# GOOS=js/wasm just because the same file also happened to define mount().
+
+const applyAttrs = fn(el: browser.Element, attrs: [Attr]) -> Nothing {
+	if (array.len(attrs) == 0) {
+		return
+	}
+	let head = array.head(attrs)
+	browser.setAttribute(el, head.name, head.value)
+	return applyAttrs(el, array.tail(attrs))
+}
+
+const applyStyles = fn(el: browser.Element, styles: [Style]) -> Nothing {
+	if (array.len(styles) == 0) {
+		return
+	}
+	let head = array.head(styles)
+	browser.setStyle(el, head.property, head.value)
+	return applyStyles(el, array.tail(styles))
+}
+
+# attachHandlers wires up both kinds of handler a View can carry.
+#
+# A JavaScript handler becomes an inline event attribute — the same thing
+# renderToString emits — so an onX written for a static page behaves
+# identically in a mounted app instead of being silently ignored. A Caja
+# handler goes through browser.on, which is the part that needs this
+# package at all.
+const attachHandlers = fn(el: browser.Element, handlers: [Handler]) -> Nothing {
+	if (array.len(handlers) == 0) {
+		return
+	}
+	let head = array.head(handlers)
+	if (string.len(head.script) > 0) {
+		browser.setAttribute(el, "on${head.event}", head.script)
+		return attachHandlers(el, array.tail(handlers))
+	}
+	browser.on(head.event, el, head.handler)
+	return attachHandlers(el, array.tail(handlers))
+}
+
+# mountChildren takes `mountOne` as a plain parameter, exactly like
+# @caja/ui's mapConcat takes `render` — the same forward-reference
+# constraint applies here: mount() and a "mount each of my children" helper
+# need each other, but Caja has no forward references between separate
+# `let` bindings, only self-reference from within a function's own body.
+# mount(), defined after this, passes itself in as `mountOne`.
+const mountChildren = fn(children: [View], parent: browser.Element, mountOne: fn(View, browser.Element) -> browser.Element) -> Nothing {
+	if (array.len(children) == 0) {
+		return
+	}
+	let head = array.head(children)
+	mountOne(head, parent)
+	return mountChildren(array.tail(children), parent, mountOne)
+}
+
+# mount — the web-app terminal. Returns the root element it created, so a
+# caller can keep a handle for a later, explicit browser.setText/setStyle
+# call — an opt-in escape hatch, not automatic reactivity.
+# The View parameter is named `target`, not `view`: this file wildcard-
+# imports @caja/ui, where `view` is now the View constructor's own name, and
+# a same-named parameter would silently shadow it.
+const mount = fn(target: View, parent: browser.Element) -> browser.Element {
+	let el = browser.createElement(target.tag)
+	applyAttrs(el, target.attrs)
+	applyStyles(el, target.styles)
+	if (string.len(target.text) > 0) {
+		browser.setText(el, target.text)
+	}
+	mountChildren(target.children, el, mount)
+	attachHandlers(el, target.handlers)
+	browser.appendChild(parent, el)
+	return el
+}
+
+# sync — explicit reconciliation. There is no automatic reactivity here:
+# Caja's `active`/`react` system can't be reached from inside any function
+# body at all (purity forbids reading OR writing an outer `let`, `active`
+# or not), so an event handler already has to re-fetch whatever state it
+# needs fresh, the same "no closures" pattern on()/onClick's own
+# handlers already require (see @caja/ui's index.caja). sync() is
+# just the DOM-reconciliation half of that: call it after rebuilding a View
+# from that freshly-read state.
+#
+# v1 strategy is clear-and-remount, not a diff/patch: browser.setHTML(el,
+# "") clears mountedRoot's entire current subtree in one call (there's no
+# "get this element's children" builtin to walk and remove them one at a
+# time), then mount() builds the new tree fresh underneath it. Correct, but
+# loses any focus/scroll state inside the reconciled subtree, and repaints
+# the whole thing rather than patching only what changed — a real keyed
+# diff would need mount() to retain a live element-per-node mapping it
+# deliberately doesn't keep today, so it's a deferred optimization, not a
+# v1 requirement.
+const sync = fn(target: View, mountedRoot: browser.Element) -> Nothing {
+	browser.setHTML(mountedRoot, "")
+	mount(target, mountedRoot)
+}
+
+# ---------------------------------------------------------------------
+# Caja event handlers
+#
+# The onX functions live HERE rather than in @caja/ui because this is the
+# package that can actually honour them. A Caja function handler needs a
+# Caja runtime in the browser to call it, which exists only in a web-app
+# (wasm) build — the one mount() is part of. @caja/ui, which also serves
+# static pages, keeps the onX family instead: JavaScript, emitted as
+# an attribute, which needs no runtime of ours at all and therefore works
+# in every target.
+#
+# So the split is by what makes the handler work, not by taste:
+#
+#     view(HTMLElement.Button) |> dom.onClick(fn() -> Nothing { ... })
+#         Caja code, attached by mount(). wasm only.
+#
+#     view(HTMLElement.Button) |> onClick([jsAlert(jsStr("hi"))])
+#         JavaScript, from @caja/ui. Everywhere.
+#
+# The names are the same on purpose — onClick is onClick, and which one you
+# get is which package you reached into. Wildcard-importing both and writing
+# a bare onClick is a clear "ambiguous reference" error naming both
+# packages, so the usual shape is to qualify this one: import "@caja/dom"
+# as dom.
+#
+# The event set itself is @caja/ui's DOMEvent, reached through the wildcard
+# import at the top of this file. It is defined once, there, because both
+# packages need the same 90 names and a second copy would only drift. That
+# is also the one thing @caja/ui exports a DOMEvent for: nothing in its own
+# public API takes one.
+#
+# A Caja handler cannot close over an outer let/const — Caja's purity rule
+# applies to it like any other function value, and nothing about passing it
+# through onClick changes that. Read what you need inside the handler
+# (browser.getElementById, browser.getValue, localStorageGet), which is
+# also what makes it correct: the handler runs long after the tree was
+# built.
+#
+# Rendering a Caja handler to a static page drops it, with a warning from
+# renderToString saying so — the same component code stays safe to share
+# between the two kinds of build, it just does nothing in one of them.
+# ---------------------------------------------------------------------
+
+private const on = fn(target: View, event: DOMEvent, handler: fn() -> Nothing) -> View {
+	let v = target
+	# `script` is left empty: this handler is Caja code for mount() to
+	# attach, not JavaScript for an attribute. @caja/ui's onX writes
+	# the other field, and each terminal reads the one it can use.
+	v.handlers = array.push(v.handlers, Handler{event: event, handler: handler, script: ""})
+	return v
+}
+
+const onClick = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Click, handler) }
+const onDoubleClick = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DoubleClick, handler) }
+const onAuxClick = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.AuxClick, handler) }
+const onContextMenu = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.ContextMenu, handler) }
+const onMouseDown = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseDown, handler) }
+const onMouseUp = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseUp, handler) }
+const onMouseEnter = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseEnter, handler) }
+const onMouseLeave = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseLeave, handler) }
+const onMouseOver = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseOver, handler) }
+const onMouseOut = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseOut, handler) }
+const onMouseMove = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.MouseMove, handler) }
+const onWheel = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Wheel, handler) }
+const onPointerDown = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerDown, handler) }
+const onPointerUp = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerUp, handler) }
+const onPointerMove = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerMove, handler) }
+const onPointerEnter = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerEnter, handler) }
+const onPointerLeave = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerLeave, handler) }
+const onPointerOver = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerOver, handler) }
+const onPointerOut = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerOut, handler) }
+const onPointerCancel = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.PointerCancel, handler) }
+const onGotPointerCapture = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.GotPointerCapture, handler) }
+const onLostPointerCapture = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.LostPointerCapture, handler) }
+const onTouchStart = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TouchStart, handler) }
+const onTouchMove = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TouchMove, handler) }
+const onTouchEnd = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TouchEnd, handler) }
+const onTouchCancel = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TouchCancel, handler) }
+const onKeyDown = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.KeyDown, handler) }
+const onKeyUp = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.KeyUp, handler) }
+const onKeyPress = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.KeyPress, handler) }
+const onInput = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Input, handler) }
+const onBeforeInput = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.BeforeInput, handler) }
+const onChange = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Change, handler) }
+const onSubmit = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Submit, handler) }
+const onReset = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Reset, handler) }
+const onInvalid = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Invalid, handler) }
+const onSelect = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Select, handler) }
+const onSearch = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Search, handler) }
+const onFocus = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Focus, handler) }
+const onBlur = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Blur, handler) }
+const onFocusIn = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.FocusIn, handler) }
+const onFocusOut = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.FocusOut, handler) }
+const onCopy = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Copy, handler) }
+const onCut = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Cut, handler) }
+const onPaste = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Paste, handler) }
+const onDragStart = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DragStart, handler) }
+const onDrag = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Drag, handler) }
+const onDragEnter = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DragEnter, handler) }
+const onDragOver = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DragOver, handler) }
+const onDragLeave = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DragLeave, handler) }
+const onDrop = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Drop, handler) }
+const onDragEnd = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DragEnd, handler) }
+const onScroll = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Scroll, handler) }
+const onScrollEnd = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.ScrollEnd, handler) }
+const onLoad = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Load, handler) }
+const onError = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Error, handler) }
+const onAbort = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Abort, handler) }
+const onToggle = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Toggle, handler) }
+const onBeforeToggle = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.BeforeToggle, handler) }
+const onClose = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Close, handler) }
+const onCancel = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Cancel, handler) }
+const onPlay = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Play, handler) }
+const onPlaying = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Playing, handler) }
+const onPause = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Pause, handler) }
+const onEnded = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Ended, handler) }
+const onVolumeChange = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.VolumeChange, handler) }
+const onTimeUpdate = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TimeUpdate, handler) }
+const onRateChange = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.RateChange, handler) }
+const onDurationChange = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.DurationChange, handler) }
+const onCanPlay = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.CanPlay, handler) }
+const onCanPlayThrough = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.CanPlayThrough, handler) }
+const onLoadedData = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.LoadedData, handler) }
+const onLoadedMetadata = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.LoadedMetadata, handler) }
+const onLoadStart = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.LoadStart, handler) }
+const onProgress = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Progress, handler) }
+const onSeeked = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Seeked, handler) }
+const onSeeking = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Seeking, handler) }
+const onStalled = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Stalled, handler) }
+const onSuspend = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Suspend, handler) }
+const onWaiting = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Waiting, handler) }
+const onEmptied = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.Emptied, handler) }
+const onCueChange = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.CueChange, handler) }
+const onAnimationStart = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.AnimationStart, handler) }
+const onAnimationEnd = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.AnimationEnd, handler) }
+const onAnimationIteration = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.AnimationIteration, handler) }
+const onAnimationCancel = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.AnimationCancel, handler) }
+const onTransitionRun = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TransitionRun, handler) }
+const onTransitionStart = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TransitionStart, handler) }
+const onTransitionEnd = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TransitionEnd, handler) }
+const onTransitionCancel = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.TransitionCancel, handler) }
+const onSlotChange = fn(target: View, handler: fn() -> Nothing) -> View { return on(target, DOMEvent.SlotChange, handler) }

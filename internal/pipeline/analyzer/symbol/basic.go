@@ -39,6 +39,17 @@ func (bs *BasicSymbol) Equals(other Symbol) bool {
 		return false
 	}
 
+	// Script widens to String, exactly the way an enum widens to its backing
+	// type above: validated JavaScript source IS a string, so it can be
+	// interpolated, measured, or written to a file like any other. The
+	// reverse is NOT permitted — this check is one-directional, so a plain
+	// String still fails to satisfy a Script parameter, which is the whole
+	// reason the type exists (js.raw is the only way to produce one, and it
+	// is what runs the validator).
+	if bs.symbolType == environment.STRING_OBJ && otherSymbol.symbolType == environment.SCRIPT_OBJ {
+		return true
+	}
+
 	if bs.symbolType != otherSymbol.symbolType {
 		return false
 	}

@@ -1,0 +1,49 @@
+import js
+import log
+import string
+
+# The `js` builtin module: JavaScript that is parsed at COMPILE time.
+#
+# js.raw is the only way to produce a Script, and a Script is what
+# @caja/ui's onXScript/scriptBlock functions emit into a page. So every
+# script a Caja program can emit has necessarily been through a real
+# JavaScript parser (esbuild, inside the caja binary) before the build
+# succeeded — a missing bracket is a build error here, not a page that
+# loads and silently does nothing in a browser.
+#
+# Two properties this sample pins down:
+#
+#   1. The argument must be a string LITERAL. That is what puts the source
+#      in front of the validator while the compiler is still running. A
+#      script assembled at runtime could never be checked, so it is
+#      rejected outright rather than silently trusted.
+#   2. A Script erases to a plain Go string, and registers NO module
+#      dependency. That second half matters: the compile target is chosen
+#      by grepping the generated source for "syscall/js", so a Script must
+#      never drag a static-page program onto the wasm build path.
+
+let simple = js.raw("document.title = 'set by caja'")
+
+# Multi-statement, multi-line, and every quoting style JS has — all of it
+# survives verbatim, including the newline.
+let block = js.raw("function greet(name) {\n\tconsole.log('hello ' + name)\n}\ngreet(\"caja\")")
+
+# A JS template literal needs its ${...} escaped as \${...}: Caja
+# interpolates ${...} inside its own string literals, so an unescaped one
+# would be evaluated at build time (and, being an interpolated string
+# rather than a literal, rejected by js.raw).
+let templated = js.raw("console.log(`1 + 1 = \${1 + 1}`)")
+
+# A Script widens to String — it IS text, so it can be measured,
+# interpolated and written out like any other. The reverse is rejected: a
+# bare String never narrows to a Script, which is what stops an unvalidated
+# string reaching a page.
+let asText: String = simple
+log.info("script length:", string.len(asText))
+log.info("contains document:", string.contains(simple, "document"))
+
+let wrapped = "<script>${block}</script>"
+log.info("wrapped:", string.len(wrapped))
+
+log.info("simple:", simple)
+log.info("templated:", templated)

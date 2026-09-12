@@ -1,21 +1,49 @@
-import "@caja/siriguela" as siriguela
-import "@caja/siriguela-dom" as siriguelaDom
+import * from "@caja/siriguela"
+import * from "@caja/ui"
+import * from "@caja/js"
+import "@caja/dom" as dom
 import browser
 
-# This scaffold builds the page as a siriguela View tree instead of a raw
-# HTML string — mount() walks it into live DOM nodes under #app. See
-# https://www.cajalang.com for more on siriguela.
+# This scaffold builds the page as a View tree instead of a raw HTML
+# string — mount() walks it into live DOM nodes under #app.
+#
+# @caja/siriguela is the theme: it gives you the components below. It is
+# built on @caja/ui, the structural layer — import that too whenever you
+# need a structural element or an event the theme doesn't wrap. See
+# https://www.cajalang.com for more.
 
 browser.log("{{.Name}} booted")
 
-let ui = siriguela.el("div")
-	|> siriguela.addChild(siriguela.pageHeading(1, "{{.Name}}"))
-	|> siriguela.addChild(siriguela.text("Edit main.caja, then run 'caja build' to compile to wasm or 'caja serve' to run it locally."))
-	|> siriguela.addChild(
-		siriguela.primaryButton("Click me")
-		|> siriguela.onClick(fn() -> Nothing {
-			browser.alert("Hello from {{.Name}}!")
-		})
-	)
+# Two kinds of event handler. They share a NAME — onClick is onClick — and
+# differ only in which package you reached into, because they need
+# different things to work.
+#
+# dom.onClick takes a CAJA function. Attaching it needs a Caja runtime in
+# the browser, which is exactly what this wasm build ships — so it lives in
+# @caja/dom, next to the mount() that attaches it. Render a View carrying
+# one to a static page and it is dropped, with a warning.
+#
+# onClick (from @caja/ui) takes JavaScript built with @caja/js and
+# emits it as an inline attribute. It needs no runtime of ours, so it works
+# here AND in a static page. Reach for it unless the handler genuinely
+# needs to run Caja code.
+let cta = primaryButton("Click me")
+	|> dom.onClick(fn() -> Nothing {
+		browser.alert("Hello from {{.Name}}!")
+	})
 
-siriguelaDom.mount(ui, browser.getElementById("app"))
+# The same button, the other way — JavaScript instead of Caja. Note the
+# bare onClick here versus dom.onClick above: same name, different package.
+# (Wildcard-importing both packages and writing a bare onClick would be an
+# "ambiguous reference" error naming both, which is why @caja/dom is
+# imported qualified.) This one also works unchanged in a static page.
+let altCta = secondaryButton("Or click me")
+	|> onClick([jsAlert(jsStr("Hello from {{.Name}}, in JavaScript!"))])
+
+let root = stack() {
+	pageHeading("{{.Name}}")
+	paragraph("Edit main.caja, then run 'caja build' to compile to wasm or 'caja serve' to run it locally.")
+	inlineRow([cta, altCta])
+}
+
+dom.mount(root, browser.getElementById("app"))

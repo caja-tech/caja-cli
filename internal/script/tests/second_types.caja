@@ -5,6 +5,11 @@ type Point struct {
 
 union Shape = Point
 
+enum Size {
+	Small = "small",
+	Large = "large",
+}
+
 private type Hidden struct {
 	value Number
 }

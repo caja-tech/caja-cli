@@ -1088,46 +1088,77 @@ func (a *Analyzer) analyzeImportStatement(n *ast.ImportStatement) symbol.Symbol 
 		}
 
 		for _, named := range n.NamedImports {
-			if sym, exists := modSym.GetSymbol(named.Value); exists {
-				a.nodeSymbols[named] = sym
-				if defTok, ok := modSym.Definitions[named.Value]; ok {
-					a.nodeDefinitions[named] = defTok
-				}
-				if modSym.FilePath != "" {
-					if a.nodeImportedFiles == nil {
-						a.nodeImportedFiles = make(map[ast.Node]string)
-					}
-					a.nodeImportedFiles[named] = modSym.FilePath
-				}
-				// A wildcard-bound name is not a real conflict: an explicit
-				// named import silently wins over `import * from ...`, which
-				// is what lets a user resolve a wildcard ambiguity by naming
-				// the one member they meant.
-				if existing, alreadyDeclared := a.findVarSymbolInScope(named.Value); alreadyDeclared && len(existing.WildcardModules) == 0 {
-					a.reportError(named.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", named.Value))
-				} else {
-					a.declareImport(named.Value, sym, true, named.Token, modPath)
-				}
-			} else if modSym.IsPrivate(named.Value) {
-				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
-			} else if typeSym, ok := modSym.GetType(named.Value); ok {
-				a.declareType(named.Value, typeSym)
-				if defTok, ok := modSym.Definitions[named.Value]; ok {
-					a.nodeDefinitions[named] = defTok
-				}
-				if modSym.FilePath != "" {
-					if a.nodeImportedFiles == nil {
-						a.nodeImportedFiles = make(map[ast.Node]string)
-					}
-					a.nodeImportedFiles[named] = modSym.FilePath
-				}
-			} else {
-				a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
-			}
+			a.bindNamedImport(named, modSym, modPath)
 		}
 	}
 
 	return modSymbol
+}
+
+// bindNamedImport binds one entry of `import { a, b } from mod` into the
+// importing scope.
+//
+// A name is looked up as a value AND as a type independently (not an
+// if/else-if chain) because an enum's name is deliberately registered in
+// BOTH the value scope and the type registry (see analyzeEnumStatement) —
+// CSSProperty.Padding resolves through the value form, x: CSSProperty
+// resolves through the type form. An if/else-if chain would only ever bind
+// whichever check ran first, silently dropping the other — exactly the gap
+// bindWildcardImport's own two independent loops don't have. struct/union/
+// define names exist only in the type registry, so this is a no-op for
+// them: symExists is simply false.
+func (a *Analyzer) bindNamedImport(named *ast.Identifier, modSym *symbol.ModuleSymbol, modPath string) {
+	sym, symExists := modSym.GetSymbol(named.Value)
+	typeSym, typeExists := modSym.GetType(named.Value)
+
+	// Privacy decides first, whatever the lookups found: GetType (like
+	// GetTypes, used by bindWildcardImport) does not itself filter private
+	// entries out of the module's type registry — every caller is
+	// responsible for checking IsPrivate before trusting a GetType hit.
+	// That check is what keeps `import { Hidden } from "mod"` correctly
+	// rejected for a `private type Hidden` even though GetType would
+	// otherwise happily return it.
+	if modSym.IsPrivate(named.Value) || (!symExists && !typeExists) {
+		a.reportError(named.Token, fmt.Sprintf("semantic error: module '%s' has no exported member '%s'", modPath, named.Value))
+		return
+	}
+
+	if symExists {
+		a.nodeSymbols[named] = sym
+		a.recordImportedNodeOrigin(named, modSym)
+		// A wildcard-bound name is not a real conflict: an explicit named
+		// import silently wins over `import * from ...`, which is what lets
+		// a user resolve a wildcard ambiguity by naming the one member they
+		// meant.
+		if existing, alreadyDeclared := a.findVarSymbolInScope(named.Value); alreadyDeclared && len(existing.WildcardModules) == 0 {
+			a.reportError(named.Token, fmt.Sprintf("import conflict: variable '%s' is already declared. Suggestion: create an alias for the module", named.Value))
+		} else {
+			a.declareImport(named.Value, sym, true, named.Token, modPath)
+		}
+	}
+
+	if typeExists {
+		a.declareType(named.Value, typeSym)
+		a.recordImportedNodeOrigin(named, modSym)
+	}
+}
+
+// recordImportedNodeOrigin points the named-import node at where the member
+// it names was actually defined, for go-to-definition (nodeDefinitions) and
+// for the transpiler's cross-module identifier prefixing
+// (nodeImportedFiles). Called for both the value and the type binding of a
+// name, since an enum is bound as both.
+func (a *Analyzer) recordImportedNodeOrigin(named *ast.Identifier, modSym *symbol.ModuleSymbol) {
+	if defTok, ok := modSym.Definitions[named.Value]; ok {
+		a.nodeDefinitions[named] = defTok
+	}
+	if modSym.FilePath == "" {
+		return
+	}
+	if a.nodeImportedFiles == nil {
+		a.nodeImportedFiles = make(map[ast.Node]string)
+	}
+	a.nodeImportedFiles[named] = modSym.FilePath
 }
 
 // bindWildcardImport binds every exported member of modSym directly into the

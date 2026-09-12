@@ -1,0 +1,9 @@
+{
+  "name": "@caja/ui",
+  "version": "0.1.0",
+  "description": "Renderer-agnostic building blocks for generating HTML and CSS from Caja — the View tree, modifiers, structural component catalog, renderToString, and the CSS-in-Caja APIs. No theme.",
+  "main": "index.caja",
+  "dependencies": {
+    "@caja/js": "0.1.0"
+  }
+}

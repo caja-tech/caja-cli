@@ -161,6 +161,36 @@ func GetStandardModule(moduleName string) (map[string]Symbol, map[string]Symbol,
 			"write": NewBuiltinSymbol(moduleName, 2, "write(path: String, content: String) -> Nothing", "path: String", "content: String"),
 		}, nil, true
 
+	case "js":
+		return map[string]Symbol{
+				// raw is the only way to get a Script, and a Script is the only
+				// thing @caja/ui will emit as JavaScript — so every script in a
+				// page is forced through the validation below.
+				//
+				// Two things make this a builtin rather than an ordinary library
+				// function. First, the argument must be a string LITERAL: the
+				// analyzer reads it straight off the AST (see
+				// analyzeJsRawFunction) and hands it to a real JavaScript parser,
+				// which is only possible for source that exists at compile time.
+				// Second, the validator has to run inside the caja binary — the
+				// program caja emits is built as a stdlib-only module (go mod
+				// init caja_build, CGO_ENABLED=0, no dependency resolution), so
+				// generated code could never import a JS parser itself.
+				//
+				// The consequence worth stating plainly: a script assembled at
+				// runtime by interpolation cannot be validated, and so cannot be
+				// expressed here at all. That is the deliberate trade — an
+				// unchecked script string is exactly the failure this module
+				// exists to prevent.
+				"raw": NewBuiltinSymbol(moduleName, 1, "raw(code: String) -> Script", "code: String"),
+			}, map[string]Symbol{
+				// Script is opaque and distinct from String on purpose: if it
+				// were an alias, any String would satisfy a Script parameter and
+				// the validation would be advisory rather than enforced. It
+				// erases to a Go string at codegen (mapSymbolToGoType).
+				"Script": NewBasicSymbol(environment.SCRIPT_OBJ),
+			}, true
+
 	case "browser":
 		return map[string]Symbol{
 				"log":            NewBuiltinSymbol(moduleName, 1, "log(message: String) -> Nothing", "message: String"),

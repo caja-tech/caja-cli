@@ -2,10 +2,29 @@
 
 A Caja **web-app** project — `main.caja` imports the `browser` module and
 compiles to a WebAssembly binary that runs entirely client-side. The page
-itself is built as a `@caja/siriguela` View tree (`mount()`, from
-`@caja/siriguela-dom`, walks it into live DOM nodes) rather than a
-hand-written HTML string — see `main.caja` for the pattern, and
-https://www.cajalang.com for more.
+itself is built as a View tree (`mount()`, from `@caja/dom`, walks it into
+live DOM nodes) rather than a hand-written HTML string — see `main.caja` for
+the pattern, and https://www.cajalang.com for more.
+
+Four packages, all imported by `main.caja`: `@caja/siriguela` is the theme
+(the components that carry the look), `@caja/ui` is the structural layer it
+is built on (the View tree, and the JavaScript event handlers), `@caja/js`
+builds that JavaScript, and `@caja/dom` is the renderer — which also owns
+the `onClick` family that takes a **Caja** function, since attaching one
+needs the Caja runtime this wasm build ships. siriguela does not re-export
+ui, so both are imported directly.
+
+`package.json` declares all three, and `caja init` runs your package
+manager's install for you. **None of them is published to npm yet**, though,
+so that install currently fails with a warning — until they are, link them
+manually into a `node_modules/` at or above this folder:
+
+```
+node_modules/@caja/siriguela   ->  the theme
+node_modules/@caja/ui          ->  the structural layer
+node_modules/@caja/dom         ->  the renderer (mount/sync)
+node_modules/@caja/js          ->  the JavaScript builder @caja/ui uses
+```
 
 ## Development
 

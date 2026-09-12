@@ -20,6 +20,7 @@ var builtinModules = map[string]bool{
 	"http":    true,
 	"browser": true,
 	"doc":     true,
+	"js":      true,
 }
 
 // UsesBrowserModule reports whether transpiled Go source came from a Caja
@@ -435,6 +436,23 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 				return fmt.Sprintf("func() %s { p := %s; if p == nil { return %s }; v := *p; return %s }()", outputGoType, argStrs[0], argStrs[1], result), nil
 			}
 			return result, nil
+		}
+
+	case "js":
+		switch fn {
+		case "raw":
+			// The whole of js.raw's codegen: the validated source, verbatim.
+			//
+			// argStrs[0] is already the Go-quoted form of the string literal
+			// the analyzer checked (analyzeJsRawFunction rejects anything that
+			// is not a literal), so a Script is just that string at runtime —
+			// no helper, no conversion, and deliberately NO ctx.usedModules
+			// entry. That last part is load-bearing: UsesBrowserModule picks
+			// the compile target by grepping the generated source for
+			// "syscall/js", so an import here would silently flip a
+			// static-page project to a wasm build that then fails when the
+			// generator step tries to run the binary natively.
+			return argStrs[0], nil
 		}
 
 	case "doc":

@@ -846,6 +846,12 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 	case environment.ELEMENT_OBJ:
 		ctx.usedModules["syscall/js"] = true
 		return "js.Value"
+	case environment.SCRIPT_OBJ:
+		// A Script is opaque to Caja but erases to a plain string here: it
+		// only ever holds JavaScript source the analyzer already parsed.
+		// Note it registers no usedModules entry, unlike ELEMENT_OBJ above —
+		// a Script must never drag a program onto the wasm build path.
+		return "string"
 	default:
 		return ""
 	}
@@ -2082,7 +2088,31 @@ func transpileExpressionInternal(expr ast.Expression, ctx *transpileContext, exp
 			ctx.usedModules["math"] = true
 			return fmt.Sprintf("math.Pow(%s, %s)", left, right), nil
 		}
-		return fmt.Sprintf("(%s %s %s)", left, e.Operator, right), nil
+		// Caja spells its boolean operators as keywords; Go spells them with
+		// symbols. Without this lowering the keyword was interpolated
+		// verbatim below, producing `(a and b)` — source the analyzer had
+		// already accepted (it type-checks and/or/xor as two Booleans) but
+		// that no Go compiler would parse. The failure surfaced only at the
+		// final `go build`, as a syntax error pointing at Go the user never
+		// wrote.
+		//
+		// && and || short-circuit, which is the conventional reading of
+		// `and`/`or` and the behaviour the analyzer's Boolean-only
+		// type-check implies. xor lowers to !=, not to Go's ^: for two
+		// booleans inequality IS exclusive-or, whereas ^ is BITWISE xor and
+		// only defined on integers. Unlike the other two it cannot
+		// short-circuit, since the result depends on both operands — which
+		// is correct for xor.
+		goOperator := e.Operator
+		switch e.Operator {
+		case "and":
+			goOperator = "&&"
+		case "or":
+			goOperator = "||"
+		case "xor":
+			goOperator = "!="
+		}
+		return fmt.Sprintf("(%s %s %s)", left, goOperator, right), nil
 	case *ast.IsExpression:
 		left, err := transpileExpression(e.Left, ctx, "")
 		if err != nil {
@@ -2690,6 +2720,17 @@ func writeReexportForwards(bodyBuf *bytes.Buffer, ctx *transpileContext) {
 			continue
 		}
 		if fnSym, isFn := entry.Sym.(*symbol.FunctionSymbol); isFn && len(fnSym.TypeParameters) > 0 {
+			continue
+		}
+		// An enum has no Go declaration of its own to forward to (see the
+		// *ast.EnumStatement case: it emits nothing, and a member access
+		// transpiles straight to the member's literal value), so emitting
+		// `var thisModule_E T = origin_E` would reference a Go symbol that
+		// was never declared. Re-exporting an enum still works for both of
+		// its uses — as a type annotation, resolved through the symbol
+		// table, and as `E.Member`, inlined at the use site — neither of
+		// which needs a runtime value here.
+		if _, isEnum := entry.Sym.(*symbol.EnumSymbol); isEnum {
 			continue
 		}
 		names = append(names, name)

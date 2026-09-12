@@ -1,0 +1,4 @@
+import { Size, describe } from "enum_facade"
+
+let s: Size = Size.Large
+return describe(s) + describe(Size.Small)

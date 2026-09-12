@@ -16,6 +16,7 @@ const (
 	INSTANT_OBJ      ObjectType = "Instant"
 	DURATION_OBJ     ObjectType = "Duration"
 	ELEMENT_OBJ      ObjectType = "Element"
+	SCRIPT_OBJ       ObjectType = "Script"
 	FUNCTION_OBJ     ObjectType = "Function"
 	BUILTIN_OBJ      ObjectType = "Builtin"
 	ARRAY_OBJ        ObjectType = "Array"
@@ -30,7 +31,7 @@ const (
 // by reference rather than by value.
 func IsReferenceType(t ObjectType) bool {
 	switch t {
-	case NUMBER_OBJ, STRING_OBJ, BOOLEAN_OBJ, DATE_OBJ, INSTANT_OBJ, DURATION_OBJ:
+	case NUMBER_OBJ, STRING_OBJ, BOOLEAN_OBJ, DATE_OBJ, INSTANT_OBJ, DURATION_OBJ, SCRIPT_OBJ:
 		return false
 	}
 	return true

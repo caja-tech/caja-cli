@@ -9,3 +9,8 @@ type Square struct {
 union Shape = Circle | Square
 
 define BigCircle constraints Circle with: fn(c: Circle) -> Boolean { return c.radius > 10 }
+
+enum Size {
+	Small = "small",
+	Large = "large",
+}

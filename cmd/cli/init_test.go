@@ -150,6 +150,15 @@ func TestInitCmd_ScaffoldsStaticPage(t *testing.T) {
 	if !strings.Contains(string(mainCaja), "import doc") {
 		t.Errorf("expected main.caja to import the doc module, got:\n%s", mainCaja)
 	}
+	// Both UI packages, not just the theme: Page/definePage and the event
+	// handlers live in @caja/ui, and @caja/siriguela does not re-export
+	// them (it reaches ui through a wildcard import, which is deliberately
+	// not forwarded to a theme's own consumers).
+	for _, imp := range []string{`import * from "@caja/siriguela"`, `import * from "@caja/ui"`} {
+		if !strings.Contains(string(mainCaja), imp) {
+			t.Errorf("expected main.caja to contain %q, got:\n%s", imp, mainCaja)
+		}
+	}
 	if !strings.Contains(string(mainCaja), "demo-site") {
 		t.Errorf("expected main.caja to be rendered with the project name, got:\n%s", mainCaja)
 	}
@@ -212,33 +221,57 @@ func TestInitCmd_ScaffoldsHTTPAPI(t *testing.T) {
 	}
 }
 
+// assertScaffoldPackageJSON reads the package.json a scaffold rendered and
+// checks it names the project and declares every dependency listed. Shared
+// by the per-project-type tests below, which differ only in that list — the
+// interesting part of each is which packages it expects, not the reading.
+func assertScaffoldPackageJSON(t *testing.T, dir, name string, deps ...string) {
+	t.Helper()
+	pkgJSON, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		t.Fatalf("expected package.json to exist: %v", err)
+	}
+	for _, dep := range deps {
+		if !strings.Contains(string(pkgJSON), dep) {
+			t.Errorf("expected package.json to declare %s as a dependency, got:\n%s", dep, pkgJSON)
+		}
+	}
+	if !strings.Contains(string(pkgJSON), `"`+name+`"`) {
+		t.Errorf("expected package.json to be rendered with the project name, got:\n%s", pkgJSON)
+	}
+}
+
 // TestInitCmd_HTTPAPIScaffoldsPackageJSON confirms the http-api scaffold
 // declares @caja/acerola as a dependency, so a package manager install
 // (real or manual) has something to fetch.
 func TestInitCmd_HTTPAPIScaffoldsPackageJSON(t *testing.T) {
 	dir := testInitScaffold(t, "http-api", "demo-api-pkg")
-
-	pkgJSON, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
-		t.Fatalf("expected package.json to exist: %v", err)
-	}
-	if !strings.Contains(string(pkgJSON), `"@caja/acerola"`) {
-		t.Errorf("expected package.json to declare @caja/acerola as a dependency, got:\n%s", pkgJSON)
-	}
-	if !strings.Contains(string(pkgJSON), `"demo-api-pkg"`) {
-		t.Errorf("expected package.json to be rendered with the project name, got:\n%s", pkgJSON)
-	}
+	assertScaffoldPackageJSON(t, dir, "demo-api-pkg", `"@caja/acerola"`)
 }
 
-// TestInitCmd_OtherProjectTypesHaveNoPackageJSON confirms package.json is
-// http-api-only — static-page/web-app have no npm dependency to manage.
-func TestInitCmd_OtherProjectTypesHaveNoPackageJSON(t *testing.T) {
-	for _, projectType := range []string{"static-page", "web-app"} {
-		dir := testInitScaffold(t, projectType, "demo-"+projectType)
-		if _, err := os.Stat(filepath.Join(dir, "package.json")); !os.IsNotExist(err) {
-			t.Errorf("expected no package.json for %s project, stat err: %v", projectType, err)
-		}
-	}
+// TestInitCmd_StaticPageScaffoldsPackageJSON confirms the static-page
+// scaffold declares every package its templates import — the theme, the
+// structural layer underneath it, and the JS interop layer. The scaffold
+// reaches into @caja/ui directly (for Page/definePage and the event
+// handlers), so it is a real direct dependency, not one left to npm to
+// resolve transitively through @caja/siriguela's own manifest. @caja/js is
+// imported by pages/index.caja rather than main.caja, which is exactly why
+// it is easy to drop from the manifest by accident: the resulting project
+// scaffolds and installs cleanly and only fails when that page is built.
+func TestInitCmd_StaticPageScaffoldsPackageJSON(t *testing.T) {
+	dir := testInitScaffold(t, "static-page", "demo-site-pkg")
+	assertScaffoldPackageJSON(t, dir, "demo-site-pkg", `"@caja/siriguela"`, `"@caja/ui"`, `"@caja/js"`)
+}
+
+// TestInitCmd_WebAppScaffoldsPackageJSON confirms the web-app scaffold
+// declares all four packages its main.caja imports: the theme, the
+// structural layer, the JS interop layer, and the DOM renderer. All four
+// are direct imports, so all four are direct dependencies — npm resolving
+// @caja/ui transitively through the other two is not enough to describe
+// what this project uses.
+func TestInitCmd_WebAppScaffoldsPackageJSON(t *testing.T) {
+	dir := testInitScaffold(t, "web-app", "demo-web-app-pkg")
+	assertScaffoldPackageJSON(t, dir, "demo-web-app-pkg", `"@caja/siriguela"`, `"@caja/ui"`, `"@caja/js"`, `"@caja/dom"`)
 }
 
 // TestInitCmd_SkipInstallLeavesNoNodeModules confirms --skip-install
@@ -252,6 +285,30 @@ func TestInitCmd_SkipInstallLeavesNoNodeModules(t *testing.T) {
 	}
 }
 
+// testInitScaffoldWithInstall scaffolds a project with the install step
+// ENABLED (unlike testInitScaffold's --skip-install), but with PATH pointed
+// at an empty directory so installDependencies is guaranteed to find no
+// package manager. That keeps the run hermetic — no shelling out to a real
+// npm, no network, no dependency on the registry's current state — while
+// still proving the install path was entered at all, since its "no npm or
+// bun found on PATH" warning is unreachable otherwise. Returns the project
+// directory and everything init wrote to its output.
+func testInitScaffoldWithInstall(t *testing.T, projectType, name string) (string, string) {
+	t.Helper()
+	t.Setenv("PATH", t.TempDir())
+
+	dir := filepath.Join(t.TempDir(), name)
+	cmd, _ := NewInitCmd()
+	bufOut := new(bytes.Buffer)
+	cmd.SetOut(bufOut)
+	cmd.SetArgs([]string{"--name", name, "--type", projectType, "--dir", dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected init --type %s to still succeed without a package manager on PATH, got: %v\noutput:\n%s", projectType, err, bufOut.String())
+	}
+	return dir, bufOut.String()
+}
+
 // TestInitCmd_InstallWarnsWithoutFailingWhenNoPackageManagerFound confirms
 // a missing npm/bun (or any other install failure) degrades to a warning
 // rather than failing the whole init — the scaffolded project is still
@@ -259,22 +316,113 @@ func TestInitCmd_SkipInstallLeavesNoNodeModules(t *testing.T) {
 // pointing PATH somewhere with neither binary, rather than depending on the
 // real npm registry's current state.
 func TestInitCmd_InstallWarnsWithoutFailingWhenNoPackageManagerFound(t *testing.T) {
-	emptyPathDir := t.TempDir()
-	t.Setenv("PATH", emptyPathDir)
+	dir, out := testInitScaffoldWithInstall(t, "http-api", "demo-no-pm")
 
-	dir := filepath.Join(t.TempDir(), "demo-no-pm")
-	cmd, _ := NewInitCmd()
-	bufOut := new(bytes.Buffer)
-	cmd.SetOut(bufOut)
-	cmd.SetArgs([]string{"--name", "demo-no-pm", "--type", "http-api", "--dir", dir})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("expected init to still succeed without a package manager on PATH, got: %v\noutput:\n%s", err, bufOut.String())
-	}
-	if !strings.Contains(bufOut.String(), "no npm or bun found on PATH") {
-		t.Errorf("expected a warning about the missing package manager, got output:\n%s", bufOut.String())
+	if !strings.Contains(out, "no npm or bun found on PATH") {
+		t.Errorf("expected a warning about the missing package manager, got output:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "main.caja")); err != nil {
 		t.Errorf("expected the scaffold to still be created despite the install warning: %v", err)
+	}
+}
+
+// TestScaffoldHasPackageJSON unit-tests the install gate itself. It replaced
+// a hardcoded `projectType == TypeHTTPAPI` check, so the property worth
+// pinning is that it reads the rendered scaffold and nothing else — that is
+// what makes "add npm deps to a project type" a pure template change.
+func TestScaffoldHasPackageJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) string
+		want  bool
+	}{
+		{
+			name: "dir containing a package.json",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}"), 0644); err != nil {
+					t.Fatalf("failed to write package.json: %v", err)
+				}
+				return dir
+			},
+			want: true,
+		},
+		{
+			name:  "empty dir",
+			setup: func(t *testing.T) string { return t.TempDir() },
+			want:  false,
+		},
+		{
+			name: "dir with other files but no package.json",
+			setup: func(t *testing.T) string {
+				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte("return 0\n"), 0644); err != nil {
+					t.Fatalf("failed to write main.caja: %v", err)
+				}
+				return dir
+			},
+			want: false,
+		},
+		{
+			// A path that doesn't exist must be false, not a panic: this
+			// runs unconditionally right after scaffolding, on whatever
+			// --dir the user gave.
+			name: "nonexistent dir",
+			setup: func(t *testing.T) string {
+				return filepath.Join(t.TempDir(), "does-not-exist")
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := scaffoldHasPackageJSON(tt.setup(t)); got != tt.want {
+				t.Errorf("scaffoldHasPackageJSON() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestInitCmd_InstallGateFollowsScaffoldNotProjectType is the behavioural
+// half: static-page and web-app now ship a package.json.tmpl, so init must
+// try to install for them too. Under the previous http-api-only condition
+// their dependencies would have been scaffolded and then never fetched,
+// leaving a project whose own main.caja imports don't resolve.
+//
+// Asserted via the missing-package-manager warning (PATH pointed at an
+// empty dir) rather than a real install, so this neither touches the
+// network nor depends on the npm registry's current state — the warning is
+// only reachable if installDependencies ran at all.
+func TestInitCmd_InstallGateFollowsScaffoldNotProjectType(t *testing.T) {
+	for _, projectType := range []string{"static-page", "web-app", "http-api"} {
+		t.Run(projectType, func(t *testing.T) {
+			dir, out := testInitScaffoldWithInstall(t, projectType, "demo-gate-"+projectType)
+
+			if !scaffoldHasPackageJSON(dir) {
+				t.Fatalf("expected the %s scaffold to contain a package.json", projectType)
+			}
+			if !strings.Contains(out, "no npm or bun found on PATH") {
+				t.Errorf("expected init to attempt an install for %s (the scaffold declares dependencies), got output:\n%s", projectType, out)
+			}
+		})
+	}
+}
+
+// TestInitCmd_SkipInstallSuppressesTheGate confirms --skip-install still
+// wins over the scaffold check: the package.json is written, but no install
+// is attempted. Without this the new gate would have made --skip-install
+// reachable only for project types that happen to have no dependencies.
+func TestInitCmd_SkipInstallSuppressesTheGate(t *testing.T) {
+	emptyPathDir := t.TempDir()
+	t.Setenv("PATH", emptyPathDir)
+
+	dir := testInitScaffold(t, "static-page", "demo-skip-gate")
+
+	if !scaffoldHasPackageJSON(dir) {
+		t.Fatalf("expected the scaffold to contain a package.json, so this test isn't passing vacuously")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "node_modules")); !os.IsNotExist(err) {
+		t.Errorf("expected no node_modules with --skip-install, stat err: %v", err)
 	}
 }

@@ -1,0 +1,659 @@
+import js
+import array
+import string
+
+# @caja/js — JavaScript as Caja data.
+#
+# The same idea as @caja/ui's View tree, one language over: build a tree of
+# expressions and statements, then render it to source at the end. Nothing
+# here executes JavaScript or parses it; it only ever writes it.
+#
+# Why this exists alongside the `js` builtin's js.raw. The two are
+# complements, and they fail in opposite directions:
+#
+#   js.raw("...")   arbitrary JavaScript, CHECKED by actually parsing it
+#                   with esbuild at compile time — but the argument must be
+#                   a string literal, so nothing about it can depend on a
+#                   value your Caja program computed.
+#
+#   this package    JavaScript assembled from Caja data at build time —
+#                   a page list, a config map, anything — and correct
+#                   because it is BUILT that way, not because something
+#                   parsed it afterwards.
+#
+# The second is the case js.raw cannot reach at all: a literal cannot
+# interpolate. Embedding a site's page list, a build timestamp, or a
+# generated lookup table as real JavaScript needs a builder.
+#
+# ---------------------------------------------------------------------
+# How "valid by construction" is actually enforced
+#
+# Two mechanisms, both load-bearing:
+#
+# 1. Expressions and statements are SEPARATE types. jsCall takes [JsExpr],
+#    jsIf takes [JsStmt] — so a statement cannot land where an expression
+#    belongs, which is the main way generated code turns into syntax
+#    errors. This is why the file is ordered JsExpr first: Caja resolves
+#    struct fields in declaration order and has no forward references
+#    between separate types, so JsExpr may never mention JsStmt. That is
+#    also the one real limitation here — see jsArrow.
+#
+# 2. Every leaf that could carry syntax is escaped on the way out, except
+#    one: jsRaw/jsRawStmt, whose payload is a js.Script. A js.Script can
+#    only be produced by js.raw, which parses it. So the single door for
+#    arbitrary syntax is a door that validates — and, because a String does
+#    not narrow to a Script, that door cannot be forged by hand-building a
+#    node either:
+#
+#        JsExpr{kind: "raw", script: "); alert(1); ("}
+#        # type error: field 'script' expects Script, got String
+#
+#    Struct literals are public in Caja, so a consumer CAN hand-build a
+#    node of any other kind — but every other kind is escaped or quoted on
+#    render, so the worst they can produce is a strange string literal, not
+#    injected code. jsIdent is the narrow exception, and validates its own
+#    input for that reason.
+# ---------------------------------------------------------------------
+
+# JsExpr is any JavaScript expression: something that has a value.
+#
+# One struct with a `kind` discriminator rather than a union, matching
+# @caja/ui's View — a union of struct types exists in Caja but an array of
+# one inside a recursive shape is not a road worth taking for this.
+#
+# The fields are reused across kinds rather than one set per kind:
+#   text   — an identifier, a property name, a number, an operator
+#   script — set only by jsRaw; the sole carrier of unescaped syntax
+#   parts  — operands, arguments, elements, object values
+#   names  — object keys, arrow parameters (parallel to parts for objects)
+type JsExpr struct {
+	kind String
+	text String
+	script js.Script
+	parts [JsExpr]
+	names [String]
+}
+
+# noScript fills `script` on every node that is not a jsRaw. js.raw("") is
+# valid (empty) JavaScript, so this costs nothing and keeps the field
+# non-nullable.
+private const noScript = js.raw("")
+
+private const expr = fn(kind: String, text: String) -> JsExpr {
+	let noParts: [JsExpr] = []
+	let noNames: [String] = []
+	return JsExpr{kind: kind, text: text, script: noScript, parts: noParts, names: noNames}
+}
+
+private const exprWith = fn(kind: String, text: String, parts: [JsExpr]) -> JsExpr {
+	let noNames: [String] = []
+	return JsExpr{kind: kind, text: text, script: noScript, parts: parts, names: noNames}
+}
+
+# ---------------------------------------------------------------------
+# Literals and identifiers
+# ---------------------------------------------------------------------
+
+# jsStr is the reason string data can cross into JavaScript safely: the
+# value is escaped here, so a quote, a backslash, a newline or a "</script"
+# in your Caja data becomes inert text rather than syntax. This is the
+# function that makes "embed build-time data" a safe thing to do.
+#
+# The escaping order matters: backslashes first, or the backslashes this
+# function itself inserts get escaped a second time — the same trap
+# @caja/ui's escapeHTML avoids by replacing "&" before "<" and ">".
+const jsStr = fn(value: String) -> JsExpr {
+	let backslashed = string.replace(value, "\\", "\\\\")
+	let quoted = string.replace(backslashed, "\"", "\\\"")
+	let newlined = string.replace(quoted, "\n", "\\n")
+	let tabbed = string.replace(newlined, "\t", "\\t")
+	let carriage = string.replace(tabbed, "\r", "\\r")
+	# "</script" cannot appear in a raw-text element even inside a string
+	# literal — the HTML parser ends the element there. Splitting the "<"
+	# off is the standard escape and is invisible at runtime.
+	let safe = string.replace(carriage, "</", "\\u003c/")
+	return expr("lit", "\"${safe}\"")
+}
+
+# jsNum relies on string interpolation to stringify: Caja has no general
+# Number->String conversion, but "${n}" formats one through the same helper
+# log.info's own argument formatting uses.
+const jsNum = fn(value: Number) -> JsExpr {
+	return expr("lit", "${value}")
+}
+
+const jsBool = fn(value: Boolean) -> JsExpr {
+	if (value) {
+		return expr("lit", "true")
+	}
+	return expr("lit", "false")
+}
+
+const jsNull = fn() -> JsExpr { return expr("lit", "null") }
+const jsUndefined = fn() -> JsExpr { return expr("lit", "undefined") }
+
+# isIdentSafe rejects anything that is not a plain JavaScript identifier.
+#
+# jsIdent is the one non-raw leaf whose text reaches the output unquoted,
+# so it is the one place a hand-built node could otherwise inject syntax.
+# Checking here rather than trusting the caller keeps the guarantee in the
+# header honest. Deliberately conservative: ASCII letters, digits, _ and $,
+# not starting with a digit. A name this rejects is still reachable as a
+# property via jsIndex, or as arbitrary code via jsRaw.
+# The alphabet is spelled out rather than tested as character ranges:
+# Caja's comparison operators are Numbers-only, so "a" <= c <= "z" is not
+# expressible. string.contains over an explicit set is, and is clearer about
+# exactly what it admits.
+private const identChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$"
+private const digitChars = "0123456789"
+
+private const identCharsOk = fn(name: String, index: Number) -> Boolean {
+	if (index >= string.len(name)) {
+		return true
+	}
+	if (string.contains(identChars, string.charAt(name, index))) {
+		return identCharsOk(name, index + 1)
+	}
+	return false
+}
+
+private const isIdentSafe = fn(name: String) -> Boolean {
+	if (string.len(name) == 0) {
+		return false
+	}
+	if (string.contains(digitChars, string.charAt(name, 0))) {
+		return false
+	}
+	return identCharsOk(name, 0)
+}
+
+# safeName is the substitution isIdentSafe implies: a name that would not
+# parse becomes a clearly broken placeholder rather than being emitted as
+# it stands. There is no way to report an error from a pure function here,
+# and emitting the name would defeat the point of checking it.
+#
+# Declared here, beside isIdentSafe, because every consumer needs it —
+# jsIdent below, and each binding form (jsConst/jsLet/jsFunction/jsForOf)
+# much further down — and Caja has no forward references between separate
+# bindings, so the earliest user fixes the position.
+private const safeName = fn(name: String) -> String {
+	if (isIdentSafe(name)) {
+		return name
+	}
+	return "__caja_invalid_identifier__"
+}
+
+# jsIdent names a variable or global.
+const jsIdent = fn(name: String) -> JsExpr {
+	return expr("ident", safeName(name))
+}
+
+# jsRaw is the ONE door for arbitrary JavaScript, and it is a door that
+# validates: a js.Script comes only from js.raw, which parses its (literal)
+# argument with a real JavaScript parser at compile time.
+const jsRaw = fn(code: js.Script) -> JsExpr {
+	let e = expr("raw", "")
+	let withScript = e
+	withScript.script = code
+	return withScript
+}
+
+# ---------------------------------------------------------------------
+# Composite expressions
+# ---------------------------------------------------------------------
+
+const jsArray = fn(items: [JsExpr]) -> JsExpr {
+	return exprWith("array", "", items)
+}
+
+# jsObject takes keys and values as two parallel arrays rather than a list
+# of pair structs. Not a style choice: a pair type would have to hold a
+# JsExpr, and JsExpr would have to hold pairs — mutual recursion between two
+# struct types, which Caja does not support (only a struct referring to
+# itself). Keys are escaped as string literals on render, so any key is
+# safe, including one that is not a valid identifier.
+#
+# Extra keys beyond the values (or vice versa) are ignored rather than
+# erroring — the render walks whichever runs out first.
+const jsObject = fn(keys: [String], values: [JsExpr]) -> JsExpr {
+	let e = exprWith("object", "", values)
+	let withKeys = e
+	withKeys.names = keys
+	return withKeys
+}
+
+# jsMember is dot access (a.b). The property is checked the same way an
+# identifier is; anything else has to go through jsIndex, which quotes it.
+const jsMember = fn(target: JsExpr, property: String) -> JsExpr {
+	let parts: [JsExpr] = [target]
+	if (isIdentSafe(property)) {
+		return exprWith("member", property, parts)
+	}
+	return exprWith("index", "", array.push(parts, jsStr(property)))
+}
+
+# jsIndex is bracket access (a[b]) — for a computed key, or any property
+# name jsMember would reject.
+const jsIndex = fn(target: JsExpr, key: JsExpr) -> JsExpr {
+	let parts: [JsExpr] = [target, key]
+	return exprWith("index", "", parts)
+}
+
+const jsCall = fn(callee: JsExpr, args: [JsExpr]) -> JsExpr {
+	let parts: [JsExpr] = [callee]
+	return exprWith("call", "", array.join(parts, args))
+}
+
+const jsNew = fn(callee: JsExpr, args: [JsExpr]) -> JsExpr {
+	let parts: [JsExpr] = [callee]
+	return exprWith("new", "", array.join(parts, args))
+}
+
+# jsArrow is an arrow function with a CONCISE body — a single expression,
+# `(a, b) => expr`. A statement body is not expressible, because JsExpr may
+# not reference JsStmt (see the header). When you need statements, declare
+# a jsFunction and pass its name, which is what a handler usually wants
+# anyway.
+const jsArrow = fn(params: [String], body: JsExpr) -> JsExpr {
+	let parts: [JsExpr] = [body]
+	let e = exprWith("arrow", "", parts)
+	let withParams = e
+	withParams.names = params
+	return withParams
+}
+
+# ---------------------------------------------------------------------
+# Operators
+#
+# A closed enum plus one named wrapper per member, the same shape
+# @caja/ui's CSSProperty and its modifier chain use. The enum is private:
+# the wrappers are the surface, and an operator is not a runtime choice.
+#
+# Equality is === and !== only. == is not exposed at all — its coercion
+# rules are a bug source, and a generator has no reason to emit one.
+# ---------------------------------------------------------------------
+
+private enum JsOp {
+	Add = "+",
+	Sub = "-",
+	Mul = "*",
+	Div = "/",
+	Mod = "%",
+	Eq = "===",
+	Neq = "!==",
+	Lt = "<",
+	Lte = "<=",
+	Gt = ">",
+	Gte = ">=",
+	And = "&&",
+	Or = "||",
+	Coalesce = "??",
+}
+
+# Binary expressions always render parenthesised. Precedence is then never
+# consulted and never wrong — the cost is (a + b) where a + b would read
+# better, which is the correct trade for generated source nobody edits.
+private const binary = fn(op: JsOp, left: JsExpr, right: JsExpr) -> JsExpr {
+	let parts: [JsExpr] = [left, right]
+	return exprWith("binary", op, parts)
+}
+
+const jsAdd = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Add, left, right) }
+const jsSub = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Sub, left, right) }
+const jsMul = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Mul, left, right) }
+const jsDiv = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Div, left, right) }
+const jsMod = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Mod, left, right) }
+const jsEq = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Eq, left, right) }
+const jsNeq = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Neq, left, right) }
+const jsLt = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Lt, left, right) }
+const jsLte = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Lte, left, right) }
+const jsGt = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Gt, left, right) }
+const jsGte = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Gte, left, right) }
+const jsAnd = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.And, left, right) }
+const jsOr = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Or, left, right) }
+const jsCoalesce = fn(left: JsExpr, right: JsExpr) -> JsExpr { return binary(JsOp.Coalesce, left, right) }
+
+private const unary = fn(op: String, operand: JsExpr) -> JsExpr {
+	let parts: [JsExpr] = [operand]
+	return exprWith("unary", op, parts)
+}
+
+const jsNot = fn(operand: JsExpr) -> JsExpr { return unary("!", operand) }
+const jsNegate = fn(operand: JsExpr) -> JsExpr { return unary("-", operand) }
+const jsTypeof = fn(operand: JsExpr) -> JsExpr { return unary("typeof ", operand) }
+
+const jsTernary = fn(condition: JsExpr, whenTrue: JsExpr, whenFalse: JsExpr) -> JsExpr {
+	let parts: [JsExpr] = [condition, whenTrue, whenFalse]
+	return exprWith("ternary", "", parts)
+}
+
+# ---------------------------------------------------------------------
+# Expression rendering
+#
+# Declared before the statement half, because a statement renders the
+# expressions inside it and Caja has no forward references between
+# separate bindings.
+# ---------------------------------------------------------------------
+
+# renderExprList takes `render` as a parameter rather than calling
+# renderExpr by name, the same trick @caja/ui's mapConcat uses: the two
+# need each other, and only a function may reference its own name from
+# inside its own body.
+private const renderExprList = fn(items: [JsExpr], separator: String, render: fn(JsExpr) -> String) -> String {
+	if (array.len(items) == 0) {
+		return ""
+	}
+	let head = array.head(items)
+	let rest = array.tail(items)
+	if (array.len(rest) == 0) {
+		return render(head)
+	}
+	return "${render(head)}${separator}${renderExprList(rest, separator, render)}"
+}
+
+private const renderObjectEntries = fn(keys: [String], values: [JsExpr], render: fn(JsExpr) -> String) -> String {
+	# Stop as soon as either list runs out: extra keys (or extra values) are
+	# ignored rather than being an error, since the two are only paired by
+	# position.
+	if (array.len(keys) == 0 or array.len(values) == 0) {
+		return ""
+	}
+	let key = array.head(keys)
+	let value = array.head(values)
+	let restKeys = array.tail(keys)
+	let restValues = array.tail(values)
+	# `render` rather than renderExpr by name: this helper is declared
+	# first, and Caja has no forward references between separate bindings.
+	let entry = "${render(jsStr(key))}: ${render(value)}"
+	if (array.len(restKeys) == 0 or array.len(restValues) == 0) {
+		return entry
+	}
+	return "${entry}, ${renderObjectEntries(restKeys, restValues, render)}"
+}
+
+const renderExpr = fn(node: JsExpr) -> String {
+	if (node.kind == "lit") {
+		return node.text
+	}
+	if (node.kind == "ident") {
+		return node.text
+	}
+	if (node.kind == "raw") {
+		return node.script
+	}
+	if (node.kind == "array") {
+		return "[${renderExprList(node.parts, ", ", renderExpr)}]"
+	}
+	if (node.kind == "object") {
+		return "{${renderObjectEntries(node.names, node.parts, renderExpr)}}"
+	}
+	if (node.kind == "member") {
+		return "${renderExpr(array.head(node.parts))}.${node.text}"
+	}
+	if (node.kind == "index") {
+		let target = renderExpr(array.head(node.parts))
+		let key = renderExpr(array.head(array.tail(node.parts)))
+		return "${target}[${key}]"
+	}
+	if (node.kind == "call") {
+		let callee = renderExpr(array.head(node.parts))
+		return "${callee}(${renderExprList(array.tail(node.parts), ", ", renderExpr)})"
+	}
+	if (node.kind == "new") {
+		let callee = renderExpr(array.head(node.parts))
+		return "new ${callee}(${renderExprList(array.tail(node.parts), ", ", renderExpr)})"
+	}
+	if (node.kind == "arrow") {
+		# Wrapped in its own parentheses, like every other composite
+		# expression here. Without them jsCall(jsArrow(...), args) renders
+		# as `(a) => body(args)` — an arrow whose BODY is a call, rather
+		# than a call of the arrow. It still parses, which is exactly what
+		# makes the omission dangerous: valid syntax, wrong program.
+		return "((${string.join(node.names, ", ")}) => ${renderExpr(array.head(node.parts))})"
+	}
+	if (node.kind == "unary") {
+		return "(${node.text}${renderExpr(array.head(node.parts))})"
+	}
+	if (node.kind == "ternary") {
+		let condition = renderExpr(array.head(node.parts))
+		let rest = array.tail(node.parts)
+		let whenTrue = renderExpr(array.head(rest))
+		let whenFalse = renderExpr(array.head(array.tail(rest)))
+		return "(${condition} ? ${whenTrue} : ${whenFalse})"
+	}
+	# binary — always parenthesised, so precedence never has to be modelled
+	let left = renderExpr(array.head(node.parts))
+	let right = renderExpr(array.head(array.tail(node.parts)))
+	return "(${left} ${node.text} ${right})"
+}
+
+# ---------------------------------------------------------------------
+# Statements
+#
+# JsStmt may reference JsExpr (declared above) and itself. It is the second
+# type on purpose: keeping statements out of JsExpr is what stops a
+# statement being passed where an expression belongs.
+# ---------------------------------------------------------------------
+
+type JsStmt struct {
+	kind String
+	text String
+	script js.Script
+	value JsExpr
+	extra JsExpr
+	block [JsStmt]
+	alternate [JsStmt]
+	names [String]
+}
+
+private const noExpr = jsUndefined()
+
+private const stmt = fn(kind: String, text: String, value: JsExpr) -> JsStmt {
+	let noBlock: [JsStmt] = []
+	let noAlternate: [JsStmt] = []
+	let noNames: [String] = []
+	return JsStmt{kind: kind, text: text, script: noScript, value: value, extra: noExpr, block: noBlock, alternate: noAlternate, names: noNames}
+}
+
+# jsConst/jsLet declare a binding. An unsafe name goes through safeName,
+# exactly as jsIdent's does, rather than emitting something that would not
+# parse.
+const jsConst = fn(name: String, value: JsExpr) -> JsStmt {
+	return stmt("const", safeName(name), value)
+}
+
+const jsLet = fn(name: String, value: JsExpr) -> JsStmt {
+	return stmt("let", safeName(name), value)
+}
+
+# jsAssign takes an arbitrary expression as its target, so a member or an
+# index is assignable: jsAssign(jsMember(el, "textContent"), jsStr("hi")).
+const jsAssign = fn(target: JsExpr, value: JsExpr) -> JsStmt {
+	let s = stmt("assign", "", value)
+	let withTarget = s
+	withTarget.extra = target
+	return withTarget
+}
+
+# jsExprStmt is an expression evaluated for its effect — the shape almost
+# every DOM call takes.
+const jsExprStmt = fn(value: JsExpr) -> JsStmt {
+	return stmt("expr", "", value)
+}
+
+const jsReturn = fn(value: JsExpr) -> JsStmt {
+	return stmt("return", "", value)
+}
+
+const jsReturnVoid = fn() -> JsStmt {
+	return stmt("returnVoid", "", noExpr)
+}
+
+const jsIf = fn(condition: JsExpr, body: [JsStmt]) -> JsStmt {
+	let s = stmt("if", "", condition)
+	let withBlock = s
+	withBlock.block = body
+	return withBlock
+}
+
+const jsIfElse = fn(condition: JsExpr, body: [JsStmt], otherwise: [JsStmt]) -> JsStmt {
+	let s = stmt("ifElse", "", condition)
+	let withBlock = s
+	withBlock.block = body
+	withBlock.alternate = otherwise
+	return withBlock
+}
+
+const jsFunction = fn(name: String, params: [String], body: [JsStmt]) -> JsStmt {
+	let s = stmt("function", safeName(name), noExpr)
+	let withBlock = s
+	withBlock.block = body
+	withBlock.names = params
+	return withBlock
+}
+
+# jsForOf is the only loop offered. for-of covers iteration over an array
+# or a NodeList, which is what generated code actually needs; an index loop
+# is available through jsRawStmt if you genuinely want one.
+const jsForOf = fn(binding: String, iterable: JsExpr, body: [JsStmt]) -> JsStmt {
+	let s = stmt("forOf", safeName(binding), iterable)
+	let withBlock = s
+	withBlock.block = body
+	return withBlock
+}
+
+# jsRawStmt is jsRaw's statement-level counterpart, and the same single
+# validated door: the payload is a js.Script, so it has been parsed.
+const jsRawStmt = fn(code: js.Script) -> JsStmt {
+	let s = stmt("raw", "", noExpr)
+	let withScript = s
+	withScript.script = code
+	return withScript
+}
+
+# ---------------------------------------------------------------------
+# Statement rendering
+#
+# renderProgram is the terminal, and the only function @caja/ui needs:
+# onClick and scriptBlock take a [JsStmt] and call this.
+#
+# Output is single-line and semicolon-terminated. Every statement ends in
+# ";" or "}", so concatenating them can never merge two statements into
+# one, and no newline is required for correctness — which matters because
+# an inline event attribute is a single line by definition.
+# ---------------------------------------------------------------------
+
+private const renderStmtList = fn(items: [JsStmt], render: fn(JsStmt) -> String) -> String {
+	if (array.len(items) == 0) {
+		return ""
+	}
+	let head = array.head(items)
+	let rest = array.tail(items)
+	return "${render(head)}${renderStmtList(rest, render)}"
+}
+
+const renderStmt = fn(node: JsStmt) -> String {
+	if (node.kind == "raw") {
+		# A raw statement may or may not end in ";" — add one. An extra
+		# semicolon is an empty statement, which is always legal; a missing
+		# one would glue this statement to the next.
+		return "${node.script};"
+	}
+	if (node.kind == "const") {
+		return "const ${node.text} = ${renderExpr(node.value)};"
+	}
+	if (node.kind == "let") {
+		return "let ${node.text} = ${renderExpr(node.value)};"
+	}
+	if (node.kind == "assign") {
+		return "${renderExpr(node.extra)} = ${renderExpr(node.value)};"
+	}
+	if (node.kind == "expr") {
+		return "${renderExpr(node.value)};"
+	}
+	if (node.kind == "return") {
+		return "return ${renderExpr(node.value)};"
+	}
+	if (node.kind == "returnVoid") {
+		return "return;"
+	}
+	if (node.kind == "if") {
+		return "if (${renderExpr(node.value)}) {${renderStmtList(node.block, renderStmt)}}"
+	}
+	if (node.kind == "ifElse") {
+		let head = "if (${renderExpr(node.value)}) {${renderStmtList(node.block, renderStmt)}}"
+		return "${head} else {${renderStmtList(node.alternate, renderStmt)}}"
+	}
+	if (node.kind == "function") {
+		return "function ${node.text}(${string.join(node.names, ", ")}) {${renderStmtList(node.block, renderStmt)}}"
+	}
+	# forOf
+	return "for (const ${node.text} of ${renderExpr(node.value)}) {${renderStmtList(node.block, renderStmt)}}"
+}
+
+# renderProgram turns a statement list into JavaScript source. This is what
+# @caja/ui emits into an inline event attribute or a <script> body.
+const renderProgram = fn(program: [JsStmt]) -> String {
+	return renderStmtList(program, renderStmt)
+}
+
+# ---------------------------------------------------------------------
+# DOM shorthands
+#
+# Not a DOM binding — just the handful of expressions that would otherwise
+# be jsCall(jsMember(jsIdent("document"), "getElementById"), [...]) every
+# single time. Everything here is ordinary composition of the builders
+# above; nothing is special-cased in the renderer.
+# ---------------------------------------------------------------------
+
+const jsDocument = fn() -> JsExpr { return jsIdent("document") }
+const jsWindow = fn() -> JsExpr { return jsIdent("window") }
+const jsConsole = fn() -> JsExpr { return jsIdent("console") }
+
+const jsGetElementById = fn(id: String) -> JsExpr {
+	let args: [JsExpr] = [jsStr(id)]
+	return jsCall(jsMember(jsDocument(), "getElementById"), args)
+}
+
+const jsQuerySelector = fn(selector: String) -> JsExpr {
+	let args: [JsExpr] = [jsStr(selector)]
+	return jsCall(jsMember(jsDocument(), "querySelector"), args)
+}
+
+const jsQuerySelectorAll = fn(selector: String) -> JsExpr {
+	let args: [JsExpr] = [jsStr(selector)]
+	return jsCall(jsMember(jsDocument(), "querySelectorAll"), args)
+}
+
+const jsLog = fn(value: JsExpr) -> JsStmt {
+	let args: [JsExpr] = [value]
+	return jsExprStmt(jsCall(jsMember(jsConsole(), "log"), args))
+}
+
+const jsAlert = fn(message: JsExpr) -> JsStmt {
+	let args: [JsExpr] = [message]
+	return jsExprStmt(jsCall(jsIdent("alert"), args))
+}
+
+const jsSetText = fn(target: JsExpr, value: JsExpr) -> JsStmt {
+	return jsAssign(jsMember(target, "textContent"), value)
+}
+
+const jsSetValue = fn(target: JsExpr, value: JsExpr) -> JsStmt {
+	return jsAssign(jsMember(target, "value"), value)
+}
+
+const jsAddClass = fn(target: JsExpr, name: String) -> JsStmt {
+	let args: [JsExpr] = [jsStr(name)]
+	return jsExprStmt(jsCall(jsMember(jsMember(target, "classList"), "add"), args))
+}
+
+const jsRemoveClass = fn(target: JsExpr, name: String) -> JsStmt {
+	let args: [JsExpr] = [jsStr(name)]
+	return jsExprStmt(jsCall(jsMember(jsMember(target, "classList"), "remove"), args))
+}
+
+const jsToggleClass = fn(target: JsExpr, name: String) -> JsStmt {
+	let args: [JsExpr] = [jsStr(name)]
+	return jsExprStmt(jsCall(jsMember(jsMember(target, "classList"), "toggle"), args))
+}

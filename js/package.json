@@ -1,0 +1,6 @@
+{
+  "name": "@caja/js",
+  "version": "0.1.0",
+  "description": "JavaScript as Caja data — an expression/statement tree and the renderer that turns it into source, so a page can emit JS built from build-time values instead of a hand-written string.",
+  "main": "index.caja"
+}

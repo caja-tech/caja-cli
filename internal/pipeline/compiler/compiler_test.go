@@ -606,6 +606,81 @@ func TestUsesBrowserModule(t *testing.T) {
 	}
 }
 
+// TestJsRawDoesNotFlipBuildToWasm is the guard on js.raw's codegen, and the
+// reason transpileBuiltinCall's "js" case deliberately registers NO
+// usedModules entry.
+//
+// The compile target is chosen by grepping the generated Go for
+// "syscall/js" (UsesBrowserModule, used by both cmd/cli's build and
+// TestSamplesCompilation's own loop). So an import added here — the
+// obvious-looking thing to do for a module literally named `js` — would
+// silently retarget a static-page project to GOOS=js/GOARCH=wasm, and the
+// static-page generator step would then fail trying to execute a wasm
+// binary natively.
+//
+// TestSamplesCompilation cannot catch this: it consults UsesBrowserModule
+// too, so it would just follow js_script onto the wasm path and still go
+// green. The assertion has to be made here, against the source text.
+func TestJsRawDoesNotFlipBuildToWasm(t *testing.T) {
+	goCode := transpileSampleToGo(t, "js_script", "js_script")
+
+	if strings.Contains(goCode, "syscall/js") {
+		t.Errorf("expected js.raw to emit no syscall/js import, got:\n%s", goCode)
+	}
+	if compiler.UsesBrowserModule(goCode) {
+		t.Error("expected a js.raw program to build for the native target, but it was detected as a browser/wasm program")
+	}
+
+	// A Script erases to a plain Go string (mapSymbolToGoType), not to the
+	// js.Value that ELEMENT_OBJ produces. If this ever became js.Value the
+	// import above would come back with it.
+	if !strings.Contains(goCode, `var simple string = "document.title = 'set by caja'"`) {
+		t.Errorf("expected a Script to erase to a bare Go string literal, got:\n%s", goCode)
+	}
+	if strings.Contains(goCode, "js.Value") {
+		t.Errorf("expected no js.Value in a js.raw program, got:\n%s", goCode)
+	}
+
+	// js.raw needs no runtime helper at all — the validated literal IS the
+	// whole of its codegen, so nothing should wrap it.
+	if strings.Contains(goCode, "caja_js_raw") {
+		t.Errorf("expected js.raw to emit the literal directly with no helper function, got:\n%s", goCode)
+	}
+}
+
+// TestJsScriptSampleRuns runs samples/js_script end to end (TestSamplesCompilation
+// only compiles it) to confirm a Script behaves as the string it erases to
+// at RUNTIME, not merely at type-check time: measured by string.len,
+// searched by string.contains, interpolated into a larger string, and
+// printed — with every quoting style, the embedded newline and tab, and an
+// escaped JS template literal all surviving verbatim through two layers of
+// escaping (Caja's, then Go's).
+func TestJsScriptSampleRuns(t *testing.T) {
+	goCode := transpileSampleToGo(t, "js_script", "js_script")
+
+	var stdout, stderr bytes.Buffer
+	if err := compiler.Run(goCode, nil, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("Run failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	out := stdout.String()
+	wants := []string{
+		// len("document.title = 'set by caja'") == 30: the Script is
+		// measured as the string it is, not as an opaque handle.
+		"script length: 30",
+		"contains document: true",
+		"simple: document.title = 'set by caja'",
+		// The `${1 + 1}` must reach the browser unevaluated — Caja's own
+		// interpolation escaped it, so the JS template literal survives.
+		"templated: console.log(`1 + 1 = ${1 + 1}`)",
+	}
+	for _, want := range wants {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected output to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
 // TestCompileBrowserModuleForWasm is the end-to-end check that a program
 // using the browser module doesn't just transpile to text that *looks*
 // right (transpiler_test.go's "Browser builtins" case), but actually
@@ -1206,7 +1281,14 @@ func TestWriteBrowserHarness(t *testing.T) {
 // statement auto-prints), formats, and runs the source, returning stdout.
 func runCajaSource(t *testing.T, source string) string {
 	t.Helper()
-	dir := t.TempDir()
+	return runCajaSourceInDir(t, t.TempDir(), source)
+}
+
+// runCajaSourceInDir is runCajaSource with the base directory supplied by the
+// caller, for the cases where the script needs something staged next to it --
+// a node_modules tree it imports from, say -- before it can be analyzed.
+func runCajaSourceInDir(t *testing.T, dir string, source string) string {
+	t.Helper()
 	filePath := filepath.Join(dir, "cow.caja")
 	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
 		t.Fatalf("failed to write test script: %v", err)
@@ -1280,10 +1362,11 @@ func TestTimeParseDurationReturnsNilOnInvalidInputAtRuntime(t *testing.T) {
 // count that was passed in. nanosecond (unlike hour/minute/second) is
 // checked because it's location-independent — Go's time.Unix returns a
 // Local-zone Time, so hour/minute/second's real values would depend on the
-// test machine's timezone. Each assertion is its own subtest/program
-// (rather than combined with "and") because the compiler doesn't currently
-// lower the "and"/"or"/"xor" keyword operators to valid Go syntax — an
-// unrelated, pre-existing gap outside this diff's scope.
+// test machine's timezone. Each assertion is its own subtest/program rather
+// than combined with "and"; that split was once forced (the compiler did not
+// lower the and/or/xor keywords to Go) and is now simply how it is written —
+// one failing assertion still names itself. See
+// TestBooleanKeywordOperatorsLowerToGo for the lowering.
 func TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond(t *testing.T) {
 	for name, source := range map[string]string{
 		"unixSeconds recovers the seconds passed to unix": `import "time" as time
@@ -1312,9 +1395,9 @@ return time.nanosecond(t) == 123456789
 // actual boolean comparison semantics at runtime, not just that they
 // transpile to the right Go method call: an earlier Instant must compare as
 // before a later one (and not after or equal to it), and an Instant must
-// compare equal to itself. See the "and"/"or"/"xor" codegen note on
-// TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond for why
-// each assertion is its own subtest/program.
+// compare equal to itself. Each assertion is its own subtest/program, the
+// same way TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond
+// splits its own.
 func TestTimeBeforeAfterEqualComparisonSemantics(t *testing.T) {
 	const setup = `import "time" as time
 let earlier = time.unix(0, 0)
@@ -1340,7 +1423,7 @@ let later = time.unix(100, 0)
 // TestTimeDurationConstructorsAndAccessorsRoundTrip verifies the
 // minutes/hours constructors and the toMilliseconds/toSeconds/toMinutes/
 // toHours accessors against each other's actual numeric output at runtime,
-// not just their codegen substrings. See the "and"/"or"/"xor" codegen note
+// not just their codegen substrings. See the subtest-splitting note
 // on TestTimeUnixRoundTripsThroughUnixSecondsUnixMilliAndNanosecond for why
 // each assertion is its own subtest/program.
 func TestTimeDurationConstructorsAndAccessorsRoundTrip(t *testing.T) {
@@ -1857,8 +1940,54 @@ func TestHTTPModuleProgramRunsViaGoRun(t *testing.T) {
 	}
 }
 
-// httpSampleAddr is the fixed port samples/http/http.caja listens on.
-const httpSampleAddr = "127.0.0.1:8089"
+// httpSampleHardcodedAddr is the port samples/http/http.caja passes to
+// http.listen in its own source. Nothing binds it any more — every test
+// below starts its sample on a reserved free port — but
+// TestHTTPSampleCajaHTTPPortEnvOverridesPort still needs the literal, to
+// assert the override really moved the server OFF it.
+const httpSampleHardcodedAddr = "127.0.0.1:8089"
+
+// reserveFreePort asks the OS for an unused port and immediately releases
+// it, returning the number so a sample can be told to bind it.
+//
+// There is an unavoidable gap between the release and the sample binding —
+// something else could take the port in between — but it is far smaller
+// than the failure this replaces. These tests used to bind ports hardcoded
+// in both the .caja sample and a matching test constant, which collided
+// with any concurrent `go test` run, a leftover server from a killed run,
+// or anything else on the machine using that port; the symptom was
+// "address already in use" on a different, arbitrary subset of tests each
+// run. Asking the OS for a port it believes is free removes that whole
+// class of collision.
+func reserveFreePort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to reserve a free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("failed to release the reserved port: %v", err)
+	}
+	return port
+}
+
+// startHTTPSampleOnFreePort starts a sample on a port reserved for this run
+// and returns the address it is actually listening on.
+//
+// It works because CAJA_HTTP_PORT overrides whatever port literal the .caja
+// source passed to http.listen (see caja_http_listen in builtins.go) — the
+// same mechanism `caja listen --port` uses, and the same approach
+// cmd/cli's build_test.go/serve_test.go already take. So the samples keep
+// their readable hardcoded ports and the tests stop depending on them.
+func startHTTPSampleOnFreePort(t *testing.T, sampleDir string, extraEnv ...string) (string, *exec.Cmd, *bytes.Buffer) {
+	t.Helper()
+	port := reserveFreePort(t)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	env := append([]string{fmt.Sprintf("CAJA_HTTP_PORT=%d", port)}, extraEnv...)
+	cmd, stderr := startHTTPSample(t, sampleDir, addr, env...)
+	return addr, cmd, stderr
+}
 
 // startHTTPSample compiles samples/<sampleDir>/<sampleDir>.caja to a real
 // binary and starts it as a live server (unlike runCajaSource's
@@ -1931,13 +2060,12 @@ func startHTTPSample(t *testing.T, sampleDir string, addr string, extraEnv ...st
 // routing, path params, JSON responses, and middleware-based auth over real
 // HTTP against it.
 func TestHTTPSampleServesRequests(t *testing.T) {
-	cmd, _ := startHTTPSample(t, "http", httpSampleAddr)
+	addr, cmd, _ := startHTTPSampleOnFreePort(t, "http")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	addr := httpSampleAddr
 	get := func(path string, headers map[string]string) (int, string) {
 		req, err := http.NewRequest(http.MethodGet, "http://"+addr+path, nil)
 		if err != nil {
@@ -2056,7 +2184,7 @@ func TestHTTPSampleServesRequests(t *testing.T) {
 // signal rather than a clean exit) — the whole point of graceful shutdown is
 // giving in-flight requests a chance to finish instead of being cut off.
 func TestHTTPSampleGracefulShutdown(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http", httpSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http")
 
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("failed to send SIGTERM: %v", err)
@@ -2081,8 +2209,8 @@ func TestHTTPSampleGracefulShutdown(t *testing.T) {
 
 	// The server must actually have stopped accepting connections, not just
 	// exited for an unrelated reason.
-	if _, dialErr := net.DialTimeout("tcp", httpSampleAddr, 200*time.Millisecond); dialErr == nil {
-		t.Errorf("expected %s to stop accepting connections after shutdown, but it's still listening", httpSampleAddr)
+	if _, dialErr := net.DialTimeout("tcp", addr, 200*time.Millisecond); dialErr == nil {
+		t.Errorf("expected %s to stop accepting connections after shutdown, but it's still listening", addr)
 	}
 }
 
@@ -2094,8 +2222,7 @@ func TestHTTPSampleGracefulShutdown(t *testing.T) {
 // CAJA_HTTP_PORT set to a different port must make it listen there instead,
 // and NOT still be reachable on its hardcoded port.
 func TestHTTPSampleCajaHTTPPortEnvOverridesPort(t *testing.T) {
-	const overriddenAddr = "127.0.0.1:8091"
-	cmd, _ := startHTTPSample(t, "http", overriddenAddr, "CAJA_HTTP_PORT=8091")
+	overriddenAddr, cmd, _ := startHTTPSampleOnFreePort(t, "http")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -2110,8 +2237,8 @@ func TestHTTPSampleCajaHTTPPortEnvOverridesPort(t *testing.T) {
 		t.Errorf("expected 200 from the overridden port, got %d", resp.StatusCode)
 	}
 
-	if _, dialErr := net.DialTimeout("tcp", httpSampleAddr, 200*time.Millisecond); dialErr == nil {
-		t.Errorf("expected the server to NOT be listening on its hardcoded port %s once CAJA_HTTP_PORT overrides it", httpSampleAddr)
+	if _, dialErr := net.DialTimeout("tcp", httpSampleHardcodedAddr, 200*time.Millisecond); dialErr == nil {
+		t.Errorf("expected the server to NOT be listening on its hardcoded port %s once CAJA_HTTP_PORT overrides it", httpSampleHardcodedAddr)
 	}
 }
 
@@ -2141,42 +2268,36 @@ func TestHTTPSampleTrustProxyControlsIPHeaderTrust(t *testing.T) {
 	}
 
 	t.Run("untrusted by default", func(t *testing.T) {
-		cmd, _ := startHTTPSample(t, "http", httpSampleAddr)
+		addr, cmd, _ := startHTTPSampleOnFreePort(t, "http")
 		defer func() {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		}()
 
-		ip := whoami(httpSampleAddr, map[string]string{"X-Forwarded-For": "203.0.113.5"})
+		ip := whoami(addr, map[string]string{"X-Forwarded-For": "203.0.113.5"})
 		if ip != "127.0.0.1" {
 			t.Errorf("expected the spoofed X-Forwarded-For to be ignored and req.ip to be the real peer 127.0.0.1, got %q", ip)
 		}
 	})
 
 	t.Run("trusted once CAJA_TRUST_PROXY is set", func(t *testing.T) {
-		cmd, _ := startHTTPSample(t, "http", httpSampleAddr, "CAJA_TRUST_PROXY=1")
+		addr, cmd, _ := startHTTPSampleOnFreePort(t, "http", "CAJA_TRUST_PROXY=1")
 		defer func() {
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 		}()
 
-		if ip := whoami(httpSampleAddr, map[string]string{"X-Forwarded-For": "203.0.113.5, 10.0.0.1"}); ip != "203.0.113.5" {
+		if ip := whoami(addr, map[string]string{"X-Forwarded-For": "203.0.113.5, 10.0.0.1"}); ip != "203.0.113.5" {
 			t.Errorf("expected req.ip to be the first X-Forwarded-For entry 203.0.113.5, got %q", ip)
 		}
-		if ip := whoami(httpSampleAddr, map[string]string{"X-Real-IP": "198.51.100.7"}); ip != "198.51.100.7" {
+		if ip := whoami(addr, map[string]string{"X-Real-IP": "198.51.100.7"}); ip != "198.51.100.7" {
 			t.Errorf("expected req.ip to fall back to X-Real-IP 198.51.100.7 when X-Forwarded-For is absent, got %q", ip)
 		}
-		if ip := whoami(httpSampleAddr, nil); ip != "127.0.0.1" {
+		if ip := whoami(addr, nil); ip != "127.0.0.1" {
 			t.Errorf("expected req.ip to fall back to the real peer 127.0.0.1 when neither header is present, got %q", ip)
 		}
 	})
 }
-
-// httpRateLimitSampleAddr is the fixed port samples/http_rate_limit listens
-// on — deliberately separate from httpSampleAddr/samples/http so rapid
-// rate-limit-triggering requests here can't make the base http sample's own
-// assertions order-sensitive or flaky.
-const httpRateLimitSampleAddr = "127.0.0.1:8090"
 
 // TestHTTPRateLimitSampleEnforcesLimit pins both halves of the token-bucket
 // contract: the first `burst` requests succeed, the next is rejected with
@@ -2185,14 +2306,14 @@ const httpRateLimitSampleAddr = "127.0.0.1:8090"
 // generous (1.1s for a 2 req/s rate, i.e. margin for >2 tokens) to avoid CI
 // flakiness.
 func TestHTTPRateLimitSampleEnforcesLimit(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_rate_limit", httpRateLimitSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_rate_limit")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	get := func() int {
-		resp, err := http.Get("http://" + httpRateLimitSampleAddr + "/limited")
+		resp, err := http.Get("http://" + addr + "/limited")
 		if err != nil {
 			t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 		}
@@ -2225,14 +2346,14 @@ func TestHTTPRateLimitSampleEnforcesLimit(t *testing.T) {
 // the one of the four with defined meaning outside a rate-limit context
 // (RFC 7231). samples/http_rate_limit configures rps=2, burst=2.
 func TestHTTPRateLimitSampleSetsRateLimitHeaders(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_rate_limit", httpRateLimitSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_rate_limit")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	get := func() *http.Response {
-		resp, err := http.Get("http://" + httpRateLimitSampleAddr + "/limited")
+		resp, err := http.Get("http://" + addr + "/limited")
 		if err != nil {
 			t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 		}
@@ -2285,13 +2406,13 @@ func TestHTTPRateLimitSampleSetsRateLimitHeaders(t *testing.T) {
 // every other rate-limit test exercises), wrapped by the same
 // http.rateLimiter as /limited.
 func TestHTTPRateLimitSamplePreservesHandlerSetHeaders(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_rate_limit", httpRateLimitSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_rate_limit")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	resp, err := http.Get("http://" + httpRateLimitSampleAddr + "/limited-custom-headers")
+	resp, err := http.Get("http://" + addr + "/limited-custom-headers")
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -2312,8 +2433,6 @@ func TestHTTPRateLimitSamplePreservesHandlerSetHeaders(t *testing.T) {
 	}
 }
 
-const httpConcurrencyLimitSampleAddr = "127.0.0.1:8099"
-
 // TestHTTPConcurrencyLimitSampleCapsInFlightRequests is the end-to-end check
 // for http.concurrencyLimiter: fires several requests at a handler that's
 // deliberately slow (samples/http_concurrency_limit's busyWork -- Caja has
@@ -2327,7 +2446,7 @@ const httpConcurrencyLimitSampleAddr = "127.0.0.1:8099"
 // practice. A final request after the batch completes confirms slots are
 // released (not leaked) once their handler returns.
 func TestHTTPConcurrencyLimitSampleCapsInFlightRequests(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_concurrency_limit", httpConcurrencyLimitSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_concurrency_limit")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -2343,7 +2462,7 @@ func TestHTTPConcurrencyLimitSampleCapsInFlightRequests(t *testing.T) {
 	for i := 0; i < batchSize; i++ {
 		go func() {
 			defer wg.Done()
-			resp, err := http.Get("http://" + httpConcurrencyLimitSampleAddr + "/slow")
+			resp, err := http.Get("http://" + addr + "/slow")
 			if err != nil {
 				t.Errorf("request failed: %v; stderr:\n%s", err, stderr.String())
 				return
@@ -2376,7 +2495,7 @@ func TestHTTPConcurrencyLimitSampleCapsInFlightRequests(t *testing.T) {
 
 	// The batch's handlers have all returned by the time wg.Wait() unblocks,
 	// so every slot should be released -- a fresh request must succeed.
-	final, err := http.Get("http://" + httpConcurrencyLimitSampleAddr + "/slow")
+	final, err := http.Get("http://" + addr + "/slow")
 	if err != nil {
 		t.Fatalf("final request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -2395,13 +2514,13 @@ func TestHTTPConcurrencyLimitSampleCapsInFlightRequests(t *testing.T) {
 // via an http.Response struct literal (a non-nil, already-populated
 // Headers map) -- covering ensure_headers's other call site.
 func TestHTTPConcurrencyLimitSamplePreservesHandlerSetHeaders(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_concurrency_limit", httpConcurrencyLimitSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_concurrency_limit")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	resp, err := http.Get("http://" + httpConcurrencyLimitSampleAddr + "/custom-headers")
+	resp, err := http.Get("http://" + addr + "/custom-headers")
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -2508,8 +2627,6 @@ func fakeRedisReadEvalCommand(r *bufio.Reader) error {
 	return nil
 }
 
-const httpDistributedRateLimitSampleAddr = "127.0.0.1:8100"
-
 // TestHTTPDistributedRateLimitSampleEnforcesLimitAndSetsHeaders drives the
 // actual enforcement path (not just fail-open) against a fake Redis server
 // scripted to return specific counts, confirming the limiter correctly
@@ -2522,14 +2639,14 @@ func TestHTTPDistributedRateLimitSampleEnforcesLimitAndSetsHeaders(t *testing.T)
 		"*2\r\n:4\r\n:37\r\n", // count=4 > limit 3, ttl=37 -> rejected
 	})
 
-	cmd, stderr := startHTTPSample(t, "http_distributed_rate_limit", httpDistributedRateLimitSampleAddr, "CAJA_REDIS_ADDR="+redisAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_distributed_rate_limit", "CAJA_REDIS_ADDR="+redisAddr)
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	get := func() *http.Response {
-		resp, err := http.Get("http://" + httpDistributedRateLimitSampleAddr + "/limited")
+		resp, err := http.Get("http://" + addr + "/limited")
 		if err != nil {
 			t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 		}
@@ -2568,14 +2685,14 @@ func TestHTTPDistributedRateLimitSampleFailsOpenWhenRedisUnreachable(t *testing.
 	unreachableAddr := ln.Addr().String()
 	ln.Close() // guaranteed nothing is listening here now
 
-	cmd, stderr := startHTTPSample(t, "http_distributed_rate_limit", httpDistributedRateLimitSampleAddr, "CAJA_REDIS_ADDR="+unreachableAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_distributed_rate_limit", "CAJA_REDIS_ADDR="+unreachableAddr)
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	start := time.Now()
-	resp, err := http.Get("http://" + httpDistributedRateLimitSampleAddr + "/limited")
+	resp, err := http.Get("http://" + addr + "/limited")
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
@@ -2597,13 +2714,13 @@ func TestHTTPDistributedRateLimitSampleFailsOpenWhenRedisUnreachable(t *testing.
 // "not configured" (CAJA_REDIS_ADDR unset entirely) shares the exact same
 // fail-open path as "configured but unreachable" -- no special-casing.
 func TestHTTPDistributedRateLimitSampleFailsOpenWhenRedisAddrUnset(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_distributed_rate_limit", httpDistributedRateLimitSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_distributed_rate_limit")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	resp, err := http.Get("http://" + httpDistributedRateLimitSampleAddr + "/limited")
+	resp, err := http.Get("http://" + addr + "/limited")
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -2728,8 +2845,6 @@ func TestHTTPClientGateIsIndependent(t *testing.T) {
 	})
 }
 
-const httpJSONSampleAddr = "127.0.0.1:8095"
-
 // TestHTTPJSONSampleParsesRequestBodies is the end-to-end check for
 // http.parseJSON, including the nested-object and nested-array cases that
 // exposed a real compiler bug during development: indexing into a value
@@ -2740,14 +2855,14 @@ const httpJSONSampleAddr = "127.0.0.1:8095"
 // this test is what would have caught the bug had it existed sooner, and
 // guards against regressing it.
 func TestHTTPJSONSampleParsesRequestBodies(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_json", httpJSONSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_json")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	postJSON := func(path string, jsonBody string) (int, string) {
-		resp, err := http.Post("http://"+httpJSONSampleAddr+path, "application/json", strings.NewReader(jsonBody))
+		resp, err := http.Post("http://"+addr+path, "application/json", strings.NewReader(jsonBody))
 		if err != nil {
 			t.Fatalf("request to %s failed: %v; stderr:\n%s", path, err, stderr.String())
 		}
@@ -2794,8 +2909,6 @@ func TestHTTPJSONSampleParsesRequestBodies(t *testing.T) {
 	}
 }
 
-const httpTimeoutsSampleAddr = "127.0.0.1:8096"
-
 // TestHTTPTimeoutsSampleClosesSlowClientConnection is a slowloris-style check
 // for caja_http_listen's ReadHeaderTimeout (builtins.go, 5s): a client that
 // opens a connection and sends only a partial request line, then goes
@@ -2806,14 +2919,14 @@ const httpTimeoutsSampleAddr = "127.0.0.1:8096"
 // sample code (there's no way for a .caja script to act as a slow client);
 // it has to be driven from the Go test via a raw socket.
 func TestHTTPTimeoutsSampleClosesSlowClientConnection(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_timeouts", httpTimeoutsSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_timeouts")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	// A normal fast request must still work fine with the timeouts in place.
-	resp, err := http.Get("http://" + httpTimeoutsSampleAddr + "/ping")
+	resp, err := http.Get("http://" + addr + "/ping")
 	if err != nil {
 		t.Fatalf("GET /ping failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -2823,9 +2936,9 @@ func TestHTTPTimeoutsSampleClosesSlowClientConnection(t *testing.T) {
 		t.Errorf(`GET /ping: expected 200 "pong", got %d %q`, resp.StatusCode, string(body))
 	}
 
-	conn, err := net.Dial("tcp", httpTimeoutsSampleAddr)
+	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		t.Fatalf("failed to dial %s: %v", httpTimeoutsSampleAddr, err)
+		t.Fatalf("failed to dial %s: %v", addr, err)
 	}
 	defer conn.Close()
 
@@ -2854,8 +2967,6 @@ func TestHTTPTimeoutsSampleClosesSlowClientConnection(t *testing.T) {
 	}
 }
 
-const httpRoutingSampleAddr = "127.0.0.1:8097"
-
 // TestHTTPRoutingSampleMultiValueAndWildcards is the end-to-end check for
 // Request.queryAll/headersAll (multi-value query params/headers, alongside
 // the existing first-value-wins query/headers) and for ":name*" wildcard
@@ -2865,14 +2976,14 @@ const httpRoutingSampleAddr = "127.0.0.1:8097"
 // wrongly (that registering both would conflict, or that the wildcard would
 // shadow the literal), so worth a direct regression check.
 func TestHTTPRoutingSampleMultiValueAndWildcards(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_routing", httpRoutingSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_routing")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	get := func(path string, headers map[string]string) (int, string) {
-		req, err := http.NewRequest(http.MethodGet, "http://"+httpRoutingSampleAddr+path, nil)
+		req, err := http.NewRequest(http.MethodGet, "http://"+addr+path, nil)
 		if err != nil {
 			t.Fatalf("failed to build request for %s: %v", path, err)
 		}
@@ -2897,7 +3008,7 @@ func TestHTTPRoutingSampleMultiValueAndWildcards(t *testing.T) {
 
 	// http.Header.Add (not Set) is required to actually send the same header
 	// key twice -- Set would overwrite the first value.
-	req, err := http.NewRequest(http.MethodGet, "http://"+httpRoutingSampleAddr+"/header-values", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/header-values", nil)
 	if err != nil {
 		t.Fatalf("failed to build request: %v", err)
 	}
@@ -2922,22 +3033,20 @@ func TestHTTPRoutingSampleMultiValueAndWildcards(t *testing.T) {
 	}
 }
 
-const httpStaticSampleAddr = "127.0.0.1:8098"
-
 // TestHTTPStaticSampleServesFiles is the end-to-end check for router.static:
 // directory-index defaulting at the mount root, an explicit file, a nested
 // asset (proving the mount serves subdirectories, not just its top level),
 // a 404 for a missing file within the mount, and a literal API route
 // registered on the same router still working alongside the static mount.
 func TestHTTPStaticSampleServesFiles(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_static", httpStaticSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_static")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
 	get := func(path string) (int, string) {
-		resp, err := http.Get("http://" + httpStaticSampleAddr + path)
+		resp, err := http.Get("http://" + addr + path)
 		if err != nil {
 			t.Fatalf("request to %s failed: %v; stderr:\n%s", path, err, stderr.String())
 		}
@@ -3128,15 +3237,25 @@ func TestReactiveChainPropagatesThroughDerivedActive(t *testing.T) {
 	}
 }
 
-// httpClientSampleAddr is the fixed port samples/http_client/http_client.caja
-// listens on; httpClientUpstreamAddr is the fixed port its Client targets.
-// Both are hardcoded in the sample source (Caja has no way to read
-// environment variables), so the test's own fake upstream server must bind
-// that exact address rather than a random port from httptest.NewServer.
-const (
-	httpClientSampleAddr   = "127.0.0.1:8101"
-	httpClientUpstreamAddr = "127.0.0.1:8102"
-)
+// httpClientUpstreamAddr is the one address here that CANNOT be made
+// dynamic. samples/http_client/http_client.caja hardcodes the URL its
+// Client calls — http.newClient("http://127.0.0.1:8102", ...) — in its own
+// source, and CAJA_HTTP_PORT only overrides http.listen, not an outbound
+// client URL. So the fake upstream below must bind this exact address
+// rather than take a random one from httptest.NewServer.
+//
+// The sample's own LISTEN port is dynamic like every other, so only this
+// upstream pair (and the deliberately-unreachable :8103 the sample also
+// names) stays fixed.
+//
+// Practical consequence, since it is the one that remains: two `go test`
+// runs of this package overlapping in time will collide here — one of them
+// fails with "address already in use" on 8102 while every other HTTP test
+// in both runs passes. Run this package alone, or serially, if you need two
+// runs at once. Making it dynamic would mean the sample reading its
+// upstream URL from the environment, which would make it a worse example of
+// http.newClient than it is a test fixture.
+const httpClientUpstreamAddr = "127.0.0.1:8102"
 
 // startFakeUpstreamServer starts a plain Go HTTP server on the fixed address
 // samples/http_client's Client is configured to call, echoing the request
@@ -3162,13 +3281,13 @@ func startFakeUpstreamServer(t *testing.T) {
 
 func TestHTTPClientSampleRelaysGetRequest(t *testing.T) {
 	startFakeUpstreamServer(t)
-	cmd, stderr := startHTTPSample(t, "http_client", httpClientSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_client")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	resp, err := http.Get("http://" + httpClientSampleAddr + "/relay-get")
+	resp, err := http.Get("http://" + addr + "/relay-get")
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -3184,13 +3303,13 @@ func TestHTTPClientSampleRelaysGetRequest(t *testing.T) {
 
 func TestHTTPClientSampleRelaysPostWithJSONBody(t *testing.T) {
 	startFakeUpstreamServer(t)
-	cmd, stderr := startHTTPSample(t, "http_client", httpClientSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_client")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	resp, err := http.Post("http://"+httpClientSampleAddr+"/relay-post", "text/plain", nil)
+	resp, err := http.Post("http://"+addr+"/relay-post", "text/plain", nil)
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -3209,13 +3328,13 @@ func TestHTTPClientSampleRelaysPostWithJSONBody(t *testing.T) {
 // unbound port specifically to exercise Client's fail-open nullable path
 // (a refused connection must return nil, not crash the handler).
 func TestHTTPClientSampleFailsOpenOnUnreachableHost(t *testing.T) {
-	cmd, stderr := startHTTPSample(t, "http_client", httpClientSampleAddr)
+	addr, cmd, stderr := startHTTPSampleOnFreePort(t, "http_client")
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 
-	resp, err := http.Get("http://" + httpClientSampleAddr + "/relay-fail")
+	resp, err := http.Get("http://" + addr + "/relay-fail")
 	if err != nil {
 		t.Fatalf("request failed: %v; stderr:\n%s", err, stderr.String())
 	}
@@ -3223,5 +3342,197 @@ func TestHTTPClientSampleFailsOpenOnUnreachableHost(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || string(body) != "fallback" {
 		t.Errorf(`expected 200 "fallback" (Client.get against a refused connection returns nil, not a crash), got %d %q`, resp.StatusCode, body)
+	}
+}
+
+// TestBooleanKeywordOperatorsLowerToGo covers the full truth table for
+// Caja's and/or/xor keyword operators, at runtime rather than at the
+// codegen-substring level.
+//
+// These reached Go as the bare keyword — `(a and b)` — for as long as they
+// had existed. The analyzer accepted them (it type-checks all three as two
+// Booleans), so nothing before the final `go build` objected, and the
+// failure arrived as a Go syntax error pointing at source the user never
+// wrote. That is exactly why this test runs the programs: an assertion on
+// the emitted text would have passed against the broken output too.
+func TestBooleanKeywordOperatorsLowerToGo(t *testing.T) {
+	cases := []struct {
+		expr string
+		want string
+	}{
+		{"true and true", "true"},
+		{"true and false", "false"},
+		{"false and true", "false"},
+		{"false and false", "false"},
+
+		{"true or true", "true"},
+		{"true or false", "true"},
+		{"false or true", "true"},
+		{"false or false", "false"},
+
+		// xor lowers to != rather than Go's ^, which is bitwise and only
+		// defined on integers.
+		{"true xor true", "false"},
+		{"true xor false", "true"},
+		{"false xor true", "true"},
+		{"false xor false", "false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.expr, func(t *testing.T) {
+			source := fmt.Sprintf("let a = %s\nreturn a\n", tc.expr)
+			got := strings.TrimSpace(runCajaSource(t, source))
+			if got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.expr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBooleanKeywordOperatorsCombineAndNest exercises the operators in the
+// positions that failed to compile before the lowering: chained several
+// deep, and inside an if condition. The lowering parenthesises each
+// operand pair, so precedence never has to be modelled — worth pinning
+// that nesting actually holds.
+func TestBooleanKeywordOperatorsCombineAndNest(t *testing.T) {
+	source := "let a = true\nlet b = false\nlet c = true\n" +
+		"let chained = a and c or b\n" +
+		"let nested = (a or b) and (c xor b)\n" +
+		"let result = false\n" +
+		"if (chained and nested) {\n\tresult = true\n}\n" +
+		"return result\n"
+	if got := strings.TrimSpace(runCajaSource(t, source)); got != "true" {
+		t.Errorf("chained/nested boolean operators = %q, want %q", got, "true")
+	}
+}
+
+// TestBooleanKeywordOperatorsShortCircuit verifies that and/or inherit Go's
+// short-circuiting rather than evaluating both operands. That is a semantic
+// commitment of the lowering, not an implementation detail: it decides
+// whether a guard like `isReady() and readValue()` is safe to write.
+//
+// Observed through log output because a function has no other way to report
+// that it ran — Caja's purity rule forbids it from touching outer state.
+func TestBooleanKeywordOperatorsShortCircuit(t *testing.T) {
+	for name, source := range map[string]string{
+		"and stops at a false left operand": "import log\n" +
+			"const noisy = fn() -> Boolean {\n\tlog.info(\"EVALUATED\", \"\")\n\treturn true\n}\n" +
+			"let a = false and noisy()\nreturn a\n",
+		"or stops at a true left operand": "import log\n" +
+			"const noisy = fn() -> Boolean {\n\tlog.info(\"EVALUATED\", \"\")\n\treturn false\n}\n" +
+			"let a = true or noisy()\nreturn a\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out := runCajaSource(t, source)
+			if strings.Contains(out, "EVALUATED") {
+				t.Errorf("right operand was evaluated; expected short-circuit. output:\n%s", out)
+			}
+		})
+	}
+}
+
+// stageCajaPackage copies one of the .caja libraries this repo publishes to
+// npm into dir/node_modules/<name>, so a test script can import it the way a
+// scaffolded project does.
+//
+// It reads the shipped file rather than a fixture copy on purpose: a copy
+// would keep passing after the real library regressed, which is the one thing
+// a regression test must not do.
+func stageCajaPackage(t *testing.T, dir string, name string, sourceDir string) {
+	t.Helper()
+
+	index, err := os.ReadFile(filepath.Join("..", "..", "..", sourceDir, "index.caja"))
+	if err != nil {
+		t.Fatalf("failed to read the %s library: %v", name, err)
+	}
+
+	pkgDir := filepath.Join(dir, "node_modules", filepath.FromSlash(name))
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to create %s package directory: %v", name, err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "index.caja"), index, 0644); err != nil {
+		t.Fatalf("failed to stage %s: %v", name, err)
+	}
+	manifest := fmt.Sprintf(`{"name": %q, "version": "0.1.0", "main": "index.caja"}`, name)
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(manifest), 0644); err != nil {
+		t.Fatalf("failed to stage %s package.json: %v", name, err)
+	}
+}
+
+// TestJsLibraryRejectsUnsafeIdentifiers pins the single injection boundary in
+// the published @caja/js library. jsIdent is the only non-raw leaf whose text
+// reaches the JavaScript output unquoted, and the four binding forms
+// (jsConst/jsLet/jsFunction/jsForOf) name a variable the same way; all five
+// route through one safeName helper. A name that is not a plain JavaScript
+// identifier must come back as a visibly broken placeholder, because emitting
+// it would let jsIdent("semi;colon") terminate the statement early and splice
+// arbitrary syntax into a generated page.
+//
+// The library is Caja source with no test harness of its own, and it cannot
+// be a samples/ entry -- samples resolve imports from their own directory and
+// nothing there resolves @caja/js -- so the real js/index.caja is staged into
+// a temp node_modules and a script is compiled and run against it. Because
+// the script's rendered output is printed, a failure shows the exact JS that
+// leaked.
+func TestJsLibraryRejectsUnsafeIdentifiers(t *testing.T) {
+	const placeholder = "__caja_invalid_identifier__"
+
+	dir := t.TempDir()
+	stageCajaPackage(t, dir, "@caja/js", "js")
+
+	// One rendered form per line, in the same order as the table below.
+	source := "import * from \"@caja/js\"\n" +
+		"import string\n" +
+		"\n" +
+		"let empty: [JsStmt] = []\n" +
+		"let noParams: [String] = []\n" +
+		"\n" +
+		"let parts = [\n" +
+		"\trenderExpr(jsIdent(\"bad name\")),\n" +
+		"\trenderExpr(jsIdent(\"2legit\")),\n" +
+		"\trenderExpr(jsIdent(\"\")),\n" +
+		"\trenderExpr(jsIdent(\"semi;colon\")),\n" +
+		"\trenderExpr(jsIdent(\"ok_$1\")),\n" +
+		"\trenderStmt(jsConst(\"semi;colon\", jsNum(1))),\n" +
+		"\trenderStmt(jsLet(\"bad name\", jsNum(2))),\n" +
+		"\trenderStmt(jsFunction(\"2legit\", noParams, empty)),\n" +
+		"\trenderStmt(jsForOf(\"semi;colon\", jsIdent(\"xs\"), empty))\n" +
+		"]\n" +
+		"\n" +
+		"return string.join(parts, \"\\n\")\n"
+
+	out := runCajaSourceInDir(t, dir, source)
+
+	scenarios := []struct {
+		name        string
+		contains    string
+		notContains string
+	}{
+		{name: "a space is not an identifier", contains: placeholder, notContains: "bad name"},
+		{name: "an identifier may not start with a digit", contains: placeholder, notContains: "2legit"},
+		{name: "the empty name is not an identifier", contains: placeholder},
+		{name: "a semicolon would end the statement early", contains: placeholder, notContains: "semi;colon"},
+		{name: "a valid identifier is passed through untouched", contains: "ok_$1", notContains: placeholder},
+		{name: "jsConst sanitises its binding name", contains: "const " + placeholder, notContains: "semi;colon"},
+		{name: "jsLet sanitises its binding name", contains: "let " + placeholder, notContains: "bad name"},
+		{name: "jsFunction sanitises its name", contains: "function " + placeholder, notContains: "2legit"},
+		{name: "jsForOf sanitises its binding name", contains: "const " + placeholder, notContains: "semi;colon"},
+	}
+
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(lines) != len(scenarios) {
+		t.Fatalf("expected %d rendered lines, got %d:\n%s", len(scenarios), len(lines), out)
+	}
+
+	for i, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			line := lines[i]
+			if !strings.Contains(line, scenario.contains) {
+				t.Errorf("expected rendered output to contain %q, got %q", scenario.contains, line)
+			}
+			if scenario.notContains != "" && strings.Contains(line, scenario.notContains) {
+				t.Errorf("unsafe name %q reached the JavaScript output: %q", scenario.notContains, line)
+			}
+		})
 	}
 }

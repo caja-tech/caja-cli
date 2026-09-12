@@ -1,4 +1,4 @@
-import { Circle, Square, Shape, BigCircle } from "./shapes"
+import { Circle, Square, Shape, BigCircle, Size } from "./shapes"
 import { Client } from "http"
 
 let c: Circle = Circle { radius: 5 }
@@ -10,11 +10,26 @@ let useClient = fn(client: Client) -> Client {
 	return client
 }
 
+# Size is a named-imported enum: classify's parameter exercises the TYPE
+# form (Size resolving as a type annotation) and Size.Small exercises the
+# VALUE form (an enum's name is registered in both, unlike Circle/Shape/
+# BigCircle above, which only ever exist as types).
+let classify = fn(size: Size) -> Number {
+	if (size == Size.Small) {
+		return 1
+	}
+	return 2
+}
+
 if (matched == nil) {
 	return 1
 }
 
 if (big == nil) {
+	return 1
+}
+
+if (classify(Size.Small) != 1) {
 	return 1
 }
 
