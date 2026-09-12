@@ -28,6 +28,7 @@ Two cross-cutting support packages sit underneath/beside that chain:
 
 - **[internal/script](internal/script/CLAUDE.md)** — the orchestration facade (`ParseWithDir`) that runs lexer→parser→analyzer in one call. Used by the CLI's `run` and `build` commands.
 - **[internal/lsp](internal/lsp/CLAUDE.md)** — the Language Server Protocol implementation. Re-implements the parse+analyze sequence itself (rather than calling `internal/script`) because it needs cancellable, per-keystroke re-analysis. Powers the VS Code extension.
+  - **[internal/lsp/posmap](internal/lsp/posmap/CLAUDE.md)** — the one place Caja's byte-based source coordinates become LSP's UTF-16 positions.
 - **[internal/encoder](internal/encoder/CLAUDE.md)** — bundles a script plus its local imports into a single portable compressed token, for the `encode`/`decode` CLI commands.
 - **[internal/toolchain](internal/toolchain/CLAUDE.md)** — downloads/caches a self-contained Go toolchain so `caja build` doesn't require a system Go install.
 - **[internal/file](internal/file/CLAUDE.md)** — the `.caja` extension / `main.caja` naming constants, shared across the CLI, encoder, and modules.

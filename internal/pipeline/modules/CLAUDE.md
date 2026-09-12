@@ -11,7 +11,8 @@ Resolves and loads an imported `.caja` module file from disk, mirroring Node.js'
 
 ## How it works
 
-- `Load(baseDir, moduleName string) (*ast.Program, error)` is the entire public API.
+- `Load(baseDir, moduleName string) (*ast.Program, string, error)` locates, reads and parses a module, returning its AST and the resolved on-disk path.
+- `Resolve(baseDir, moduleName string) (string, error)` is just the locating half. `internal/lsp` builds its workspace dependency graph with it: without a resolution-only entry point it would have to parse every module simply to learn which file an import names.
 - Resolution order mimics Node: first try `baseDir/moduleName.caja` directly; if that doesn't exist, walk up parent directories looking for `node_modules/<moduleName>`, honoring that package's `package.json` `"main"` field, defaulting to `index.caja` if `package.json` doesn't specify one.
 
 ## Gotchas / invariants
