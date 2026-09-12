@@ -68,6 +68,14 @@ func (h *CajaHandler) Initialize(_ context.Context, _ *lsp.InitializeParams) (*l
 			CompletionProvider: &lsp.CompletionOptions{
 				TriggerCharacters: []string{".", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"},
 			},
+			// Every other capability is derived by the go-lsp server from the interfaces
+			// this handler satisfies. Semantic tokens are the exception: the legend names
+			// the token types and modifiers this server emits, and only the server knows
+			// them, so it has to be stated here.
+			SemanticTokensProvider: &lsp.SemanticTokensOptions{
+				Legend: semanticLegend(),
+				Full:   &lsp.SemanticTokensFull{},
+			},
 		},
 	}, nil
 }
