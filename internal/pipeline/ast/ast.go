@@ -224,6 +224,7 @@ func (fl *FunctionLiteral) String() string {
 type StructLiteral struct {
 	Token         lexer.Token // The '{' token
 	StructName    string
+	NameRef       *TypeRef // positioned form of StructName, for go-to-definition
 	TypeArguments []string
 	Fields        map[string]Expression
 }
@@ -647,13 +648,13 @@ func (i *InfixExpression) String() string {
 type IsExpression struct {
 	Token    lexer.Token // The 'is' token
 	Left     Expression
-	TypeName string
+	TypeName *TypeRef
 }
 
 func (ie *IsExpression) expressionNode()      {}
 func (ie *IsExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *IsExpression) String() string {
-	return "(" + ie.Left.String() + " is " + ie.TypeName + ")"
+	return "(" + ie.Left.String() + " is " + ie.TypeName.String() + ")"
 }
 
 // IfExpression is an expression node that represents a conditional branching

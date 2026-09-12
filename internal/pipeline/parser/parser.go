@@ -654,15 +654,24 @@ func statementToken(s ast.Statement, fallback lexer.Token) lexer.Token {
 func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 	var structName string
 	var typeArgs []string
+	// nameRef keeps the position of the type being constructed. Token is the '{', so
+	// without this the name in `Cat { ... }` would have no position and could not be
+	// hovered or jumped from, even though it is one of the most common type references
+	// in Caja source.
+	var nameRef *ast.TypeRef
 	if ident, ok := left.(*ast.Identifier); ok {
 		structName = ident.Value
+		nameRef = &ast.TypeRef{Token: ident.Token, Name: structName}
 	} else if genIdent, ok := left.(*ast.GenericIdentifier); ok {
 		structName = genIdent.Identifier.Value
 		typeArgs = genIdent.TypeArguments
+		nameRef = &ast.TypeRef{Token: genIdent.Identifier.Token, Name: structName}
 	} else if prop, ok := left.(*ast.PropertyExpression); ok {
 		// e.g. "sm.User" -> "sm.User"
 		if modId, ok := prop.Object.(*ast.Identifier); ok {
 			structName = modId.Value + "." + prop.Property.Value
+			qualifier := modId.Token
+			nameRef = &ast.TypeRef{Token: prop.Property.Token, Qualifier: &qualifier, Name: structName}
 		} else {
 			p.reportError(p.currToken, "invalid property expression for struct literal")
 			return nil
@@ -675,6 +684,7 @@ func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 	literal := &ast.StructLiteral{
 		Token:         p.currToken, // The '{' token
 		StructName:    structName,
+		NameRef:       nameRef,
 		TypeArguments: typeArgs,
 		Fields:        make(map[string]ast.Expression),
 	}
@@ -1674,10 +1684,12 @@ func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
 		p.reportError(p.peekToken, fmt.Sprintf("expected type name after 'is', got %s", p.peekToken.Type))
 		return nil
 	}
+	leadToken := p.currToken
 	typeName := p.currToken.Literal
+	ref := &ast.TypeRef{Token: leadToken, Name: typeName}
 
 	// Allow a module-qualified type name (e.g. "animal is animals.Cat"),
-	// mirroring how parseTypeSignature reads dotted type names elsewhere.
+	// mirroring how parseTypeExpr reads dotted type names elsewhere.
 	if p.peekToken.Type == lexer.DOT {
 		p.nextToken() // move to '.'
 		if !p.expectPeek(lexer.IDENT) {
@@ -1685,9 +1697,14 @@ func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
 			return nil
 		}
 		typeName += "." + p.currToken.Literal
+
+		qualifier := leadToken
+		ref.Qualifier = &qualifier
+		ref.Token = p.currToken
+		ref.Name = typeName
 	}
 
-	return &ast.IsExpression{Token: tok, Left: left, TypeName: typeName}
+	return &ast.IsExpression{Token: tok, Left: left, TypeName: ref}
 }
 
 // parsePropertyExpression parses an object property access, capturing the left-hand

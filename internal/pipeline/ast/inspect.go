@@ -89,7 +89,7 @@ func Children(n Node) []Node {
 	case *InfixExpression:
 		add(n.Left, n.Right)
 	case *IsExpression:
-		add(n.Left)
+		add(n.Left, n.TypeName)
 	case *IfExpression:
 		add(n.Condition, n.Consequence, n.Alternative)
 
@@ -137,6 +137,7 @@ func Children(n Node) []Node {
 			add(k, n.Pairs[k])
 		}
 	case *StructLiteral:
+		add(n.NameRef)
 		for _, v := range sortedBySource(mapValues(n.Fields)) {
 			add(v)
 		}

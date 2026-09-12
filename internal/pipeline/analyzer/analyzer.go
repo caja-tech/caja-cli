@@ -256,13 +256,22 @@ func (a *Analyzer) recordTypeRefs(te *ast.TypeExpr) {
 		if !ok {
 			continue
 		}
-		a.nodeSymbols[ref] = refSym
+		a.recordTypeRefUse(ref, refSym)
+	}
+}
 
-		if site, declared := a.typeDeclarations[ref.Name]; declared {
-			a.nodeDefinitions[ref] = site.Token
-			if site.FilePath != "" {
-				a.nodeDefinitionFiles[ref] = site.FilePath
-			}
+// recordTypeRefUse makes one type reference resolvable, pointing it at the declaration
+// of the type it names.
+func (a *Analyzer) recordTypeRefUse(ref *ast.TypeRef, sym symbol.Symbol) {
+	if ref == nil || sym == nil {
+		return
+	}
+	a.nodeSymbols[ref] = sym
+
+	if site, declared := a.typeDeclarations[ref.Name]; declared {
+		a.nodeDefinitions[ref] = site.Token
+		if site.FilePath != "" {
+			a.nodeDefinitionFiles[ref] = site.FilePath
 		}
 	}
 }
@@ -768,6 +777,9 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("type error: '%s' is not a struct", n.StructName))
 		return symbol.AnySymbol()
 	}
+	// The constructed type is a reference like any other, so hovering or jumping from
+	// `Cat` in `Cat { ... }` resolves to where Cat was declared.
+	a.recordTypeRefUse(n.NameRef, structDef)
 
 	if len(n.TypeArguments) > 0 {
 		if len(n.TypeArguments) != len(structDef.TypeParameters) {
@@ -1511,11 +1523,15 @@ func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
 func (a *Analyzer) analyzeIsExpression(n *ast.IsExpression) symbol.Symbol {
 	leftSym := a.analyze(n.Left)
 
-	variantSym, ok := a.findTypeSymbolInTypesRaw(n.TypeName)
+	variantSym, ok := a.findTypeSymbolInTypesRaw(n.TypeName.String())
 	if !ok {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: undefined type '%s'", n.TypeName))
 		return symbol.AnySymbol()
 	}
+	// The narrowed-to type is a real reference, so make it hoverable and jumpable the
+	// same way an annotation's references are.
+	a.recordTypeRefUse(n.TypeName, variantSym)
+
 	variantStructDef, ok := variantSym.(*symbol.StructDefSymbol)
 	if !ok {
 		a.reportError(n.Token, fmt.Sprintf("type error: 'is' target '%s' must be a struct type", n.TypeName))

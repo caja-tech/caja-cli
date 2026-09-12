@@ -404,3 +404,60 @@ func TestDefinitionOnTypeReference(t *testing.T) {
 		t.Errorf("expected the declaration of Money on line 0, got line %d", locs[0].Range.Start.Line)
 	}
 }
+
+// TestHoverAndDefinitionOnIsTarget covers the type named by a union-narrowing check.
+// `animal is Cat` mentions Cat as a real type reference, and it used to be a bare string
+// with no position.
+func TestHoverAndDefinitionOnIsTarget(t *testing.T) {
+	src := "type Cat struct {\n    name String\n}\n" +
+		"type Dog struct {\n    name String\n}\n" +
+		"union Animal = Cat | Dog\n" +
+		"let a: Animal = Cat { name: \"Tom\" }\n" +
+		"let matched: Cat? = a is Cat\n"
+
+	const line, char = 8, 25 // the `Cat` after `is`
+
+	_, s, uri := openInline(t, "main.caja", src)
+
+	if got := hoverText(t, s, uri, line, char); got == "" {
+		t.Error("hover on the type named by `is` resolved to nothing")
+	}
+
+	locs, err := s.Definition(uri, line, char)
+	if err != nil {
+		t.Fatalf("Definition: %v", err)
+	}
+	if len(locs) == 0 {
+		t.Fatal("go-to-definition on the type named by `is` resolved to nothing")
+	}
+	if locs[0].Range.Start.Line != 0 {
+		t.Errorf("expected the declaration of Cat on line 0, got line %d", locs[0].Range.Start.Line)
+	}
+}
+
+// TestHoverAndDefinitionOnStructLiteralName covers the type named by a struct literal.
+// `Cat { name: "Tom" }` is one of the most common type references in Caja source, and
+// the name had no position at all: the parser kept only its text.
+func TestHoverAndDefinitionOnStructLiteralName(t *testing.T) {
+	src := "type Cat struct {\n    name String\n}\n" +
+		"let pet = Cat { name: \"Tom\" }\n"
+
+	const line, char = 3, 10 // the `Cat` before the brace
+
+	_, s, uri := openInline(t, "main.caja", src)
+
+	if got := hoverText(t, s, uri, line, char); got == "" {
+		t.Error("hover on a struct literal's type name resolved to nothing")
+	}
+
+	locs, err := s.Definition(uri, line, char)
+	if err != nil {
+		t.Fatalf("Definition: %v", err)
+	}
+	if len(locs) == 0 {
+		t.Fatal("go-to-definition on a struct literal's type name resolved to nothing")
+	}
+	if locs[0].Range.Start.Line != 0 {
+		t.Errorf("expected the declaration of Cat on line 0, got line %d", locs[0].Range.Start.Line)
+	}
+}
