@@ -48,7 +48,7 @@ func (h *CajaHandler) Completion(_ context.Context, params *lsp.CompletionParams
 				// Find this object in the AST/Analyzer
 				// We can try to find the variable in the global environment or analyzer cache
 				if sym, ok := resolveSymbolByName(state, objName, params.Position.Line, params.Position.Character); ok {
-					if members, found := memberCompletions(sym); found {
+					if members, found := memberCompletions(state, sym); found {
 						return &lsp.CompletionList{Items: members}, nil
 					}
 				}
@@ -350,30 +350,69 @@ func kindPtr(k lsp.CompletionItemKind) *lsp.CompletionItemKind {
 // The wrapper kinds must be unwrapped rather than rejected: a nullable or active binding
 // of a struct still has that struct's fields, and stopping at the wrapper is why
 // dot-completion used to go silent on them.
-func memberCompletions(sym symbol.Symbol) ([]lsp.CompletionItem, bool) {
+func memberCompletions(state *DocumentState, sym symbol.Symbol) ([]lsp.CompletionItem, bool) {
 	switch s := sym.(type) {
 	case *symbol.NullableSymbol:
-		return memberCompletions(s.Underlying)
+		return memberCompletions(state, s.Underlying)
 	case *symbol.ActiveSymbol:
-		return memberCompletions(s.Underlying)
+		return memberCompletions(state, s.Underlying)
 	case *symbol.ConstraintSymbol:
 		// A refinement type is its base type as far as members go.
-		return memberCompletions(s.BaseType)
+		return memberCompletions(state, s.BaseType)
 
 	case *symbol.ModuleSymbol:
+		// A module is a namespace, not a value, so nothing can be called on it as a
+		// method — only its own exports apply.
 		return moduleMembers(s), true
 
 	// Both the instance and the definition appear as receivers: a local bound to a struct
 	// literal resolves to the instance, while a function parameter declared with a struct
-	// type resolves to the definition.
+	// type resolves to the definition. A struct's own fields and the functions callable on
+	// it coexist, which is exactly how the language resolves such a call.
 	case *symbol.StructInstanceSymbol:
-		return structFieldItems(s.Def), true
+		return append(structFieldItems(s.Def), ufcsMethodItems(state, sym)...), true
 	case *symbol.StructDefSymbol:
-		return structFieldItems(s), true
+		return append(structFieldItems(s), ufcsMethodItems(state, sym)...), true
 
 	default:
-		return nil, false
+		// Every other value — an array, a string, a number — is still a legitimate
+		// receiver, because any function whose first parameter matches it can be called
+		// as a method on it. Offering nothing here is what made `arr.` come back empty.
+		methods := ufcsMethodItems(state, sym)
+		return methods, len(methods) > 0
 	}
+}
+
+// ufcsMethodItems offers the functions callable as methods on a receiver.
+//
+// Discoverability is the whole point of the dot-call form: `array.push(list, 4)` was
+// always writable, and what `list.push(4)` adds is being able to find `push` by typing a
+// dot. Without this, the one thing the syntax exists for is the one thing completion
+// cannot do.
+func ufcsMethodItems(state *DocumentState, receiver symbol.Symbol) []lsp.CompletionItem {
+	if state == nil || state.Analyzer == nil {
+		return nil
+	}
+
+	methods := state.Analyzer.UFCSMethodsFor(receiver)
+	items := make([]lsp.CompletionItem, 0, len(methods))
+
+	for _, method := range methods {
+		item := lsp.CompletionItem{
+			Label:  method.Name,
+			Kind:   kindPtr(lsp.CompletionItemKindMethod),
+			Detail: method.Fn.String(),
+		}
+		// Say where it came from, since the same name can be reachable through more than
+		// one module and the qualified form is the disambiguation the analyzer suggests.
+		if method.ModuleAlias != "" {
+			item.Detail = method.ModuleAlias + "." + item.Detail
+		}
+		items = append(items, item)
+	}
+
+	sortItems(items)
+	return items
 }
 
 func moduleMembers(mod *symbol.ModuleSymbol) []lsp.CompletionItem {

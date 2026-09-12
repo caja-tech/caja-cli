@@ -186,7 +186,9 @@ func collectSemanticTokens(state *DocumentState, ix *posmap.LineIndex) []semanti
 			emit(node.BaseType, tokType, 0)
 
 		case *ast.PropertyExpression:
-			emit(node.Property, tokProperty, 0)
+			// `list.push(4)` looks like a property access but resolves to a function, so
+			// colouring it as a field would misreport what the dot actually means here.
+			emit(node.Property, propertyTokenType(state, node.Property), 0)
 
 		case *ast.PropertyAssignmentStatement:
 			emit(node.Property, tokProperty, 0)
@@ -326,4 +328,19 @@ func encodeSemanticTokens(tokens []semanticToken) []int {
 		prevLine, prevChar = tok.line, tok.startChar
 	}
 	return data
+}
+
+// propertyTokenType classifies the name after a dot. It is a field on a struct, an export
+// on a module — or, under the dot-call form, a function that merely reads like one.
+func propertyTokenType(state *DocumentState, property *ast.Identifier) int {
+	if state.Analyzer == nil {
+		return tokProperty
+	}
+	if sym, ok := state.Analyzer.GetSymbol(property); ok {
+		switch sym.(type) {
+		case *symbol.FunctionSymbol, *symbol.BuiltinSymbol:
+			return tokFunction
+		}
+	}
+	return tokProperty
 }
