@@ -231,6 +231,23 @@ func (a *Analyzer) recordTypeDeclaration(name *ast.Identifier) {
 		file = a.globalEnv.FileName
 	}
 	a.typeDeclarations[name.Value] = typeDeclSite{Token: name.Token, FilePath: file}
+
+	// The declaration's own name resolves to itself, exactly as a let/const binding does.
+	// Without this a type's declaring occurrence has no definition recorded, so
+	// find-references and rename started from the declaration would come back empty even
+	// though every reference to it resolves fine.
+	a.nodeDefinitions[name] = name.Token
+	if file != "" {
+		a.nodeDefinitionFiles[name] = file
+	}
+}
+
+// IsDeclaredType reports whether a name denotes a type declared in this module. Renaming
+// needs it because a type's declaring occurrence is a plain identifier, indistinguishable
+// from a variable by node shape alone, and Caja requires type names to be capitalised.
+func (a *Analyzer) IsDeclaredType(name string) bool {
+	_, ok := a.typeDeclarations[name]
+	return ok
 }
 
 // resolveTypeExpr resolves a positioned type annotation, additionally registering every
