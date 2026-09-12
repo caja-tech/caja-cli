@@ -145,6 +145,7 @@ func (dl *DateLiteral) String() string       { return "'" + dl.Value + "'" }
 // holds the ordered slice of expressions that make up the array's contents.
 type ArrayLiteral struct {
 	Token    lexer.Token
+	RBracket lexer.Token // the closing bracket, so the literal's span covers it
 	Elements []Expression
 }
 
@@ -222,7 +223,8 @@ func (fl *FunctionLiteral) String() string {
 // StructLiteral is an expression node representing a struct instantiation.
 // It holds the struct name identifier and a map of provided field values.
 type StructLiteral struct {
-	Token         lexer.Token // The '{' token
+	Token         lexer.Token
+	RBrace        lexer.Token // the closing brace, so the literal's span covers it
 	StructName    string
 	NameRef       *TypeRef // positioned form of StructName, for go-to-definition
 	TypeArguments []string
@@ -416,6 +418,7 @@ func (a *AssignStatement) String() string {
 // and Statements contains the ordered list of statements within the block.
 type BlockStatement struct {
 	Token      lexer.Token
+	RBrace     lexer.Token // the closing brace, so the body's span covers it
 	Statements []Statement
 }
 
@@ -475,6 +478,7 @@ func (sf *StructField) String() string {
 // containing the struct keyword token and a slice of field definitions.
 type StructDefinition struct {
 	Token  lexer.Token // The 'struct' token
+	RBrace lexer.Token // the closing brace, so the body's span covers it
 	Fields []StructField
 }
 
@@ -807,8 +811,9 @@ func (p *PropertyAssignmentStatement) String() string {
 
 // MapLiteral represents a dictionary/map expression.
 type MapLiteral struct {
-	Token lexer.Token // the '{' token
-	Pairs map[Expression]Expression
+	Token  lexer.Token
+	RBrace lexer.Token // the closing brace, so the literal's span covers it
+	Pairs  map[Expression]Expression
 }
 
 func (ml *MapLiteral) expressionNode()      {}

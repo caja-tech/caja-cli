@@ -272,9 +272,7 @@ func Span(n Node) (start, end lexer.Token) {
 
 	// Closing delimiters are not children, so they must be considered explicitly or a
 	// span would stop at the last element rather than at the bracket that closes it.
-	if call, ok := n.(*CallExpression); ok {
-		end = laterOf(end, call.RParenToken)
-	}
+	end = laterOf(end, closingToken(n))
 
 	for _, child := range Children(n) {
 		childStart, childEnd := Span(child)
@@ -364,4 +362,41 @@ func sortedBySource[T Node](nodes []T) []T {
 		return earlier(StartToken(nodes[i]), StartToken(nodes[j]))
 	})
 	return nodes
+}
+
+// closingToken returns the delimiter that ends a node, for the bracketed constructs whose
+// closer is not one of their children. Without it a block's span stops at its last
+// statement, so folding a function body would leave the closing brace outside the fold and
+// "expand selection" would never reach the whole body.
+func closingToken(n Node) lexer.Token {
+	switch n := n.(type) {
+	case *CallExpression:
+		return n.RParenToken
+	case *BlockStatement:
+		return n.RBrace
+	case *ArrayLiteral:
+		return n.RBracket
+	case *MapLiteral:
+		return n.RBrace
+	case *StructLiteral:
+		return n.RBrace
+	case *TypeAliasStatement:
+		if n.StructDefinition != nil {
+			return n.StructDefinition.RBrace
+		}
+		if n.TargetType != nil {
+			return n.TargetType.End
+		}
+		return lexer.Token{}
+	case *Parameter:
+		return n.Type.endToken()
+	case *LetStatement:
+		return n.ValueType.endToken()
+	case *ConstStatement:
+		return n.ValueType.endToken()
+	case *TypeExpr:
+		return n.End
+	default:
+		return lexer.Token{}
+	}
 }

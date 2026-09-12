@@ -131,6 +131,28 @@ func (ix *LineIndex) TokenRange(tok lexer.Token) lsp.Range {
 	return lsp.Range{Start: start, End: end}
 }
 
+// SpanRange returns the range covering everything from the start of one token to the end
+// of another, which is how a multi-token construct (a function, a struct body, a call)
+// reports its extent. A zero start means the construct was never positioned by the
+// parser, and the result is an empty range at the origin rather than a wild one.
+func (ix *LineIndex) SpanRange(start, end lexer.Token) lsp.Range {
+	if start.Line == 0 {
+		return lsp.Range{}
+	}
+	if end.Line == 0 {
+		return ix.TokenRange(start)
+	}
+
+	endLine := max(end.Line-1, 0)
+	return lsp.Range{
+		Start: ix.Position(start),
+		End: lsp.Position{
+			Line:      endLine,
+			Character: ix.UTF16Column(endLine, max(end.Column-1, 0)+TokenByteLen(end)),
+		},
+	}
+}
+
 // TokenByteLen returns how many bytes of source a token actually occupies.
 //
 // This is not len(tok.Literal). The lexer stores a quoted literal's *inner* text — for

@@ -35,6 +35,14 @@ func (t *TypeExpr) Text() string {
 	return t.Name
 }
 
+// endToken returns the annotation's last token, or the zero token when absent.
+func (t *TypeExpr) endToken() lexer.Token {
+	if t == nil {
+		return lexer.Token{}
+	}
+	return t.End
+}
+
 // TypeRef is a single named type appearing inside an annotation: `Money` in `[Money]`,
 // or both halves of `animals.Cat`. A reference in a type-parameter list is a binding
 // occurrence; everywhere else it is a use.

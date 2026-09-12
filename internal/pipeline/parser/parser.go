@@ -451,6 +451,9 @@ func (p *Parser) parseDateLiteral() ast.Expression {
 func (p *Parser) parseArrayLiteral() ast.Expression {
 	array := &ast.ArrayLiteral{Token: p.currToken}
 	array.Elements = p.parseExpressionList(lexer.RBRACKET)
+	if p.currToken.Type == lexer.RBRACKET {
+		array.RBracket = p.currToken
+	}
 	return array
 }
 
@@ -691,6 +694,7 @@ func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 
 	if p.peekToken.Type == lexer.RBRACE {
 		p.nextToken()
+		literal.RBrace = p.currToken
 		return literal
 	}
 
@@ -727,6 +731,7 @@ func (p *Parser) parseStructLiteral(left ast.Expression) ast.Expression {
 		p.reportError(p.peekToken, fmt.Sprintf("expected rbrace, got %s", p.currToken.Type))
 		return nil
 	}
+	literal.RBrace = p.currToken
 
 	return literal
 }
@@ -1024,6 +1029,13 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		p.nextToken()
 	}
 
+	// currToken is the closing brace here (or EOF on an unterminated block). Recording it
+	// is what lets Span cover the whole body rather than stopping at the last statement,
+	// which folding and selection both depend on.
+	if p.currToken.Type == lexer.RBRACE {
+		block.RBrace = p.currToken
+	}
+
 	return block
 }
 
@@ -1197,6 +1209,7 @@ func (p *Parser) parseTypeAliasStatement() *ast.TypeAliasStatement {
 			p.reportError(p.peekToken, fmt.Sprintf("expected rbrace, got %s", p.currToken.Type))
 			return nil
 		}
+		statement.StructDefinition.RBrace = p.currToken
 	} else {
 		statement.TargetType = p.parseTypeExpr()
 	}
@@ -1396,6 +1409,7 @@ func (p *Parser) parseMapLiteral() ast.Expression {
 		p.reportError(p.peekToken, fmt.Sprintf("expected rbrace in map literal, got %s", p.currToken.Type))
 		return nil
 	}
+	mapLiteral.RBrace = p.currToken
 
 	return mapLiteral
 }
