@@ -4,6 +4,7 @@ import (
 	"caja-cli/internal/pipeline/analyzer/symbol"
 	"caja-cli/internal/pipeline/ast"
 	"caja-cli/internal/pipeline/environment"
+	"caja-cli/internal/pipeline/lexer"
 	"fmt"
 	"sort"
 )
@@ -13,6 +14,11 @@ type ufcsCandidate struct {
 	modulePath  string // "" for a same-file top-level function
 	moduleAlias string // the alias it was reached through, "" when it is directly callable by name
 	fn          *symbol.FunctionSymbol
+	// Where the function was declared, so go-to-definition on the method name in
+	// `list.push(4)` can reach it. A builtin has no source location and leaves this zero,
+	// which is the same answer `math.abs` already gives.
+	defToken lexer.Token
+	defFile  string
 }
 
 // resolveUFCS attempts to resolve n (a property expression in call position,
@@ -46,6 +52,7 @@ func (a *Analyzer) resolveUFCS(n *ast.PropertyExpression, receiverType symbol.Sy
 		c := candidates[0]
 		a.nodeSymbols[n.Property] = c.fn
 		a.ufcsMatches[n] = c.modulePath
+		a.recordUFCSDefinition(n, c)
 		return c.fn, true
 	default:
 		a.reportUFCSAmbiguity(n, methodName, candidates)
@@ -68,7 +75,7 @@ func (a *Analyzer) ufcsCandidates(methodName string, receiverType symbol.Symbol)
 	var candidates []ufcsCandidate
 	seen := make(map[*symbol.FunctionSymbol]bool)
 
-	addCandidate := func(modulePath, moduleAlias string, fnSym *symbol.FunctionSymbol) {
+	addCandidate := func(modulePath, moduleAlias string, fnSym *symbol.FunctionSymbol, defToken lexer.Token, defFile string) {
 		if len(fnSym.ParamTypes()) == 0 || seen[fnSym] {
 			return
 		}
@@ -76,7 +83,13 @@ func (a *Analyzer) ufcsCandidates(methodName string, receiverType symbol.Symbol)
 			return
 		}
 		seen[fnSym] = true
-		candidates = append(candidates, ufcsCandidate{modulePath: modulePath, moduleAlias: moduleAlias, fn: fnSym})
+		candidates = append(candidates, ufcsCandidate{
+			modulePath:  modulePath,
+			moduleAlias: moduleAlias,
+			fn:          fnSym,
+			defToken:    defToken,
+			defFile:     defFile,
+		})
 	}
 
 	for _, name := range names {
@@ -88,7 +101,8 @@ func (a *Analyzer) ufcsCandidates(methodName string, receiverType symbol.Symbol)
 			}
 			if propSym, ok := modSym.GetSymbol(methodName); ok {
 				if fnSym, ok := propSym.(*symbol.FunctionSymbol); ok {
-					addCandidate(modSym.FilePath, name, fnSym)
+					addCandidate(modSym.FilePath, name, fnSym,
+						modSym.Definitions[methodName], modSym.FilePath)
 				}
 			}
 			continue
@@ -109,7 +123,9 @@ func (a *Analyzer) ufcsCandidates(methodName string, receiverType symbol.Symbol)
 			if entry.IsImport {
 				modulePath = entry.FilePath
 			}
-			addCandidate(modulePath, "", fnSym)
+			// A same-file declaration's own token is where go-to-definition should land;
+			// leaving defFile empty makes GetDefinition fall back to this file.
+			addCandidate(modulePath, "", fnSym, entry.DefinitionToken, modulePath)
 		}
 	}
 
@@ -278,11 +294,13 @@ func needsExpectedType(expr ast.Expression) bool {
 		// that reader anyway: if either form becomes parseable, answering false
 		// here would silently pick an overload off a guessed signature, which
 		// is the one failure mode this whole function exists to avoid.
-		if e.ReturnType == "" {
+		// Type annotations are *ast.TypeExpr nodes; Text() is nil-safe and yields ""
+		// for an absent annotation, which is the condition this checks.
+		if e.ReturnType.Text() == "" {
 			return true
 		}
 		for _, p := range e.Parameters {
-			if p == nil || p.Type == "" {
+			if p == nil || p.Type.Text() == "" {
 				return true
 			}
 		}
@@ -487,7 +505,22 @@ func (a *Analyzer) winUFCS(prop *ast.PropertyExpression, c ufcsCandidate) symbol
 	a.ufcsMatches[prop] = c.modulePath
 	a.nodeSymbols[prop.Property] = c.fn
 	a.nodeSymbols[prop] = c.fn
+	a.recordUFCSDefinition(prop, c)
 	return c.fn
+}
+
+// recordUFCSDefinition points the method name at the function the call resolved to, so
+// go-to-definition works on `push` in `list.push(4)` exactly as it does on `push` in
+// `array.push(list, 4)`. A builtin carries no source location and is left unrecorded,
+// which is the same answer a qualified call to one already gives.
+func (a *Analyzer) recordUFCSDefinition(prop *ast.PropertyExpression, c ufcsCandidate) {
+	if prop == nil || prop.Property == nil || c.defToken.Line == 0 {
+		return
+	}
+	a.nodeDefinitions[prop.Property] = c.defToken
+	if c.defFile != "" {
+		a.nodeDefinitionFiles[prop.Property] = c.defFile
+	}
 }
 
 // sameDeclaredParams reports whether a field's function type and a UFCS
@@ -505,4 +538,79 @@ func sameDeclaredParams(field, candidate *symbol.FunctionSymbol) bool {
 		}
 	}
 	return true
+}
+
+// UFCSMethod is a function reachable as a method on some receiver.
+type UFCSMethod struct {
+	Name        string
+	ModuleAlias string // the module it came through, or "" for a function declared in this file
+	Fn          *symbol.FunctionSymbol
+}
+
+// UFCSMethodsFor lists every function callable as `receiver.name(...)` for a receiver of
+// the given type.
+//
+// This is the enumerating counterpart to ufcsCandidates, which answers "does this one
+// name resolve?" — the question analysis asks. Completion asks the opposite question,
+// "what names could go here?", and cannot be expressed in terms of the first without
+// probing every identifier in scope.
+//
+// Matching, privacy and ordering all follow ufcsCandidates deliberately: a name offered
+// here that analysis would then reject is worse than not offering it.
+func (a *Analyzer) UFCSMethodsFor(receiverType symbol.Symbol) []UFCSMethod {
+	if receiverType == nil || len(a.scopes) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(a.scopes[0]))
+	for name := range a.scopes[0] {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var methods []UFCSMethod
+	seen := make(map[*symbol.FunctionSymbol]bool)
+
+	add := func(name, moduleAlias string, fnSym *symbol.FunctionSymbol) {
+		if fnSym == nil || len(fnSym.ParamTypes()) == 0 || seen[fnSym] {
+			return
+		}
+		if !receiverType.Equals(fnSym.ParamTypes()[0]) {
+			return
+		}
+		seen[fnSym] = true
+		methods = append(methods, UFCSMethod{Name: name, ModuleAlias: moduleAlias, Fn: fnSym})
+	}
+
+	for _, scopeName := range names {
+		entry := a.scopes[0][scopeName]
+
+		if modSym, ok := entry.Sym.(*symbol.ModuleSymbol); ok {
+			exported := make([]string, 0, len(modSym.GetSymbols()))
+			for exportName := range modSym.GetSymbols() {
+				exported = append(exported, exportName)
+			}
+			sort.Strings(exported)
+
+			for _, exportName := range exported {
+				if modSym.IsPrivate(exportName) {
+					continue
+				}
+				propSym, ok := modSym.GetSymbol(exportName)
+				if !ok {
+					continue
+				}
+				if fnSym, ok := propSym.(*symbol.FunctionSymbol); ok {
+					add(exportName, scopeName, fnSym)
+				}
+			}
+			continue
+		}
+
+		if fnSym, ok := entry.Sym.(*symbol.FunctionSymbol); ok {
+			add(scopeName, "", fnSym)
+		}
+	}
+
+	return methods
 }

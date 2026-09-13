@@ -3,33 +3,16 @@
   "name": "caja",
   "scopeName": "source.caja",
   "patterns": [
-    {
-      "include": "#comments"
-    },
-    {
-      "include": "#strings"
-    },
-    {
-      "include": "#keywords"
-    },
-    {
-      "include": "#constants"
-    },
-    {
-      "include": "#types"
-    },
-    {
-      "include": "#numbers"
-    },
-    {
-      "include": "#functions"
-    },
-    {
-      "include": "#operators"
-    },
-    {
-      "include": "#punctuation"
-    }
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#dates" },
+    { "include": "#keywords" },
+    { "include": "#constants" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
   ],
   "repository": {
     "comments": {
@@ -37,9 +20,7 @@
         {
           "begin": "#",
           "beginCaptures": {
-            "0": {
-              "name": "punctuation.definition.comment.caja"
-            }
+            "0": { "name": "punctuation.definition.comment.caja" }
           },
           "end": "$",
           "name": "comment.line.number-sign.caja"
@@ -51,38 +32,73 @@
         {
           "begin": "\"",
           "beginCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.begin.caja"
-            }
+            "0": { "name": "punctuation.definition.string.begin.caja" }
           },
           "end": "\"",
           "endCaptures": {
-            "0": {
-              "name": "punctuation.definition.string.end.caja"
-            }
+            "0": { "name": "punctuation.definition.string.end.caja" }
           },
           "name": "string.quoted.double.caja",
           "patterns": [
+            { "include": "#interpolation" },
+            {
+              "comment": "The lexer accepts a fixed escape set; anything else is an error.",
+              "match": "\\\\(u[0-9A-Fa-f]{4}|[tbnr'\"\\\\$])",
+              "name": "constant.character.escape.caja"
+            },
             {
               "match": "\\\\.",
-              "name": "constant.character.escape.caja"
+              "name": "invalid.illegal.unknown-escape.caja"
             }
           ]
+        }
+      ]
+    },
+    "interpolation": {
+      "patterns": [
+        {
+          "comment": "Kotlin-style \"${expr}\": the contents are real Caja code, so recurse.",
+          "begin": "\\$\\{",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.embedded.begin.caja" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.embedded.end.caja" }
+          },
+          "name": "meta.embedded.expression.caja",
+          "patterns": [{ "include": "$self" }]
+        }
+      ]
+    },
+    "dates": {
+      "patterns": [
+        {
+          "comment": "Single quotes are a distinct DATE token in the lexer, not an alternate string syntax.",
+          "begin": "'",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.caja" }
+          },
+          "end": "'",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.caja" }
+          },
+          "name": "string.quoted.single.date.caja"
         }
       ]
     },
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(import|from|as|return|if|else|constraints|with|move|react|async|await|unwrap)\\b",
+          "match": "\\b(import|as|return|if|else|constraints|with|move|react|async|await|unwrap)\\b",
           "name": "keyword.control.caja"
         },
         {
-          "match": "\\b(and|or|xor)\\b",
+          "match": "\\b(and|or|xor|is)\\b",
           "name": "keyword.operator.logical.caja"
         },
         {
-          "match": "\\b(let|const|fn|struct|type|define)\\b",
+          "match": "\\b(let|const|fn|struct|type|define|union)\\b",
           "name": "storage.type.caja"
         },
         {
@@ -106,10 +122,11 @@
     "types": {
       "patterns": [
         {
-          "match": "\\b(Number|Boolean|Date|String|Nothing)\\b",
+          "match": "\\b(Number|Boolean|Date|String|Nothing|Instant|Duration|Element)\\b",
           "name": "support.type.caja"
         },
         {
+          "comment": "A fallback: the language server's semantic tokens tell types and capitalised values apart properly.",
           "match": "\\b([A-Z][a-zA-Z0-9_]*)\\b",
           "name": "entity.name.type.caja"
         }
@@ -134,33 +151,37 @@
     "operators": {
       "patterns": [
         {
-          "match": "(->|=>|\\?\\.|\\?\\>\\>|\\?\\>|\\|\\>\\>|\\|\\>|==|!=|<=|>=|<|>|=|\\+|-|\\*|/|&)",
+          "comment": "Longest first: the pipe and safe-navigation forms must win over their prefixes.",
+          "match": "(\\?>>|\\|>>|\\?>|\\|>|\\?\\.|->|=>|::|==|!=|<=|>=)",
+          "name": "keyword.operator.caja"
+        },
+        {
+          "match": "(\\+|-|\\*|/|\\^|%)",
+          "name": "keyword.operator.arithmetic.caja"
+        },
+        {
+          "match": "(<|>)",
+          "name": "keyword.operator.comparison.caja"
+        },
+        {
+          "match": "(=)",
+          "name": "keyword.operator.assignment.caja"
+        },
+        {
+          "comment": "'&' joins parallel stream stages; '|' separates union variants; '?' marks a nullable type.",
+          "match": "(!|\\?|&|\\|)",
           "name": "keyword.operator.caja"
         }
       ]
     },
     "punctuation": {
       "patterns": [
-        {
-          "match": "\\(|\\)",
-          "name": "punctuation.parenthesis.caja"
-        },
-        {
-          "match": "\\{|\\}",
-          "name": "punctuation.brace.caja"
-        },
-        {
-          "match": "\\[|\\]",
-          "name": "punctuation.bracket.caja"
-        },
-        {
-          "match": ",",
-          "name": "punctuation.comma.caja"
-        },
-        {
-          "match": ":",
-          "name": "punctuation.colon.caja"
-        }
+        { "match": "\\(|\\)", "name": "punctuation.parenthesis.caja" },
+        { "match": "\\{|\\}", "name": "punctuation.brace.caja" },
+        { "match": "\\[|\\]", "name": "punctuation.bracket.caja" },
+        { "match": ",", "name": "punctuation.comma.caja" },
+        { "match": ":", "name": "punctuation.colon.caja" },
+        { "match": "\\.", "name": "punctuation.accessor.caja" }
       ]
     }
   }

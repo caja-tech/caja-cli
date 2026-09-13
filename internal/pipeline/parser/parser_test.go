@@ -1348,7 +1348,7 @@ func TestNullableTypesAndNavigation(t *testing.T) {
 		var nextType string
 		for _, f := range structNode.Fields {
 			if f.Name.Value == "next" {
-				nextType = f.Type
+				nextType = f.Type.Text()
 			}
 		}
 		if nextType != "Node?" {
@@ -1368,11 +1368,11 @@ func TestNullableTypesAndNavigation(t *testing.T) {
 
 		letStmt := program.Statements[0].(*ast.LetStatement)
 		fnLit := letStmt.Value.(*ast.FunctionLiteral)
-		if fnLit.Parameters[0].Type != "Node?" {
-			t.Errorf("expected param type Node?, got %s", fnLit.Parameters[0].Type)
+		if fnLit.Parameters[0].Type.Text() != "Node?" {
+			t.Errorf("expected param type Node?, got %s", fnLit.Parameters[0].Type.Text())
 		}
-		if fnLit.ReturnType != "Node?" {
-			t.Errorf("expected return type Node?, got %s", fnLit.ReturnType)
+		if fnLit.ReturnType.Text() != "Node?" {
+			t.Errorf("expected return type Node?, got %s", fnLit.ReturnType.Text())
 		}
 	})
 

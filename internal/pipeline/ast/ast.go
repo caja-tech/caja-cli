@@ -145,6 +145,7 @@ func (dl *DateLiteral) String() string       { return "'" + dl.Value + "'" }
 // holds the ordered slice of expressions that make up the array's contents.
 type ArrayLiteral struct {
 	Token    lexer.Token
+	RBracket lexer.Token // the closing bracket, so the literal's span covers it
 	Elements []Expression
 }
 
@@ -167,13 +168,13 @@ func (al *ArrayLiteral) String() string {
 type Parameter struct {
 	Token lexer.Token // The token for the parameter name
 	Name  string
-	Type  string
+	Type  *TypeExpr
 }
 
 func (p *Parameter) TokenLiteral() string { return p.Token.Literal }
 
 func (p *Parameter) String() string {
-	return p.Name + ": " + p.Type
+	return p.Name + ": " + p.Type.Text()
 }
 
 // FunctionLiteral is an expression node that represents a function definition.
@@ -182,7 +183,7 @@ type FunctionLiteral struct {
 	Token          lexer.Token
 	TypeParameters []string
 	Parameters     []*Parameter
-	ReturnType     string
+	ReturnType     *TypeExpr
 	Body           *BlockStatement
 	IsMemo         bool
 }
@@ -212,8 +213,8 @@ func (fl *FunctionLiteral) String() string {
 	}
 
 	out += ")"
-	if fl.ReturnType != "" {
-		out += " -> " + fl.ReturnType
+	if fl.ReturnType.Text() != "" {
+		out += " -> " + fl.ReturnType.Text()
 	}
 	out += " { ... }"
 	return out
@@ -222,8 +223,10 @@ func (fl *FunctionLiteral) String() string {
 // StructLiteral is an expression node representing a struct instantiation.
 // It holds the struct name identifier and a map of provided field values.
 type StructLiteral struct {
-	Token         lexer.Token // The '{' token
+	Token         lexer.Token
+	RBrace        lexer.Token // the closing brace, so the literal's span covers it
 	StructName    string
+	NameRef       *TypeRef // positioned form of StructName, for go-to-definition
 	TypeArguments []string
 	Fields        map[string]Expression
 }
@@ -255,7 +258,7 @@ type LetStatement struct {
 	Value     Expression
 	IsPrivate bool
 	IsActive  bool
-	ValueType string
+	ValueType *TypeExpr
 }
 
 func (ls *LetStatement) statementNode()       {}
@@ -271,8 +274,8 @@ func (ls *LetStatement) String() string {
 	}
 	out += ls.Name.String()
 
-	if ls.ValueType != "" {
-		out += ": " + ls.ValueType
+	if ls.ValueType.Text() != "" {
+		out += ": " + ls.ValueType.Text()
 	}
 
 	out += " = "
@@ -291,7 +294,7 @@ type ConstStatement struct {
 	Name      *Identifier
 	Value     Expression
 	IsPrivate bool
-	ValueType string
+	ValueType *TypeExpr
 }
 
 func (cs *ConstStatement) statementNode()       {}
@@ -303,8 +306,8 @@ func (cs *ConstStatement) String() string {
 	}
 	out += cs.TokenLiteral() + " " + cs.Name.String()
 
-	if cs.ValueType != "" {
-		out += ": " + cs.ValueType
+	if cs.ValueType.Text() != "" {
+		out += ": " + cs.ValueType.Text()
 	}
 
 	out += " = "
@@ -415,6 +418,7 @@ func (a *AssignStatement) String() string {
 // and Statements contains the ordered list of statements within the block.
 type BlockStatement struct {
 	Token      lexer.Token
+	RBrace     lexer.Token // the closing brace, so the body's span covers it
 	Statements []Statement
 }
 
@@ -431,8 +435,8 @@ func (bs *BlockStatement) String() string {
 // FunctionSignature represents the expected type signature of a function,
 // including its parameter types and optional return type.
 type FunctionSignature struct {
-	ParamTypes []string
-	ReturnType string
+	ParamTypes []*TypeExpr
+	ReturnType *TypeExpr
 }
 
 func (fs *FunctionSignature) String() string {
@@ -440,7 +444,7 @@ func (fs *FunctionSignature) String() string {
 
 	if len(fs.ParamTypes) > 0 {
 		for i, param := range fs.ParamTypes {
-			out += param
+			out += param.Text()
 			if i != len(fs.ParamTypes)-1 {
 				out += ", "
 			}
@@ -448,8 +452,8 @@ func (fs *FunctionSignature) String() string {
 	}
 
 	out += ")"
-	if fs.ReturnType != "" {
-		out += " -> " + fs.ReturnType
+	if fs.ReturnType.Text() != "" {
+		out += " -> " + fs.ReturnType.Text()
 	}
 
 	return out
@@ -459,21 +463,22 @@ func (fs *FunctionSignature) String() string {
 // holding the field's name, expected type string, and constant modifier.
 type StructField struct {
 	Name       *Identifier
-	Type       string
+	Type       *TypeExpr
 	IsConstant bool
 }
 
 func (sf *StructField) String() string {
 	if sf.IsConstant {
-		return "const " + sf.Name.String() + " " + sf.Type
+		return "const " + sf.Name.String() + " " + sf.Type.Text()
 	}
-	return sf.Name.String() + " " + sf.Type
+	return sf.Name.String() + " " + sf.Type.Text()
 }
 
 // StructDefinition represents the body of a struct type declaration,
 // containing the struct keyword token and a slice of field definitions.
 type StructDefinition struct {
 	Token  lexer.Token // The 'struct' token
+	RBrace lexer.Token // the closing brace, so the body's span covers it
 	Fields []StructField
 }
 
@@ -539,7 +544,7 @@ type TypeAliasStatement struct {
 	Name             *Identifier
 	TypeParameters   []string           // Used for generic aliases like type Map<K, V> ...
 	Signature        *FunctionSignature // Used for fn(...) types
-	TargetType       string             // Used for simple alias types like Number, [String], etc.
+	TargetType       *TypeExpr          // Used for simple alias types like Number, [String], etc.
 	StructDefinition *StructDefinition  // Used for struct types
 	IsPrivate        bool
 }
@@ -562,7 +567,7 @@ func (ts *TypeAliasStatement) String() string {
 	} else if ts.StructDefinition != nil {
 		out += ts.TokenLiteral() + " " + namePart + " " + ts.StructDefinition.String()
 	} else {
-		out += ts.TokenLiteral() + " " + namePart + " " + ts.TargetType
+		out += ts.TokenLiteral() + " " + namePart + " " + ts.TargetType.Text()
 	}
 
 	return out
@@ -647,13 +652,13 @@ func (i *InfixExpression) String() string {
 type IsExpression struct {
 	Token    lexer.Token // The 'is' token
 	Left     Expression
-	TypeName string
+	TypeName *TypeRef
 }
 
 func (ie *IsExpression) expressionNode()      {}
 func (ie *IsExpression) TokenLiteral() string { return ie.Token.Literal }
 func (ie *IsExpression) String() string {
-	return "(" + ie.Left.String() + " is " + ie.TypeName + ")"
+	return "(" + ie.Left.String() + " is " + ie.TypeName.String() + ")"
 }
 
 // IfExpression is an expression node that represents a conditional branching
@@ -711,7 +716,7 @@ func (ce *CallExpression) expressionNode()      {}
 func (ce *CallExpression) TokenLiteral() string { return ce.Token.Literal }
 func (ce *CallExpression) String() string {
 	out := ce.Function.String()
-	
+
 	if len(ce.TypeArguments) > 0 {
 		out += "::<"
 		for i, t := range ce.TypeArguments {
@@ -722,7 +727,7 @@ func (ce *CallExpression) String() string {
 		}
 		out += ">"
 	}
-	
+
 	out += "("
 
 	parts := []string{}
@@ -806,8 +811,9 @@ func (p *PropertyAssignmentStatement) String() string {
 
 // MapLiteral represents a dictionary/map expression.
 type MapLiteral struct {
-	Token lexer.Token // the '{' token
-	Pairs map[Expression]Expression
+	Token  lexer.Token
+	RBrace lexer.Token // the closing brace, so the literal's span covers it
+	Pairs  map[Expression]Expression
 }
 
 func (ml *MapLiteral) expressionNode()      {}

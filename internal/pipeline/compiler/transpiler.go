@@ -1626,7 +1626,7 @@ func (s *%s) cajaClone() *%s {
 
 			return buf.String(), nil
 		}
-		if s.TargetType != "" || s.Signature != nil {
+		if s.TargetType.Text() != "" || s.Signature != nil {
 			sym, ok := a.GetSymbol(s)
 			if ok {
 				goType := ctx.mapSymbolToGoType(sym)

@@ -35,8 +35,13 @@ type Analyzer struct {
 	expectedTypeStack   []symbol.Symbol
 	streamStageTypes    map[*ast.StreamPipeExpression]symbol.Symbol
 	memoBindingAllowed  bool
-	topLevelAwaitAsync map[ast.Node]bool
+	topLevelAwaitAsync  map[ast.Node]bool
 	resolvedCallArgs    map[*ast.CallExpression][]callArgSource
+	// typeDeclarations remembers where each named type was declared, giving
+	// go-to-definition on a type reference something to point at. Keyed by name
+	// rather than threaded through declareType because generic parameters and
+	// imported types have no declaration site in this file.
+	typeDeclarations map[string]typeDeclSite
 	// wildcardTypes is the type-scope mirror of ScopeEntry.WildcardModules:
 	// type name -> the bound module names that wildcard-imported it. A flat
 	// map is safe because imports are rejected inside blocks and forced to the
@@ -78,22 +83,23 @@ type Analyzer struct {
 func New(globalEnv *environment.Environment) *Analyzer {
 	globalScope := make(map[string]ScopeEntry)
 	analyzer := &Analyzer{
-		scopes:              []map[string]ScopeEntry{globalScope},
-		types:               []map[string]symbol.Symbol{make(map[string]symbol.Symbol)},
-		diagnosticErrors:    make([]ast.DiagnosticError, 0),
-		nodeSymbols:         make(map[ast.Node]symbol.Symbol),
-		nodeDefinitions:     make(map[ast.Node]lexer.Token),
-		nodeDefinitionFiles: make(map[ast.Node]string),
-		nodeImportedFiles:   make(map[ast.Node]string),
-		globalEnv:           globalEnv,
-		cache:               make(map[string]*Analyzer),
-		loading:             make(map[string]bool),
-		privates:            make(map[string]bool),
-		unwrappedPipeArgs:   make(map[ast.Node]symbol.Symbol),
-		expectedTypeStack:   make([]symbol.Symbol, 0),
-		streamStageTypes:    make(map[*ast.StreamPipeExpression]symbol.Symbol),
-		topLevelAwaitAsync:  make(map[ast.Node]bool),
-		resolvedCallArgs:    make(map[*ast.CallExpression][]callArgSource),
+		scopes:                 []map[string]ScopeEntry{globalScope},
+		types:                  []map[string]symbol.Symbol{make(map[string]symbol.Symbol)},
+		diagnosticErrors:       make([]ast.DiagnosticError, 0),
+		nodeSymbols:            make(map[ast.Node]symbol.Symbol),
+		nodeDefinitions:        make(map[ast.Node]lexer.Token),
+		nodeDefinitionFiles:    make(map[ast.Node]string),
+		nodeImportedFiles:      make(map[ast.Node]string),
+		globalEnv:              globalEnv,
+		cache:                  make(map[string]*Analyzer),
+		loading:                make(map[string]bool),
+		privates:               make(map[string]bool),
+		unwrappedPipeArgs:      make(map[ast.Node]symbol.Symbol),
+		expectedTypeStack:      make([]symbol.Symbol, 0),
+		streamStageTypes:       make(map[*ast.StreamPipeExpression]symbol.Symbol),
+		topLevelAwaitAsync:     make(map[ast.Node]bool),
+		resolvedCallArgs:       make(map[*ast.CallExpression][]callArgSource),
+		typeDeclarations:       make(map[string]typeDeclSite),
 		wildcardTypes:          make(map[string][]string),
 		importedTypes:          make(map[string]bool),
 		reportedAmbiguousTypes: make(map[string]bool),
@@ -232,9 +238,103 @@ func (a *Analyzer) GetDefinition(node ast.Node) (lexer.Token, string, bool) {
 	return tok, file, ok
 }
 
+// typeDeclSite is where a named type was written.
+type typeDeclSite struct {
+	Token    lexer.Token
+	FilePath string
+}
+
+// recordTypeDeclaration notes the source location of a type declaration.
+func (a *Analyzer) recordTypeDeclaration(name *ast.Identifier) {
+	if name == nil {
+		return
+	}
+	file := ""
+	if a.globalEnv != nil {
+		file = a.globalEnv.FileName
+	}
+	a.typeDeclarations[name.Value] = typeDeclSite{Token: name.Token, FilePath: file}
+
+	// The declaration's own name resolves to itself, exactly as a let/const binding does.
+	// Without this a type's declaring occurrence has no definition recorded, so
+	// find-references and rename started from the declaration would come back empty even
+	// though every reference to it resolves fine.
+	a.nodeDefinitions[name] = name.Token
+	if file != "" {
+		a.nodeDefinitionFiles[name] = file
+	}
+}
+
+// IsDeclaredType reports whether a name denotes a type declared in this module. Renaming
+// needs it because a type's declaring occurrence is a plain identifier, indistinguishable
+// from a variable by node shape alone, and Caja requires type names to be capitalised.
+func (a *Analyzer) IsDeclaredType(name string) bool {
+	_, ok := a.typeDeclarations[name]
+	return ok
+}
+
+// resolveTypeExpr resolves a positioned type annotation, additionally registering every
+// named type it mentions so the language server can answer on them.
+//
+// Type annotations used to be plain strings, so no type reference anywhere in the
+// language had a position and none of hover, go-to-definition, find-references or
+// semantic tokens could resolve one. Routing annotation resolution through here is what
+// connects `Money` in `let x: [Money]` back to where Money was declared.
+func (a *Analyzer) resolveTypeExpr(tok lexer.Token, te *ast.TypeExpr) (symbol.Symbol, bool) {
+	sym, ok := a.resolveTypeRef(tok, te.Text())
+	a.recordTypeRefs(te)
+	return sym, ok
+}
+
+// recordTypeRefs makes each named type inside an annotation individually resolvable.
+func (a *Analyzer) recordTypeRefs(te *ast.TypeExpr) {
+	if te == nil {
+		return
+	}
+	for _, ref := range te.Refs {
+		refSym, ok := a.resolveTypeRef(ref.Token, ref.Name)
+		if !ok {
+			continue
+		}
+		a.recordTypeRefUse(ref, refSym)
+	}
+}
+
+// recordTypeRefUse makes one type reference resolvable, pointing it at the declaration
+// of the type it names.
+func (a *Analyzer) recordTypeRefUse(ref *ast.TypeRef, sym symbol.Symbol) {
+	if ref == nil || sym == nil {
+		return
+	}
+	a.nodeSymbols[ref] = sym
+
+	if site, declared := a.typeDeclarations[ref.Name]; declared {
+		a.nodeDefinitions[ref] = site.Token
+		if site.FilePath != "" {
+			a.nodeDefinitionFiles[ref] = site.FilePath
+		}
+	}
+}
+
 // GetImportedModule returns the module path from which an identifier was imported, if any.
 func (a *Analyzer) GetImportedModule(node ast.Node) string {
 	return a.nodeImportedFiles[node]
+}
+
+// recordDeclarationName makes the identifier being bound resolvable in its own right.
+// Identifier *references* get their symbol when they resolve through the scope chain, but
+// a declaration's Name node is deliberately never analyzed as a reference — so without
+// this, hovering `x` in `let x = 5`, or invoking go-to-definition on it, answers with
+// nothing even though the name is the most obvious thing to ask about. Type aliases,
+// unions and constraints already record their own Name; this is the same step for
+// let/const bindings. The definition points at the name itself, which is what makes
+// go-to-definition idempotent once you have arrived at the declaration.
+func (a *Analyzer) recordDeclarationName(name *ast.Identifier, sym symbol.Symbol) {
+	if name == nil {
+		return
+	}
+	a.nodeSymbols[name] = sym
+	a.nodeDefinitions[name] = name.Token
 }
 
 // HasErrors returns true if any semantic errors were found.
@@ -584,7 +684,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 
 	for i, param := range n.Parameters {
 		var paramSymbol symbol.Symbol
-		if param.Type == "" {
+		if param.Type.Text() == "" {
 			if expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
 				paramSymbol = expectedFnType.ParamTypes()[i]
 			} else {
@@ -593,7 +693,7 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 			}
 		} else {
 			var ok bool
-			paramSymbol, ok = a.resolveTypeRef(n.Token, param.Type)
+			paramSymbol, ok = a.resolveTypeExpr(n.Token, param.Type)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", param.Type))
 				paramSymbol = symbol.AnySymbol()
@@ -611,10 +711,10 @@ func (a *Analyzer) analyzeFunctionLiteral(n *ast.FunctionLiteral) symbol.Symbol 
 	// fn<T>(x: T) -> T) before popping the scope those type parameters were
 	// registered into - popScope() also clears that scope's type registry.
 	var expectedReturnSymbol symbol.Symbol
-	if n.ReturnType != "" {
-		resolvedReturn, ok := a.resolveTypeRef(n.Token, n.ReturnType)
+	if n.ReturnType.Text() != "" {
+		resolvedReturn, ok := a.resolveTypeExpr(n.Token, n.ReturnType)
 		if !ok {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.ReturnType))
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.ReturnType.Text()))
 		}
 		expectedReturnSymbol = resolvedReturn
 	} else if expectedFnType != nil {
@@ -717,6 +817,9 @@ func (a *Analyzer) analyzeStructLiteral(n *ast.StructLiteral) symbol.Symbol {
 		a.reportError(n.Token, fmt.Sprintf("type error: '%s' is not a struct", n.StructName))
 		return symbol.AnySymbol()
 	}
+	// The constructed type is a reference like any other, so hovering or jumping from
+	// `Cat` in `Cat { ... }` resolves to where Cat was declared.
+	a.recordTypeRefUse(n.NameRef, structDef)
 
 	if len(n.TypeArguments) > 0 {
 		if len(n.TypeArguments) != len(structDef.TypeParameters) {
@@ -827,9 +930,9 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 
 	valType = symbol.AnySymbol()
 
-	if n.ValueType != "" {
-		if t, ok := a.resolveTypeRef(n.Token, n.ValueType); !ok {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+	if n.ValueType.Text() != "" {
+		if t, ok := a.resolveTypeExpr(n.Token, n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType.Text()))
 		} else {
 			explicitType = t
 			hasExplicitType = true
@@ -851,13 +954,13 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 
 		var paramTypes []symbol.Symbol
 		for i, param := range fnNode.Parameters {
-			if param.Type == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
+			if param.Type.Text() == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
 				paramTypes = append(paramTypes, expectedFnType.ParamTypes()[i])
-			} else if param.Type == "" {
+			} else if param.Type.Text() == "" {
 				// Type cannot be inferred from context, handled in function body analysis
 				paramTypes = append(paramTypes, symbol.AnySymbol())
 			} else {
-				typeName, ok := a.resolveTypeRef(n.Token, param.Type)
+				typeName, ok := a.resolveTypeExpr(n.Token, param.Type)
 				if !ok {
 					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
 				}
@@ -866,10 +969,10 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 		}
 
 		var returnType symbol.Symbol
-		if fnNode.ReturnType != "" {
-			resolvedReturnType, ok := a.resolveTypeRef(n.Token, fnNode.ReturnType)
+		if fnNode.ReturnType.Text() != "" {
+			resolvedReturnType, ok := a.resolveTypeExpr(n.Token, fnNode.ReturnType)
 			if !ok {
-				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
+				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType.Text()))
 			}
 			returnType = resolvedReturnType
 		} else if expectedFnType != nil {
@@ -929,6 +1032,7 @@ func (a *Analyzer) analyzeLetStatement(n *ast.LetStatement) symbol.Symbol {
 	}
 
 	a.declare(n.Name.Value, valType, false, n.Name.Token)
+	a.recordDeclarationName(n.Name, valType)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -947,8 +1051,8 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	a.checkNameAvailable(n.Token, n.Name.Value)
 
 	var expectedFnType *symbol.FunctionSymbol
-	if n.ValueType != "" {
-		if explicitType, ok := a.resolveTypeRef(n.Token, n.ValueType); ok {
+	if n.ValueType.Text() != "" {
+		if explicitType, ok := a.resolveTypeExpr(n.Token, n.ValueType); ok {
 			if fs, ok := explicitType.(*symbol.FunctionSymbol); ok {
 				expectedFnType = fs
 			}
@@ -962,12 +1066,12 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 
 		var paramTypes []symbol.Symbol
 		for i, param := range fnNode.Parameters {
-			if param.Type == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
+			if param.Type.Text() == "" && expectedFnType != nil && i < len(expectedFnType.ParamTypes()) {
 				paramTypes = append(paramTypes, expectedFnType.ParamTypes()[i])
-			} else if param.Type == "" {
+			} else if param.Type.Text() == "" {
 				paramTypes = append(paramTypes, symbol.AnySymbol())
 			} else {
-				typeName, ok := a.resolveTypeRef(n.Token, param.Type)
+				typeName, ok := a.resolveTypeExpr(n.Token, param.Type)
 				if !ok {
 					a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", param.Name, param.Type))
 				}
@@ -976,10 +1080,10 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 		}
 
 		var returnType symbol.Symbol
-		if fnNode.ReturnType != "" {
-			resolvedReturnType, ok := a.resolveTypeRef(n.Token, fnNode.ReturnType)
+		if fnNode.ReturnType.Text() != "" {
+			resolvedReturnType, ok := a.resolveTypeExpr(n.Token, fnNode.ReturnType)
 			if !ok {
-				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType))
+				a.reportError(n.Token, fmt.Sprintf("semantic error: function return type is not declared: '%s'", fnNode.ReturnType.Text()))
 			}
 			returnType = resolvedReturnType
 		}
@@ -1006,9 +1110,9 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 
 	valType = symbol.AnySymbol()
 
-	if n.ValueType != "" {
-		if t, ok := a.resolveTypeRef(n.Token, n.ValueType); !ok {
-			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType))
+	if n.ValueType.Text() != "" {
+		if t, ok := a.resolveTypeExpr(n.Token, n.ValueType); !ok {
+			a.reportError(n.Token, fmt.Sprintf("semantic error: variable '%s' type is not declared: '%s'", n.Name.Value, n.ValueType.Text()))
 		} else {
 			explicitType = t
 			hasExplicitType = true
@@ -1036,6 +1140,7 @@ func (a *Analyzer) analyzeConstStatement(n *ast.ConstStatement) symbol.Symbol {
 	}
 
 	a.declare(n.Name.Value, valType, true, n.Name.Token)
+	a.recordDeclarationName(n.Name, valType)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -1370,6 +1475,7 @@ func (a *Analyzer) analyzeTypeConstraintStatement(n *ast.TypeConstraintStatement
 
 	constraint := symbol.NewConstraintSymbol(n.Name.Value, baseType, n.Predicate)
 	a.declareType(n.Name.Value, constraint)
+	a.recordTypeDeclaration(n.Name)
 	a.nodeSymbols[n.BaseType] = baseType
 	a.nodeSymbols[n.Name] = constraint
 
@@ -1440,6 +1546,7 @@ func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
 
 	union := symbol.NewUnionSymbol(n.Name.Value, variants, a.globalEnv.FileName)
 	a.declareType(n.Name.Value, union)
+	a.recordTypeDeclaration(n.Name)
 	a.nodeSymbols[n.Name] = union
 
 	if n.IsPrivate {
@@ -1459,11 +1566,15 @@ func (a *Analyzer) analyzeUnionStatement(n *ast.UnionStatement) symbol.Symbol {
 func (a *Analyzer) analyzeIsExpression(n *ast.IsExpression) symbol.Symbol {
 	leftSym := a.analyze(n.Left)
 
-	variantSym, ok := a.findTypeSymbolInTypesRaw(n.TypeName)
+	variantSym, ok := a.findTypeSymbolInTypesRaw(n.TypeName.String())
 	if !ok {
 		a.reportError(n.Token, fmt.Sprintf("semantic error: undefined type '%s'", n.TypeName))
 		return symbol.AnySymbol()
 	}
+	// The narrowed-to type is a real reference, so make it hoverable and jumpable the
+	// same way an annotation's references are.
+	a.recordTypeRefUse(n.TypeName, variantSym)
+
 	variantStructDef, ok := variantSym.(*symbol.StructDefSymbol)
 	if !ok {
 		a.reportError(n.Token, fmt.Sprintf("type error: 'is' target '%s' must be a struct type", n.TypeName))
@@ -1503,7 +1614,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 		var paramTypes []symbol.Symbol
 
 		for _, pt := range n.Signature.ParamTypes {
-			paramSymbol, ok := a.resolveTypeRef(n.Token, pt)
+			paramSymbol, ok := a.resolveTypeExpr(n.Token, pt)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", pt))
 			}
@@ -1511,10 +1622,10 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 		}
 
 		var returnType symbol.Symbol
-		if n.Signature.ReturnType != "" {
-			resolvedReturn, ok := a.resolveTypeRef(n.Token, n.Signature.ReturnType)
+		if n.Signature.ReturnType.Text() != "" {
+			resolvedReturn, ok := a.resolveTypeExpr(n.Token, n.Signature.ReturnType)
 			if !ok {
-				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.Signature.ReturnType))
+				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.Signature.ReturnType.Text()))
 			}
 			returnType = resolvedReturn
 		}
@@ -1530,13 +1641,14 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 
 		// Pre-register the struct in the type registry to allow recursive definitions
 		a.declareType(n.Name.Value, aliasedSymbol)
+		a.recordTypeDeclaration(n.Name)
 
 		for _, field := range n.StructDefinition.Fields {
 			if _, exists := fields[field.Name.Value]; exists {
 				a.reportError(n.Token, fmt.Sprintf("semantic error: duplicate field '%s' in struct '%s'", field.Name.Value, n.Name.Value))
 				continue
 			}
-			fieldSym, ok := a.resolveTypeRef(n.Token, field.Type)
+			fieldSym, ok := a.resolveTypeExpr(n.Token, field.Type)
 			if !ok {
 				a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", field.Type))
 			}
@@ -1544,11 +1656,15 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 				Type:       fieldSym,
 				IsConstant: field.IsConstant,
 			}
+			// The field name is the obvious thing to hover in a struct body; without
+			// this it resolves to nothing, because a field declaration is never
+			// analyzed as an identifier reference.
+			a.recordDeclarationName(field.Name, fieldSym)
 		}
-	} else if n.TargetType != "" {
-		resolvedSymbol, ok := a.resolveTypeRef(n.Token, n.TargetType)
+	} else if n.TargetType.Text() != "" {
+		resolvedSymbol, ok := a.resolveTypeExpr(n.Token, n.TargetType)
 		if !ok {
-			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.TargetType))
+			a.reportError(n.Token, fmt.Sprintf("type error: cannot resolve type name for %s", n.TargetType.Text()))
 		}
 		aliasedSymbol = resolvedSymbol
 	}
@@ -1559,6 +1675,7 @@ func (a *Analyzer) analyzeTypeAliasStatement(n *ast.TypeAliasStatement) symbol.S
 	}
 
 	a.declareType(n.Name.Value, aliasedSymbol)
+	a.recordTypeDeclaration(n.Name)
 
 	if n.IsPrivate {
 		if len(a.scopes) > 1 {
@@ -2093,6 +2210,11 @@ func (a *Analyzer) resolveNamedCallArguments(n *ast.CallExpression, fnSymbol *sy
 			a.reportError(na.Token, fmt.Sprintf("type error: duplicate named argument '%s'", na.Name.Value))
 			ok = false
 			continue
+		}
+		// `f(width: 10)` — the label names a parameter, so hovering it should report
+		// that parameter's type rather than nothing.
+		if pos < len(fnSymbol.ParamTypes()) {
+			a.nodeSymbols[na.Name] = fnSymbol.ParamTypes()[pos]
 		}
 		seen[na.Name.Value] = true
 		// Naming an argument documents it; it does not license reordering the

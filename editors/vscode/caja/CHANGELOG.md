@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - Syntax highlighting for the new `active` (storage modifier) and `react` (control keyword) reactive-programming keywords.
+- Highlighting for the `union` and `is` keywords, for the `^`, `%`, `!`, `?`, `::` and `|`
+  operators, and for date literals (`'2024-01-01'`), none of which were recognised before.
+- Highlighting for string interpolation: the code inside `${...}` is now highlighted as
+  code rather than as part of the surrounding string.
+- Language server features surfaced by the editor: document outline and breadcrumbs,
+  folding, expand-selection, find all references, rename, document highlight, workspace
+  symbol search, semantic highlighting and quick fixes.
+- Settings: `caja.server.path` to point at a `caja` executable that is not on `PATH`, and
+  `caja.trace.server` for troubleshooting.
+- Commands: **Caja: Restart Language Server** and **Caja: Show Language Server Output**.
+- A file watcher for `**/*.caja`, so the server re-checks open files when a module they
+  import changes on disk.
+
+### Fixed
+- A failed server start is now reported with the path it tried and a link to the setting,
+  instead of failing silently — previously a missing `caja` binary just meant nothing
+  happened.
+- `from` is no longer highlighted as a keyword; Caja's lexer treats it as an ordinary
+  identifier.
+- Quotes no longer auto-close inside comments and strings.
+
+### Changed
+- The development-mode popup announcing the server path is now a line in the output
+  channel rather than a modal notification on every launch.
+- The Marketplace page now documents the extension rather than reproducing the CLI's
+  README.
 
 ## [0.1.2] - 2026-08-29
 ### Added

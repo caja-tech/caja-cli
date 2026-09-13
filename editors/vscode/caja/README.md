@@ -1,88 +1,55 @@
-# Caja CLI
+# Caja for Visual Studio Code
 
-[![NPM Version](https://img.shields.io/npm/v/@caja/cli?style=for-the-badge&logo=npm)](https://www.npmjs.com/package/@caja/cli) [![Official Docs](https://img.shields.io/badge/docs-cajalang.com-orange?style=for-the-badge)](https://www.cajalang.com)
+Language support for [Caja](https://cajalang.com): syntax highlighting plus a full language
+server.
 
-A command-line interface for the Caja language. The `caja` CLI allows you to execute `.caja` scripts, as well as encode and decode them into transportable token strings.
+## Features
 
-## Installation
+- **Diagnostics** as you type, and across files — editing a module re-checks the files that
+  import it.
+- **Hover** for types, functions, struct fields and type annotations.
+- **Go to definition** and **find all references**, including on type names.
+- **Rename**, with the declaration and every use updated together.
+- **Completion** for locals, parameters, struct fields, module members and keywords.
+- **Signature help**, including while the call is still being typed.
+- **Outline and breadcrumbs**, folding, and expand-selection.
+- **Workspace symbol search** across every `.caja` file in the folder.
+- **Semantic highlighting**, which distinguishes types from ordinary capitalised names,
+  marks standard-library modules, and colours the expressions inside string interpolation.
+- **Quick fixes** for the problems the analyzer already explains — capitalising a type
+  name, qualifying an ambiguous wildcard import, adding a missing `active`.
 
-You can install the Caja CLI globally using npm:
+## Requirements
 
-```bash
+The `caja` CLI must be installed and on your `PATH`:
+
+```sh
 npm install -g @caja/cli
 ```
 
-## Usage & Commands
+If it lives somewhere else, point the extension at it with `caja.server.path`.
 
-### 1. Run a Script
-Parse and evaluate a `.caja` script file to execute it.
+## Settings
 
-```bash
-caja run -f <file.caja>
-```
-- `-f, --file`: The path to the `.caja` script file.
-- `-e, --export` (Optional): File name to export log values to (e.g., `data.csv`).
+| Setting | Description |
+| --- | --- |
+| `caja.server.path` | Path to the `caja` executable. Empty means "use `PATH`". |
+| `caja.trace.server` | Log traffic between the editor and the server: `off`, `messages` or `verbose`. |
 
-### 2. Encode a Script
-Encode a `.caja` script file and its dependencies into a single base64-like token string.
+## Commands
 
-```bash
-caja encode -f <file.caja>
-```
-- `-f, --file`: The path to the script to encode.
+| Command | Description |
+| --- | --- |
+| `Caja: Restart Language Server` | Restart the server after upgrading the CLI, or if it stops responding. |
+| `Caja: Show Language Server Output` | Open the server's log. |
 
-### 3. Decode a Token
-Decode a token string back into its original `.caja` script modules and save them to a directory.
+## Troubleshooting
 
-```bash
-caja decode <token> -o <output_dir>
-```
-- `-o, --output`: Directory path to save the decoded scripts (use `-o .` for the current directory).
+If language features are missing, run **Caja: Show Language Server Output**. A server that
+failed to launch reports the path it tried there, and the usual cause is `caja` not being
+on `PATH`.
 
-### 4. Check Version
-Retrieve the currently installed version of the Caja CLI.
+## Contributing
 
-```bash
-caja --version
-```
-
-## Example Script
-
-::: tip
-Before running this script, make sure to install the std and query packages:
-
-npm install @caja/std
-npm install @caja/query
-:::
-
-Create a file named `test.caja`:
-
-```caja
-import "@caja/std"
-import "@caja/query"
-
-let isEven = fn(x: Number) -> Boolean {
-    return x % 2 == 0
-}
-
-let powerTwo = fn(x: Number) -> Number {
-    return x ^ 2
-}
-
-let add_numbers = fn(acc: Number, current: Number) -> Number {
-    return acc + current
-}
-
-let result = std.range(1, 10)
-    |> query.filter(isEven) 
-    |> query.map(powerTwo)
-    |> query.reduce(add_numbers, 0)
-
-return result
-```
-
-Run it using the CLI:
-
-```bash
-caja run -f test.caja
-```
+The extension lives in [caja-tech/caja-cli](https://github.com/caja-tech/caja-cli) under
+`editors/vscode/caja`; the language server is the same repository's `caja lsp` command.

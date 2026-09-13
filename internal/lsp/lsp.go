@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"caja-cli/internal/lsp/posmap"
 	"caja-cli/internal/pipeline/analyzer"
 	"caja-cli/internal/pipeline/analyzer/symbol"
 	"caja-cli/internal/pipeline/ast"
@@ -10,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -36,6 +38,10 @@ type CajaHandler struct {
 	workers  map[lsp.DocumentURI]chan context.Context
 	cancels  map[lsp.DocumentURI]context.CancelFunc
 	astCache map[lsp.DocumentURI]*DocumentState
+
+	// index is what the server knows about files the editor has not opened: what each
+	// declares, and which files import which.
+	index *workspaceIndex
 }
 
 func NewCajaHandler() *CajaHandler {
@@ -44,6 +50,7 @@ func NewCajaHandler() *CajaHandler {
 		workers:  make(map[lsp.DocumentURI]chan context.Context),
 		cancels:  make(map[lsp.DocumentURI]context.CancelFunc),
 		astCache: make(map[lsp.DocumentURI]*DocumentState),
+		index:    newWorkspaceIndex(),
 	}
 }
 
@@ -56,7 +63,14 @@ func Run(version string) error {
 	return srv.Run(context.Background(), server.RunStdio())
 }
 
-func (h *CajaHandler) Initialize(_ context.Context, _ *lsp.InitializeParams) (*lsp.InitializeResult, error) {
+func (h *CajaHandler) Initialize(_ context.Context, params *lsp.InitializeParams) (*lsp.InitializeResult, error) {
+	if params != nil {
+		h.index.setRoots(params)
+		// Scanning happens in the background: a large workspace takes long enough that
+		// blocking initialize would leave the editor waiting before it can send anything.
+		go h.index.scan()
+	}
+
 	return &lsp.InitializeResult{
 		ServerInfo: &lsp.ServerInfo{
 			Name:    lsName,
@@ -65,6 +79,14 @@ func (h *CajaHandler) Initialize(_ context.Context, _ *lsp.InitializeParams) (*l
 		Capabilities: lsp.ServerCapabilities{
 			CompletionProvider: &lsp.CompletionOptions{
 				TriggerCharacters: []string{".", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"},
+			},
+			// Every other capability is derived by the go-lsp server from the interfaces
+			// this handler satisfies. Semantic tokens are the exception: the legend names
+			// the token types and modifiers this server emits, and only the server knows
+			// them, so it has to be stated here.
+			SemanticTokensProvider: &lsp.SemanticTokensOptions{
+				Legend: semanticLegend(),
+				Full:   &lsp.SemanticTokensFull{},
 			},
 		},
 	}, nil
@@ -89,20 +111,7 @@ func (h *CajaHandler) DidOpen(_ context.Context, params *lsp.DidOpenTextDocument
 			go h.documentWorkerLoop(uri, ch)
 		}
 
-		ch := h.workers[uri]
-
-		if cancel, ok := h.cancels[uri]; ok {
-			cancel()
-		}
-
-		ctx, cancelFunc := context.WithCancel(context.Background())
-		h.cancels[uri] = cancelFunc
-
-		select {
-		case <-ch: // pop old context if full
-		default:
-		}
-		ch <- ctx
+		h.queueValidationLocked(uri)
 	}
 	h.mu.Unlock()
 	return err
@@ -113,19 +122,8 @@ func (h *CajaHandler) DidChange(_ context.Context, params *lsp.DidChangeTextDocu
 	_, err := h.docs.Change(params)
 	if err == nil {
 		uri := params.TextDocument.URI
-		if ch, ok := h.workers[uri]; ok {
-			if cancel, hasCancel := h.cancels[uri]; hasCancel {
-				cancel()
-			}
-
-			ctx, cancelFunc := context.WithCancel(context.Background())
-			h.cancels[uri] = cancelFunc
-
-			select {
-			case <-ch:
-			default:
-			}
-			ch <- ctx
+		if _, running := h.workers[uri]; running {
+			h.queueValidationLocked(uri)
 		}
 	}
 	h.mu.Unlock()
@@ -151,10 +149,60 @@ func (h *CajaHandler) DidClose(_ context.Context, params *lsp.DidCloseTextDocume
 	return nil
 }
 
+// queueValidationLocked schedules a fresh validation of a document, cancelling any pass
+// already in flight. The worker channel holds one context: a pending request is dropped
+// in favour of the newer one, so a burst of keystrokes costs one analysis, not a queue of
+// stale ones. Callers hold h.mu.
+func (h *CajaHandler) queueValidationLocked(uri lsp.DocumentURI) {
+	ch, running := h.workers[uri]
+	if !running {
+		return
+	}
+
+	if cancel, ok := h.cancels[uri]; ok {
+		cancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	h.cancels[uri] = cancel
+
+	select {
+	case <-ch: // drop the superseded request
+	default:
+	}
+	ch <- ctx
+}
+
+// requestValidation is queueValidationLocked for callers that do not already hold the
+// lock, such as the file-change notifications.
+func (h *CajaHandler) requestValidation(uri lsp.DocumentURI) {
+	h.mu.Lock()
+	h.queueValidationLocked(uri)
+	h.mu.Unlock()
+}
+
+// pathToURI builds a file URI from an on-disk path, escaping it properly. Concatenating
+// "file://" with a path breaks on spaces and non-ASCII characters.
+func pathToURI(path string) lsp.DocumentURI {
+	if path == "" {
+		return ""
+	}
+	u := url.URL{Scheme: "file", Path: path}
+	return lsp.DocumentURI(u.String())
+}
+
 func (h *CajaHandler) documentWorkerLoop(uri lsp.DocumentURI, ch chan context.Context) {
 	for ctx := range ch {
-		h.validateDocument(ctx, string(uri))
+		h.safeValidate(ctx, uri)
 	}
+}
+
+// safeValidate runs one validation pass with panic recovery scoped to this iteration, so
+// a parser or analyzer panic on half-typed source costs a single stale pass rather than
+// the whole worker. This goroutine sits outside the go-lsp transport's own recover, so
+// without this an uncaught panic here takes down the entire language server process.
+func (h *CajaHandler) safeValidate(ctx context.Context, uri lsp.DocumentURI) {
+	defer recoverWorker("validateDocument", uri)
+	h.validateDocument(ctx, string(uri))
 }
 
 func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
@@ -166,6 +214,8 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 		return
 	}
 
+	ix := posmap.New(text)
+
 	tknzr := lexer.New(text)
 	p := parser.New(tknzr)
 	prog := p.WithContext(ctx).Parse()
@@ -175,33 +225,30 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 
 	diagnostics := make([]lsp.Diagnostic, 0)
 	for _, err := range p.DiagnosticErrors() {
-		diagnostics = append(diagnostics, toLSPDiagnostic(err))
+		diagnostics = append(diagnostics, toLSPDiagnostic(ix, err))
 	}
 
-	var a *analyzer.Analyzer
+	filePath := uriToPath(uri)
+	globalEnv := environment.NewEnvironment(filepath.Dir(filePath), filePath, false)
+
+	a := analyzer.New(globalEnv)
+	a.WithContext(ctx).Run(prog)
+	if ctx.Err() != nil {
+		return
+	}
+
+	// Semantic errors are reported only when the file parsed. A broken parse produces
+	// cascading nonsense downstream, and burying the one real syntax error under it helps
+	// nobody. Analysis still runs, because hover and completion work off its symbol table.
 	if !p.HasErrors() {
-		filePath := uriToPath(uri)
-		baseDir := filepath.Dir(filePath)
-		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-		a = analyzer.New(globalEnv)
-		a.WithContext(ctx).Run(prog)
-		if ctx.Err() != nil {
-			return
-		}
-
 		for _, err := range a.DiagnosticErrors() {
-			diagnostics = append(diagnostics, toLSPDiagnostic(err))
-		}
-	} else {
-		filePath := uriToPath(uri)
-		baseDir := filepath.Dir(filePath)
-		globalEnv := environment.NewEnvironment(baseDir, filePath, false)
-		a = analyzer.New(globalEnv)
-		a.WithContext(ctx).Run(prog)
-		if ctx.Err() != nil {
-			return
+			diagnostics = append(diagnostics, toLSPDiagnostic(ix, err))
 		}
 	}
+
+	// Join the dependency graph, so an open file participates even if it was created
+	// after the workspace scan.
+	h.indexOpenDocument(filePath, prog)
 
 	// Safely cache the AST and Analyzer
 	h.mu.Lock()
@@ -219,35 +266,43 @@ func (h *CajaHandler) validateDocument(ctx context.Context, uri string) {
 	}
 }
 
-func toLSPDiagnostic(err ast.DiagnosticError) lsp.Diagnostic {
-	line := err.Token.Line
-	if line > 0 {
-		line-- // LSP lines are 0-indexed
-	}
-	col := err.Token.Column
-	if col > 0 {
-		col-- // LSP cols are 0-indexed
-	}
-
-	length := len(err.Token.Literal)
-	if length == 0 {
-		length = 1
-	}
-
+func toLSPDiagnostic(ix *posmap.LineIndex, err ast.DiagnosticError) lsp.Diagnostic {
 	severity := lsp.SeverityError
 
 	return lsp.Diagnostic{
-		Range: lsp.Range{
-			Start: lsp.Position{Line: line, Character: col},
-			End:   lsp.Position{Line: line, Character: col + length},
-		},
+		Range:    ix.TokenRange(err.Token),
 		Severity: &severity,
-		Source:   lsName,
-		Message:  err.Message,
+		// A stable code lets clients group, filter and search diagnostics, and it is what
+		// a quick fix keys off. It is derived from the message's own taxonomy prefix
+		// rather than threaded through the 200-plus sites that report one.
+		Code:    diagnosticCode(err.Message),
+		Source:  lsName,
+		Message: err.Message,
 	}
 }
 
-func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Hover, error) {
+// indexFor returns the coordinate index for a document, falling back to reading the file
+// from disk. The fallback matters for go-to-definition, which routinely targets a module
+// the editor has never opened — without it, a cross-file jump would land using the
+// *source* file's line lengths to interpret the *target* file's token columns.
+func (h *CajaHandler) indexFor(uri lsp.DocumentURI) *posmap.LineIndex {
+	h.mu.RLock()
+	text, ok := h.docs.Text(uri)
+	h.mu.RUnlock()
+
+	if !ok {
+		data, err := os.ReadFile(uriToPath(string(uri)))
+		if err != nil {
+			return posmap.New("")
+		}
+		text = string(data)
+	}
+	return posmap.New(text)
+}
+
+func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (res *lsp.Hover, err error) {
+	defer recoverInto("hover", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, ok := h.astCache[params.TextDocument.URI]
 	h.mu.RUnlock()
@@ -258,7 +313,8 @@ func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Ho
 	prog := state.Prog
 	a := state.Analyzer
 
-	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
+	byteCol := h.indexFor(params.TextDocument.URI).ByteColumn(params.Position)
+	node := FindNodeAtPosition(prog, params.Position.Line, byteCol)
 	if node == nil {
 		return nil, nil
 	}
@@ -275,7 +331,9 @@ func (h *CajaHandler) Hover(_ context.Context, params *lsp.HoverParams) (*lsp.Ho
 	}, nil
 }
 
-func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams) ([]lsp.Location, error) {
+func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams) (res []lsp.Location, err error) {
+	defer recoverInto("definition", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, ok := h.astCache[params.TextDocument.URI]
 	h.mu.RUnlock()
@@ -289,7 +347,8 @@ func (h *CajaHandler) Definition(_ context.Context, params *lsp.DefinitionParams
 	filePath := uriToPath(string(params.TextDocument.URI))
 	baseDir := filepath.Dir(filePath)
 
-	node := FindNodeAtPosition(prog, params.Position.Line, params.Position.Character)
+	byteCol := h.indexFor(params.TextDocument.URI).ByteColumn(params.Position)
+	node := FindNodeAtPosition(prog, params.Position.Line, byteCol)
 	if node == nil {
 		return nil, nil
 	}
@@ -334,7 +393,9 @@ func uriToPath(uri string) string {
 }
 
 // SignatureHelp provides signature information for a function call at the cursor position.
-func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelpParams) (*lsp.SignatureHelp, error) {
+func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelpParams) (res *lsp.SignatureHelp, err error) {
+	defer recoverInto("signatureHelp", params.TextDocument.URI, &res, &err)
+
 	h.mu.RLock()
 	state, stateOk := h.astCache[params.TextDocument.URI]
 	text, textOk := h.docs.Text(params.TextDocument.URI)
@@ -349,12 +410,8 @@ func (h *CajaHandler) SignatureHelp(_ context.Context, params *lsp.SignatureHelp
 	prog := state.Prog
 	a := state.Analyzer
 
-	if prog == nil {
-		fmt.Println("PROG IS NIL")
-		return nil, nil
-	}
-
-	callExpr := FindCallExpressionAtPosition(prog, params.Position.Line, params.Position.Character)
+	sigByteCol := h.indexFor(params.TextDocument.URI).ByteColumn(params.Position)
+	callExpr := FindCallExpressionAtPosition(prog, params.Position.Line, sigByteCol)
 	if callExpr == nil {
 		return nil, nil
 	}

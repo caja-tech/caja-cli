@@ -1,7 +1,7 @@
 {
   "name": "caja",
   "displayName": "caja",
-  "description": "Rich caja language support for Visual Studio Code",
+  "description": "Caja language support for Visual Studio Code: syntax highlighting and a full language server.",
   "version": "0.1.2",
   "icon": "profile_256x256.png",
   "publisher": "CajaTech",
@@ -43,12 +43,87 @@
         "scopeName": "source.caja",
         "path": "./syntaxes/caja.tmLanguage.json"
       }
+    ],
+    "commands": [
+      {
+        "command": "caja.restartServer",
+        "title": "Restart Language Server",
+        "category": "Caja"
+      },
+      {
+        "command": "caja.showOutput",
+        "title": "Show Language Server Output",
+        "category": "Caja"
+      }
+    ],
+    "configuration": {
+      "title": "Caja",
+      "properties": {
+        "caja.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `caja` executable used for the language server. Leave empty to use `caja` from your `PATH`.",
+          "scope": "machine-overridable"
+        },
+        "caja.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the traffic between VS Code and the Caja language server, for troubleshooting.",
+          "scope": "window"
+        }
+      }
+    },
+    "semanticTokenScopes": [
+      {
+        "language": "caja",
+        "scopes": {
+          "namespace": [
+            "entity.name.namespace.caja"
+          ],
+          "type": [
+            "entity.name.type.caja"
+          ],
+          "struct": [
+            "entity.name.type.struct.caja"
+          ],
+          "enum": [
+            "entity.name.type.enum.caja"
+          ],
+          "enumMember": [
+            "variable.other.enummember.caja"
+          ],
+          "interface": [
+            "entity.name.type.interface.caja"
+          ],
+          "typeParameter": [
+            "entity.name.type.parameter.caja"
+          ],
+          "parameter": [
+            "variable.parameter.caja"
+          ],
+          "variable": [
+            "variable.other.caja"
+          ],
+          "property": [
+            "variable.other.property.caja"
+          ],
+          "function": [
+            "entity.name.function.caja"
+          ]
+        }
+      }
     ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -b",
-    "watch": "tsc -b -w"
+    "watch": "tsc -b -w",
+    "package": "npx @vscode/vsce package"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
