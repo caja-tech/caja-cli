@@ -53,7 +53,7 @@ looks like.
 
 ## Install
 
-Neither package is published to npm yet. `caja init --type static-page` does scaffold a
+Neither package is published to npm yet. `caja init --type web-app` does scaffold a
 `package.json` declaring both and runs your package manager's install — but until publication
 that install can only fail (with a warning, not a fatal error), so a fresh project still needs a
 manual `node_modules` setup pointing at **both** packages:
@@ -92,9 +92,7 @@ closed `Variant` enum (`Info`/`Success`/`Warning`/`Danger` — an unknown one is
 error, not a typo that silently falls through).
 
 Event handlers are **not** in this list, and deliberately so: a theme has no opinion about an
-event. `onClick`/`onInput`/… take JavaScript built with @caja/js and come from
-@caja/ui; `onClick`/`onInput`/… take a Caja function and come from @caja/dom, which is the package
-that can attach one.
+event. They come from @caja/ui and take JavaScript built with @caja/js.
 
 **Prose and layout** — a structural element plus this theme's spacing/typography decision:
 `pageContent`, `sectionBody`, `stack`, `inlineRow`, `paragraph`, `leadText`, `mutedText`,

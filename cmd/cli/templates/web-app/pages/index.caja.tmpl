@@ -153,7 +153,7 @@ let docsPanel = stack() {
 	componentDoc(
 		"docSection(anchor, title, children)",
 		"A titled section with an id you can link to. Every numbered section of this page is one.",
-		"docSection(\"install\", \"Install\", [\n\tparagraph(\"A static-page project imports two packages.\")\n])",
+		"docSection(\"install\", \"Install\", [\n\tparagraph(\"A web-app project imports three packages.\")\n])",
 		docSection("demo-anchor", "A section", [paragraph("Its body goes here.")])
 	)
 	componentDoc(
@@ -271,8 +271,6 @@ let interactive = docSection("interactive", "Interactivity", [
 	codeSample("import js\n\nonClick([jsRawStmt(js.raw(\"alert('saved')\"))])"),
 	mutedText("js.raw's argument must be a string literal, because that is what puts the source in front of the validator while the compiler is still running. A script assembled at runtime could not be checked, so it is rejected rather than silently trusted. jsRawStmt is the only node that carries unescaped syntax, and it can only hold something js.raw produced."),
 	paragraph("There is one onX function per event, matching the onX set: onInput, onSubmit, onKeyDown, and so on. For JavaScript that is not one element's handler — a shared helper, some setup on load — scriptBlock takes the same statement list and emits a script element instead."),
-	subheading("The one that does not"),
-	paragraph("onClick and its siblings take a Caja function. Those need a runtime to attach them, which only a web-app build (compiled to WebAssembly, mounted with @caja/dom) has. Render one to a static page and it is dropped, with a warning at build time telling you so. The same component code is safe in both kinds of project; the handler simply does nothing in this one."),
 	mutedText("Neither kind of handler can read a variable from your Caja program. A script is text sent to a browser, and a Caja handler cannot close over an outer let either — Caja's purity rules forbid it. Read what you need from the page inside the handler.")
 ])
 

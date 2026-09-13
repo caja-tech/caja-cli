@@ -53,13 +53,13 @@ func runBuiltBinaryOnce(outBin, workDir string) error {
 	return nil
 }
 
-// staticPageAssetsDir is the folder a static-page project keeps the files
+// webAppAssetsDir is the folder a static-page project keeps the files
 // its pages reference (images, documents, ...). It is mirrored into
-// dist/<staticPageAssetsDir> on every build so `assets/logo.svg` in a page
+// dist/<webAppAssetsDir> on every build so `assets/logo.svg` in a page
 // resolves once dist/ is served.
-const staticPageAssetsDir = "assets"
+const webAppAssetsDir = "assets"
 
-// generateStaticPage is the single static-page generation path — `caja
+// generateWebApp is the single static-page generation path — `caja
 // build` and `caja serve` both call it, so the two can't drift apart the
 // way they had when each inlined runBuiltBinaryOnce itself. It runs the
 // freshly built generator binary once (its doc.write calls populate dist/)
@@ -69,18 +69,18 @@ const staticPageAssetsDir = "assets"
 // asset doesn't linger. Generated pages are deliberately NOT cleared: they
 // are the script's own doc.write output, not this command's to manage.
 // A project with no assets/ folder at all is left exactly as before.
-func generateStaticPage(outBin, projectDir string) error {
+func generateWebApp(outBin, projectDir string) error {
 	if err := runBuiltBinaryOnce(outBin, projectDir); err != nil {
 		return err
 	}
-	src := filepath.Join(projectDir, staticPageAssetsDir)
+	src := filepath.Join(projectDir, webAppAssetsDir)
 	if _, err := os.Stat(src); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to read %s: %w", src, err)
 	}
-	dst := filepath.Join(projectDir, project.StaticPageOutputDir, staticPageAssetsDir)
+	dst := filepath.Join(projectDir, project.OutputDir, webAppAssetsDir)
 	if err := os.RemoveAll(dst); err != nil {
 		return fmt.Errorf("failed to clear %s: %w", dst, err)
 	}

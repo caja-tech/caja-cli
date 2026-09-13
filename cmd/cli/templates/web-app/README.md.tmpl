@@ -1,30 +1,149 @@
 # {{.Name}}
 
-A Caja **web-app** project — `main.caja` imports the `browser` module and
-compiles to a WebAssembly binary that runs entirely client-side. The page
-itself is built as a View tree (`mount()`, from `@caja/dom`, walks it into
-live DOM nodes) rather than a hand-written HTML string — see `main.caja` for
-the pattern, and https://www.cajalang.com for more.
+A Caja **web-app** project — a progressive web app. `main.caja` runs once at
+build time and writes the whole app into `dist/` via the `doc` builtin
+module: HTML, CSS, JavaScript, a web app manifest and a service worker. The
+output is plain static files, installable and usable offline, with no
+runtime of Caja's in the browser.
+Every page is built as a View tree rather than a hand-written HTML string;
+see https://www.cajalang.com for more.
 
-Four packages, all imported by `main.caja`: `@caja/siriguela` is the theme
-(the components that carry the look), `@caja/ui` is the structural layer it
-is built on (the View tree, and the JavaScript event handlers), `@caja/js`
-builds that JavaScript, and `@caja/dom` is the renderer — which also owns
-the `onClick` family that takes a **Caja** function, since attaching one
-needs the Caja runtime this wasm build ships. siriguela does not re-export
-ui, so both are imported directly.
+## Layout
 
-`package.json` declares all three, and `caja init` runs your package
-manager's install for you. **None of them is published to npm yet**, though,
-so that install currently fails with a warning — until they are, link them
+```
+main.caja        the app builder: lists the pages, wraps each in the shared
+                 layout and navigation, and writes dist/*.html,
+                 dist/style.css, dist/manifest.webmanifest and dist/sw.js
+pages/           one .caja file per page, each exporting `page`
+  index.caja     the home page (a reference for every siriguela component)
+  about.caja     a second page, so there is something to navigate to
+assets/          images, documents, anything a page references
+dist/            the generated site — never edit it by hand
+```
+
+Every file here imports two libraries, both with Caja's wildcard-import
+feature, so every name is available bare rather than prefixed:
+
+```caja
+import * from "@caja/siriguela"   # the theme: card(), paragraph(), docSection()
+import * from "@caja/ui"          # the structural layer: Page, definePage, column()
+```
+
+siriguela is the theme — the palette and the components that carry the look.
+@caja/ui is what it is built on: the View tree, the site model (`Page`,
+`definePage`, `navLinks`), the event handlers, and the CSS-in-Caja APIs. The
+two export surfaces are disjoint, so importing both bare is collision-free.
+Reach for a themed component first; drop to @caja/ui for anything structural
+the theme doesn't wrap.
+
+**Adding a page:** create `pages/name.caja` exporting
+`let page = definePage(title: "Title", path: "name.html", content: content)`,
+import it in
+`main.caja` (`import "pages/name" as name`) and append `name.page` to the
+`site` list. The navigation, the layout and the writer all pick it up from
+that one list. A page module only *builds* its page; writing files is
+`main.caja`'s job — which is also why `caja run -f pages/name.caja` still
+works for a quick check while `caja run -f main.caja` is refused.
+
+**Assets:** put files in `assets/` and reference them as `assets/<name>` from
+a page (`image("assets/logo.svg", "Logo")`). Every build recreates
+`dist/assets/` from scratch, so a renamed or deleted asset disappears from
+the output too. Generated pages are *not* cleared: if you rename a page,
+delete its old `dist/*.html` yourself (or delete `dist/` entirely).
+
+**Interactivity:** a static page has no Caja runtime in the browser —
+`main.caja` ran at build time and produced HTML — so a Caja event handler
+(`onClick`) has nothing to attach it to and is dropped, with a warning at
+build time. Use the JavaScript handlers instead:
+
+```caja
+import * from "@caja/js"
+
+primaryButton("Run it")
+	|> onClick([
+		jsSetText(jsGetElementById("out"), jsStr("clicked"))
+	])
+```
+
+`@caja/js` builds JavaScript the way `@caja/ui` builds HTML — a tree,
+rendered to source at the end. It is correct by construction, and (unlike a
+hand-written string) it can depend on values your Caja program computed, so
+a page list or a label can cross into JavaScript as escaped, inert data.
+
+For JavaScript you would rather just write, the `js` builtin parses a literal
+at compile time and `jsRawStmt` drops it into a program:
+
+```caja
+import js
+
+onClick([jsRawStmt(js.raw("alert('saved')"))])
+```
+
+There is one `onX` per event (`onInput`, `onSubmit`, ...),
+and `scriptBlock` takes the same statement list for JavaScript that is not one
+element's handler. The home page's "Interactivity" section is a working
+example.
+
+**Styles:** siriguela emits inline styles for anything a single element can
+carry. Everything selector-based — a hover state, a pseudo-element, a media
+query, an element or attribute selector — needs a real stylesheet, and the
+theme owns it: `main.caja` writes `siteStylesheet()` to `dist/style.css` and
+that is the whole of the CSS in this project. There is no hand-written CSS
+string anywhere.
+
+To add rules of your own, @caja/ui's CSS-in-Caja APIs are all available here:
+`rule(...)` for element/combinator/attribute selectors, `media(...)` for
+responsive rules, `class(...)` + `variant(...)` for a class with pseudo-states,
+`keyframes(...)` for an animation, and `stylesheet(frames, rules, classes,
+queries)` to render the lot. They are built by the same modifier chain that
+styles a View, so a misspelled property is still a compile-time error.
+
+## Progressive web app
+
+`caja build` writes three things beyond the pages themselves:
+
+- **`manifest.webmanifest`** — name, colours, icons and `display: standalone`,
+  which is what lets a browser offer to install the app.
+- **`assets/icon-192.png` / `icon-512.png`** — the icons the manifest points
+  at. The 512 is marked `any maskable` so Android can crop it to its own
+  shape; `pages/`-level HTML also links the 192 as an `apple-touch-icon`,
+  because iOS ignores the manifest's icons for the home screen.
+- **`sw.js`** — a service worker that precaches every generated file on
+  install and serves them from cache afterwards, so the app works offline.
+
+The service worker is *generated*, not hand-written: `main.caja` builds it
+with `@caja/js` so its precache list comes from the same page list the rest
+of the build uses. Add a page and it is cached automatically — there is no
+second list to keep in step.
+
+Bump the cache name in `main.caja` when you want installed clients to
+discard the old files; `activate` deletes every cache that is not the
+current one.
+
+Two things to know while developing. A service worker only registers over
+HTTP(S), so `caja serve` is the way to test it — opening `dist/index.html`
+via `file://` silently skips registration. And once registered it will serve
+the *cached* copy, so a rebuild may appear to do nothing until you bump the
+cache name or use your browser's "update on reload".
+
+## Dependencies
+
+`package.json` declares both UI packages, and `caja init` runs your package
+manager's install for you. **Neither is published to npm yet**, though, so
+that install currently fails with a warning — until they are, link them
 manually into a `node_modules/` at or above this folder:
 
 ```
 node_modules/@caja/siriguela   ->  the theme
-node_modules/@caja/ui          ->  the structural layer
-node_modules/@caja/dom         ->  the renderer (mount/sync)
+node_modules/@caja/ui          ->  the structural layer it is built on
 node_modules/@caja/js          ->  the JavaScript builder @caja/ui uses
 ```
+
+Both are real, direct dependencies: this project imports @caja/ui itself, not
+only through the theme. siriguela does **not** re-export ui — every name it
+exports is its own component — which is why a page writes `docSection(...)`
+rather than assembling a `section` by hand, and why `Page`/`definePage` come
+from the import below it rather than from the theme.
 
 ## Development
 
@@ -32,8 +151,7 @@ node_modules/@caja/js          ->  the JavaScript builder @caja/ui uses
 caja serve
 ```
 
-Builds the project to wasm and serves it (with its HTML/JS harness) over
-HTTP for local development.
+Builds the project and serves `dist/` over HTTP for local development.
 
 ## Building
 
@@ -41,13 +159,10 @@ HTTP for local development.
 caja build
 ```
 
-Compiles `main.caja` to `{{.Name}}.wasm`, and writes `wasm_exec.js`,
-`{{.Name}}.html`, and `index.html` alongside it.
+Compiles `main.caja`, runs it once to (re)generate `dist/`, copies `assets/`
+into `dist/assets/`, and prints where the output landed.
 
 ## Deploying
 
-The build output directory is a self-contained static bundle
-(`{{.Name}}.wasm`, `wasm_exec.js`, `index.html`) — point any static file host
-(Netlify, GitHub Pages, S3 + CloudFront, nginx, ...) at it and visitors
-navigating to your domain will receive `index.html`, which loads and runs
-the wasm binary in their browser.
+`dist/` is a plain directory of static files — point any static file host
+(Netlify, GitHub Pages, S3 + CloudFront, nginx, ...) at it.

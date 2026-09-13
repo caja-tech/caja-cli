@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Reads and writes `cajaproj.yml`, the manifest a `caja init`-scaffolded project uses to declare its type (`static-page`, `http-api`, `web-app`), name, and entry file. Lets `caja build`/`run`/`serve`/`listen` detect what kind of project they're operating on when invoked without an explicit `--file`.
+Reads and writes `cajaproj.yml`, the manifest a `caja init`-scaffolded project uses to declare its type (`web-app`, `http-api`), name, and entry file. Lets `caja build`/`run`/`serve`/`listen` detect what kind of project they're operating on when invoked without an explicit `--file`.
 
 ## Integration
 

@@ -67,9 +67,6 @@ func NewRunCmd() (*cobra.Command, error) {
 			}
 			goCode = string(formattedCode)
 
-			if compiler.UsesBrowserModule(goCode) {
-				return fmt.Errorf("the browser module requires 'caja build' (it targets GOOS=js/GOARCH=wasm, which 'go run' can't execute); it can't be used with 'caja run'")
-			}
 			if compiler.UsesDocModule(goCode) {
 				return fmt.Errorf("the doc module requires 'caja build' ('caja run' executes inside a temporary directory that's discarded on exit, so anything doc.write wrote would be lost immediately); it can't be used with 'caja run'")
 			}

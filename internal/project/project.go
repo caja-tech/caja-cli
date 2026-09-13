@@ -19,19 +19,22 @@ import (
 type Type string
 
 const (
-	TypeStaticPage Type = "static-page"
-	TypeHTTPAPI    Type = "http-api"
-	TypeWebApp     Type = "web-app"
+	// TypeWebApp builds a progressive web app: HTML, CSS and JavaScript
+	// generated at build time into OutputDir, installable and offline-capable.
+	// It was called "static-page" until the wasm target was removed; there is
+	// no compatibility alias, so an older manifest must be updated by hand.
+	TypeWebApp  Type = "web-app"
+	TypeHTTPAPI Type = "http-api"
 )
 
 // ManifestFile is the conventional filename `caja init` writes and
 // resolveProjectContext-style lookups read, analogous to file.MAIN_FILE.
 const ManifestFile = "cajaproj.yml"
 
-// StaticPageOutputDir is the directory a static-page project's generator
-// binary writes into, relative to the project's entry file. Not yet
-// configurable via the manifest.
-const StaticPageOutputDir = "dist"
+// OutputDir is the directory a web-app project's generator binary writes
+// into, relative to the project's entry file. Not yet configurable via the
+// manifest.
+const OutputDir = "dist"
 
 // Manifest is cajaproj.yml's decoded shape.
 type Manifest struct {
@@ -43,11 +46,10 @@ type Manifest struct {
 	Entry string `yaml:"entry,omitempty"`
 }
 
-// Valid reports whether t is one of the three project types this CLI knows
-// about.
+// Valid reports whether t is one of the project types this CLI knows about.
 func (t Type) Valid() bool {
 	switch t {
-	case TypeStaticPage, TypeHTTPAPI, TypeWebApp:
+	case TypeWebApp, TypeHTTPAPI:
 		return true
 	default:
 		return false
@@ -82,7 +84,7 @@ func Load(dir string) (manifest *Manifest, found bool, err error) {
 	}
 
 	if !m.Type.Valid() {
-		return nil, false, fmt.Errorf("%s: invalid type %q (must be one of %q, %q, %q)", manifestPath, m.Type, TypeStaticPage, TypeHTTPAPI, TypeWebApp)
+		return nil, false, fmt.Errorf("%s: invalid type %q (must be %q or %q)", manifestPath, m.Type, TypeWebApp, TypeHTTPAPI)
 	}
 
 	return &m, true, nil

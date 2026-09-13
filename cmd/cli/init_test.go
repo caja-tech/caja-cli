@@ -13,7 +13,7 @@ func TestInitCmd_MissingName(t *testing.T) {
 	cmd, _ := NewInitCmd()
 	bufOut := new(bytes.Buffer)
 	cmd.SetOut(bufOut)
-	cmd.SetArgs([]string{"--type", "static-page"})
+	cmd.SetArgs([]string{"--type", "web-app"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -59,7 +59,7 @@ func TestInitCmd_RefusesNonEmptyDir(t *testing.T) {
 	}
 
 	cmd, _ := NewInitCmd()
-	cmd.SetArgs([]string{"--name", "demo", "--type", "static-page", "--dir", dir})
+	cmd.SetArgs([]string{"--name", "demo", "--type", "web-app", "--dir", dir})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -82,7 +82,7 @@ func TestInitCmd_DefaultDirDerivedFromName(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
 
 	cmd, _ := NewInitCmd()
-	cmd.SetArgs([]string{"--name", "my-app", "--type", "static-page"})
+	cmd.SetArgs([]string{"--name", "my-app", "--type", "web-app"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("expected init to succeed, got: %v", err)
@@ -136,8 +136,8 @@ func testInitScaffold(t *testing.T, projectType, name string) string {
 	return dir
 }
 
-func TestInitCmd_ScaffoldsStaticPage(t *testing.T) {
-	dir := testInitScaffold(t, "static-page", "demo-site")
+func TestInitCmd_ScaffoldsWebApp(t *testing.T) {
+	dir := testInitScaffold(t, "web-app", "demo-site")
 
 	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err != nil {
 		t.Errorf("expected .gitignore to exist: %v", err)
@@ -163,7 +163,7 @@ func TestInitCmd_ScaffoldsStaticPage(t *testing.T) {
 		t.Errorf("expected main.caja to be rendered with the project name, got:\n%s", mainCaja)
 	}
 
-	// The static-page scaffold is a small multi-page site: pages/ holds one
+	// The web-app scaffold is a small multi-page site: pages/ holds one
 	// module per page (rendered through text/template, so the project name
 	// must reach them too) and assets/ ships a real file — both live in
 	// NESTED template directories, which renderProjectTemplates has to
@@ -191,18 +191,6 @@ func TestInitCmd_ScaffoldsStaticPage(t *testing.T) {
 	}
 	if svg, err := os.ReadFile(filepath.Join(dir, "assets", "siriguela.svg")); err == nil && !strings.HasPrefix(string(svg), "<svg") {
 		t.Errorf("expected assets/siriguela.svg to be copied verbatim, got:\n%s", svg)
-	}
-}
-
-func TestInitCmd_ScaffoldsWebApp(t *testing.T) {
-	dir := testInitScaffold(t, "web-app", "demo-app")
-
-	mainCaja, err := os.ReadFile(filepath.Join(dir, "main.caja"))
-	if err != nil {
-		t.Fatalf("failed to read main.caja: %v", err)
-	}
-	if !strings.Contains(string(mainCaja), "import browser") {
-		t.Errorf("expected main.caja to import the browser module, got:\n%s", mainCaja)
 	}
 }
 
@@ -249,7 +237,7 @@ func TestInitCmd_HTTPAPIScaffoldsPackageJSON(t *testing.T) {
 	assertScaffoldPackageJSON(t, dir, "demo-api-pkg", `"@caja/acerola"`)
 }
 
-// TestInitCmd_StaticPageScaffoldsPackageJSON confirms the static-page
+// TestInitCmd_WebAppScaffoldsPackageJSON confirms the static-page
 // scaffold declares every package its templates import — the theme, the
 // structural layer underneath it, and the JS interop layer. The scaffold
 // reaches into @caja/ui directly (for Page/definePage and the event
@@ -258,20 +246,9 @@ func TestInitCmd_HTTPAPIScaffoldsPackageJSON(t *testing.T) {
 // imported by pages/index.caja rather than main.caja, which is exactly why
 // it is easy to drop from the manifest by accident: the resulting project
 // scaffolds and installs cleanly and only fails when that page is built.
-func TestInitCmd_StaticPageScaffoldsPackageJSON(t *testing.T) {
-	dir := testInitScaffold(t, "static-page", "demo-site-pkg")
-	assertScaffoldPackageJSON(t, dir, "demo-site-pkg", `"@caja/siriguela"`, `"@caja/ui"`, `"@caja/js"`)
-}
-
-// TestInitCmd_WebAppScaffoldsPackageJSON confirms the web-app scaffold
-// declares all four packages its main.caja imports: the theme, the
-// structural layer, the JS interop layer, and the DOM renderer. All four
-// are direct imports, so all four are direct dependencies — npm resolving
-// @caja/ui transitively through the other two is not enough to describe
-// what this project uses.
 func TestInitCmd_WebAppScaffoldsPackageJSON(t *testing.T) {
-	dir := testInitScaffold(t, "web-app", "demo-web-app-pkg")
-	assertScaffoldPackageJSON(t, dir, "demo-web-app-pkg", `"@caja/siriguela"`, `"@caja/ui"`, `"@caja/js"`, `"@caja/dom"`)
+	dir := testInitScaffold(t, "web-app", "demo-site-pkg")
+	assertScaffoldPackageJSON(t, dir, "demo-site-pkg", `"@caja/siriguela"`, `"@caja/ui"`, `"@caja/js"`)
 }
 
 // TestInitCmd_SkipInstallLeavesNoNodeModules confirms --skip-install
@@ -395,7 +372,7 @@ func TestScaffoldHasPackageJSON(t *testing.T) {
 // network nor depends on the npm registry's current state — the warning is
 // only reachable if installDependencies ran at all.
 func TestInitCmd_InstallGateFollowsScaffoldNotProjectType(t *testing.T) {
-	for _, projectType := range []string{"static-page", "web-app", "http-api"} {
+	for _, projectType := range []string{"web-app", "http-api"} {
 		t.Run(projectType, func(t *testing.T) {
 			dir, out := testInitScaffoldWithInstall(t, projectType, "demo-gate-"+projectType)
 
@@ -417,7 +394,7 @@ func TestInitCmd_SkipInstallSuppressesTheGate(t *testing.T) {
 	emptyPathDir := t.TempDir()
 	t.Setenv("PATH", emptyPathDir)
 
-	dir := testInitScaffold(t, "static-page", "demo-skip-gate")
+	dir := testInitScaffold(t, "web-app", "demo-skip-gate")
 
 	if !scaffoldHasPackageJSON(dir) {
 		t.Fatalf("expected the scaffold to contain a package.json, so this test isn't passing vacuously")

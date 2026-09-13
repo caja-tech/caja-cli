@@ -29,8 +29,9 @@ So this README is for two audiences: someone writing a theme, and someone who wa
 structural layer with no theme at all. If you are just building a site and are happy with the
 default look, [siriguela's README](../siriguela/README.md) is the one you want.
 
-Render the same tree as an HTML string (`static-page` projects) or mount it live in the DOM
-(`web-app` projects, via the separate [`@caja/dom`](../dom) package).
+`renderToString` turns the tree into HTML at build time. That is the only terminal: a generated
+page carries no Caja runtime, so everything this library produces is decided before anyone opens
+it.
 
 ## Install
 
@@ -64,14 +65,7 @@ dependency order. A component that needs a `Rule` has to be declared after the `
 
 Keeping the base function set in one file means it is fully visible in one place, with nothing
 held back behind an internal boundary — which is exactly what a theme author needs.
-## Quick start — `static-page`
-
-A `static-page` project only ever needs this package. `renderToString` has no browser
-dependency at all, so importing only `@caja/siriguela` (never `@caja/dom`) is what
-keeps `caja build` compiling a plain native binary instead of `wasm` — merely importing a module
-that contains any browser-touching code (even code nothing calls) forces the whole compiled
-binary into `wasm`-only mode, which is why `mount()`/`sync()` live in the separate
-`@caja/dom` package instead of here.
+## Quick start
 
 ```caja
 import "@caja/ui" as ui
@@ -85,28 +79,11 @@ let card = ui.view(ui.HTMLElement.Div)
 doc.write("dist/index.html", ui.renderToString(card))
 ```
 
-## Quick start — `web-app`
+Interactivity is JavaScript, built with [`@caja/js`](../js) and attached with the `onX` handlers
+below — see [Events](#events).
 
-A `web-app` project additionally needs [`@caja/dom`](../dom) for `mount()`
-— see that package's own README for why it's a separate package and the import-alias caveat its
-hyphenated name needs.
-
-```caja
-import "@caja/ui" as ui
-import "@caja/dom" as dom
-import browser
-
-let handleClick = fn() -> Nothing {
-	browser.alert("hi")
-}
-
-let panel = ui.view(ui.HTMLElement.Div)
-	|> ui.addChild(ui.button("Click me") |> ui.onClick(handleClick))
-
-dom.mount(panel, browser.getElementById("app"))
-```
-
-`caja init --type static-page` / `--type web-app` scaffold exactly this shape by default.
+`caja init --type web-app` scaffolds exactly this shape, plus the manifest, icons and service
+worker that make it installable.
 
 ## Component catalog
 
@@ -139,9 +116,8 @@ dom.mount(panel, browser.getElementById("app"))
   `option(value, label, selected)`, `select(options)`, `textArea(placeholder, rows)` — HTML's
   `checked`/`selected` are boolean-by-presence, so these just conditionally attach the attribute;
   no extra `View` state is needed
-- **Events**: one function per event, in two families — `onClick`/`onInput`/`onKeyDown`/… take a
-  Caja function (web-app builds), and `onClick`/`onInput`/… take JavaScript (static
-  pages). ~90 events each; see "Events" below
+- **Events**: `onClick`/`onInput`/`onKeyDown`/… — one per event, ~90 of them, each taking a
+  `[JsStmt]` from [`@caja/js`](../js); see "Events" below
 - **Terminal**: `renderToString(target) -> String`
 
 `View`, `Handler`, `Attr`, `Style`, `style(target, property, value)` and both public enums are
@@ -179,8 +155,8 @@ enum's members live in the enum's own namespace, reachable only through `HTMLEle
 
 ## Events
 
-This package's handlers take **JavaScript**, built with [`@caja/js`](../js), and there are 90 of
-them — one per event:
+Handlers take **JavaScript**, built with [`@caja/js`](../js), and there are 90 of them — one per
+event:
 
 ```caja
 button("Save") |> onClick([jsAlert(jsStr("saved"))])
@@ -189,39 +165,11 @@ button("Save") |> onClick([jsAlert(jsStr("saved"))])
 They are emitted as an inline event attribute, so the browser runs them with no runtime of ours
 involved. That means they work in **every** target: a static page, and a mounted web-app.
 
-The other kind of handler — one taking a Caja `fn() -> Nothing` — lives in
-[`@caja/dom`](../dom), not here:
+There is only one kind of handler. A generated page has no Caja runtime in it — `main.caja` ran at
+build time and produced files — so a Caja function could not be called from an event even in
+principle. The script is emitted as an inline event attribute and the browser runs it directly.
 
-| | takes | attached by | works in |
-|---|---|---|---|
-| `onClick`, `onInput`, … (**here**) | a `[JsStmt]` | the browser, as an inline attribute | every target |
-| `onClick`, `onInput`, … (**`@caja/dom`**) | a Caja `fn() -> Nothing` | `mount()` | `web-app` (wasm) only |
-
-**The names are identical on purpose** — `onClick` is `onClick`, and which one you get is which
-package you reached into. Wildcard-importing both and writing a bare `onClick` is a clear
-compile-time error, not a silent pick:
-
-```
-semantic error: ambiguous reference to 'onClick': wildcard-imported from 'ui' and 'dom'.
-Suggestion: qualify it (ui.onClick or dom.onClick)
-```
-
-So the usual shape is to wildcard-import this package and qualify the other:
-
-```caja
-import * from "@caja/ui"
-import "@caja/dom" as dom
-
-button("js")   |> onClick([jsAlert(jsStr("hi"))])            # JavaScript, every target
-button("caja") |> dom.onClick(fn() -> Nothing { ... })        # Caja code, wasm only
-```
-
-The split is by what makes the handler work. Running a Caja function in a browser needs a Caja
-runtime there, which only a wasm build ships — so those functions live next to the `mount()` that
-attaches them. A static page has no such runtime: `main.caja` ran at build time and produced HTML,
-so `renderToString` drops a Caja handler and says so with a `log.warn` at `caja build` time.
-
-Coverage is identical in both families, and is every element-attachable event: mouse, pointer,
+Coverage is every element-attachable event: mouse, pointer,
 touch, keyboard, form and input, focus, clipboard, drag-and-drop, scroll, loading,
 disclosure/dialog, media, animation, transition and slots. Window- and document-scoped events
 (`beforeunload`, `DOMContentLoaded`, `popstate`, `visibilitychange`, `online`) are deliberately
@@ -309,7 +257,7 @@ Different, and both correct:
 ## More components
 
 There is no JS runtime available while a `View` tree is being built — `renderToString` and
-`mount()` are the only two ways it ever becomes real HTML/DOM, and `onClick`/`onInput` are the
+`renderToString` is the only way it ever becomes real HTML, and the `onX` handlers are the
 only hook into either. So the components below are either plain structural/styling primitives, or
 lean on a native HTML behavior/CSS-only trick to get real open/closed/toggled interactivity with
 **zero JS**. Two ideas come up more than once, so they're explained here instead of per-component:
@@ -326,9 +274,8 @@ lean on a native HTML behavior/CSS-only trick to get real open/closed/toggled in
   (`tooltipStyles()`/`skeletonStyles()`/`spinnerStyles()`).
   **Prefer the Caja value**: fold it into your own `stylesheet()` call and the rules ship once, in
   the `.css` file, with no per-page `<style>` block and none of the `<`/`>`/`&` escaping
-  constraint. The `<style>` wrapper is for the quick case and for a `mount()`-only app with no
-  stylesheet at all — call it once anywhere in your page tree; calling it more than once is
-  harmless duplication, not an error.
+  constraint. The `<style>` wrapper is for the quick case — call it once anywhere in your page
+  tree; calling it more than once is harmless duplication, not an error.
 
 **Structural/styling** (no interactivity): `avatar(src, alt)`, `badge(label)`, `alert(children)`,
 `breadcrumb(items)`, `buttonGroup(children)`, `cardHeader/cardTitle/cardDescription/cardContent/
@@ -558,7 +505,7 @@ adjacent strings, and only the parameter names tell them apart:
 let page = ui.definePage(title: "About", path: "about.html", content: content)
 ```
 
-`caja init --type static-page` scaffolds exactly this shape (plus an `assets/` folder that
+`caja init --type web-app` scaffolds exactly this shape (plus an `assets/` folder that
 `caja build`/`serve` copy into `dist/assets/`). Two constraints the module system imposes: spell
 the `"@caja/ui"` import identically in every file (the specifier is the module cache key —
 two spellings compile the library twice, with two incompatible `Page` types), and don't define

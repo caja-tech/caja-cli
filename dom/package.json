@@ -1,9 +1,0 @@
-{
-  "name": "@caja/dom",
-  "version": "0.1.0",
-  "description": "mount() and sync() for @caja/ui View trees — the web-app renderer, kept in a separate package so a static-page project (renderToString only) never pulls in the browser/wasm build path.",
-  "main": "index.caja",
-  "dependencies": {
-    "@caja/ui": "0.1.0"
-  }
-}

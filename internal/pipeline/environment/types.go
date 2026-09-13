@@ -15,7 +15,6 @@ const (
 	DATE_OBJ         ObjectType = "Date"
 	INSTANT_OBJ      ObjectType = "Instant"
 	DURATION_OBJ     ObjectType = "Duration"
-	ELEMENT_OBJ      ObjectType = "Element"
 	SCRIPT_OBJ       ObjectType = "Script"
 	FUNCTION_OBJ     ObjectType = "Function"
 	BUILTIN_OBJ      ObjectType = "Builtin"

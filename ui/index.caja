@@ -2,6 +2,7 @@ import array
 import string
 import log
 import * from "@caja/js"
+import js
 
 # @caja/ui — the renderer-agnostic building blocks for generating HTML and
 # CSS from Caja: the View tree and its types, the view/attr/style
@@ -268,20 +269,18 @@ enum CSSProperty {
 # even where the wire name is abbreviated (DoubleClick = "dblclick").
 #
 # Public, and the single definition of the event set for the whole
-# ecosystem. @caja/dom's own handler functions take one of these, so the
-# list lives here — in the package both of them already depend on — rather
-# than being copied into each. A duplicated 90-member enum is exactly the
-# kind of thing that drifts.
+# ecosystem: the closed set of events the onX handlers below accept.
 #
-# Nothing in THIS package's public API takes a DOMEvent (on() is private,
-# and the named onX wrappers are the surface), so a consumer rarely names
-# the type. It is exported for the package that does.
+# Nothing in this package's public API takes a DOMEvent — on() is private,
+# and the named onX wrappers are the surface — so a consumer rarely names
+# the type. It is exported anyway, so one can be passed around or annotated
+# by code that builds handlers generically.
 #
 # Element events only. Window/document-scoped events (beforeunload,
 # DOMContentLoaded, popstate, hashchange, visibilitychange, online/offline)
 # are deliberately absent: on() attaches to the element a View becomes, so
-# one of those could never fire from here. Reach for browser.on directly
-# for those.
+# one of those could never fire from an element attribute. Attach those
+# yourself with a scriptBlock calling addEventListener.
 enum DOMEvent {
 	# Mouse
 	Click = "click",
@@ -394,40 +393,25 @@ enum DOMEvent {
 # 2. Core types
 # ---------------------------------------------------------------------
 
-# Handler defers event attachment to mount() (in the separate @caja/dom
-# package) — merely importing a module that contains any browser-touching
-# code forces the whole compiled binary into wasm-only mode, even if
-# nothing in the program actually calls it, so mount() can't live in this
-# same file; building a View must stay backend-agnostic, so nothing in this
-# package ever calls browser.on directly.
+# Handler is one event binding on a View: the event name, and the
+# JavaScript to run when it fires.
+#
+# The script is emitted by renderToString as an inline event attribute
+# (onclick='...'), so the browser runs it directly — there is no runtime of
+# ours in the page at all. That is the whole model: a Caja program builds
+# the page at build time and is gone by the time anyone clicks anything.
 #
 # `event` is a plain String, not a DOMEvent, even though on() only ever
 # puts a DOMEvent in it: an enum value widens to its backing type on the
-# way in, and @caja/dom reads this field straight back out into
-# browser.on's String parameter. Typing it as the enum would buy nothing
-# and force a narrowing that Caja (correctly) doesn't allow.
+# way in, and renderToString reads the field straight back out to build the
+# attribute name. Typing it as the enum would buy nothing and force a
+# narrowing that Caja (correctly) doesn't allow.
 #
-# Exactly one of the last two fields is meaningful, and which one decides
-# which terminal can honour the handler:
-#
-#   handler — a Caja function, attached by @caja/dom's mount(). Only a
-#             web-app build can run it; renderToString has no JS runtime to
-#             attach it to and drops it with a warning.
-#   script  — JavaScript source, emitted by renderToString as an inline
-#             event attribute (onclick='...'). Works in a static page,
-#             which is the whole point; mount() ignores it, since a
-#             wasm app attaches the real function instead.
-#
-# `script` is a String rather than a js.Script for one reason: once it is
-# in here it has already been through the validator, so the rest of this
-# file wants to treat it as ordinary text (measure it, interpolate it). The
-# type gate sits on the way IN, at the onX functions below, whose
-# parameter IS a js.Script — and js.raw is the only thing that produces
-# one. A Script widens to String, but a String never narrows to a Script,
-# so there is no way to smuggle an unvalidated string past them.
+# `script` is likewise a String rather than a js.Script: by the time it is
+# in here it has already been rendered from a @caja/js statement tree, and
+# the rest of this file wants to treat it as ordinary text.
 type Handler struct {
 	event String
-	handler fn() -> Nothing
 	script String
 }
 
@@ -435,7 +419,7 @@ type Handler struct {
 # Caja's "map" standard module has no way to enumerate an arbitrary map's
 # entries (no keys/values/entries/forEach, only containsKey/delete), so a
 # map-typed attrs/styles field could be written to but never walked by
-# mount()/renderToString(). Arrays sidestep that entirely (recursion over
+# renderToString(). Arrays sidestep that entirely (recursion over
 # array.head/tail already works, same idiom as everywhere else in this
 # file) and, as a real bonus and not just a workaround, give deterministic
 # render order — a Go map's iteration order is randomized, which would have
@@ -453,8 +437,7 @@ type Style struct {
 # View is the renderer-agnostic tree every component in this library
 # builds: a tag, its attributes and inline styles, its children, and any
 # deferred event handlers. Building or styling a View never touches a DOM
-# or a string buffer — only the terminals (renderToString here, mount() in
-# @caja/dom) do that, by walking this same tree two different ways.
+# or a string buffer — only renderToString does that, by walking the tree.
 #
 # children is typed [View] — an array of View's own type. This compiles
 # because the analyzer pre-registers a struct's name into the type registry
@@ -465,7 +448,7 @@ type Style struct {
 # `tag` is a String, not an HTMLElement, for the same reason Handler.event
 # is: view() validates the tag on the way in, customView() deliberately
 # doesn't, and both terminals want the raw name back out (renderToString
-# interpolates it, mount() hands it to browser.createElement). An empty tag
+# interpolates it into the markup). An empty tag
 # means "text node" to renderToString — see styles() in section 7, the one
 # thing in this file that builds one.
 type View struct {
@@ -689,46 +672,21 @@ const elementId = fn(target: View, value: String) -> View { return attr(target, 
 # A View records a handler; it never attaches one. Which kind of handler
 # you can use is decided by what will eventually walk the tree:
 #
-#   this package    JavaScript, via the onX functions below. The
-#                   handler is emitted as an inline event attribute, so the
-#                   browser runs it directly. Works in EVERY target — a
-#                   static page, and a mounted app.
+# A handler is JavaScript, built with @caja/js and emitted as an inline
+# event attribute. The browser runs it; nothing of ours is involved at
+# runtime, which is why it works in a page that has no Caja runtime in it —
+# and a generated page never does.
 #
-#   @caja/dom       a Caja function, via functions of the SAME names.
-#                   Attaching one needs mount() and a Caja runtime in the
-#                   browser, so it only means anything in a web-app (wasm)
-#                   build. That is why those live over there, next to the
-#                   mount() that makes them work, rather than here.
-#
-# The names match across the two packages on purpose: onClick is onClick,
-# and which one you get is which package you reached into. A file that
-# wildcard-imports both and then writes a bare `onClick` gets a clear
-# "ambiguous reference" error naming both packages — not a silent pick — so
-# the usual shape is to wildcard-import this package and qualify the other
-# (`import "@caja/dom" as dom`, then `dom.onClick`).
-#
-# renderToString drops a Caja handler it cannot honour and says so; it
-# emits a JavaScript one as an attribute. mount() attaches both.
-#
-# Handler carries both a `handler` and a `script` field for that reason:
-# this package writes the second, @caja/dom writes the first, and each
-# terminal reads what it can use.
+# A Caja function cannot be a handler: there would be nothing in the page
+# to call it. Read what you need from the DOM inside the script instead.
 # ---------------------------------------------------------------------
-
-# noopHandler fills the unused `handler` field of a script-only Handler.
-# A do-nothing function rather than a nullable one: a nullable function
-# field would push an unwrapping burden onto @caja/dom's mount() for a case
-# it already skips by checking `script`.
-private const noopHandler = fn() -> Nothing {
-	return
-}
 
 # on() is private, and so is DOMEvent: the named onX wrappers are
 # the whole public surface. The event is not a runtime choice — it is part
 # of which function you called.
 private const on = fn(target: View, event: DOMEvent, program: [JsStmt]) -> View {
 	let v = target
-	v.handlers = array.push(v.handlers, Handler{event: event, handler: noopHandler, script: renderProgram(program)})
+	v.handlers = array.push(v.handlers, Handler{event: event, script: renderProgram(program)})
 	return v
 }
 
@@ -769,10 +727,9 @@ private const on = fn(target: View, event: DOMEvent, program: [JsStmt]) -> View 
 #   - There is no event object plumbed through. An inline attribute can
 #     reference `event` directly if you write it, but nothing here helps.
 #
-# These work in a web-app build too — mount() applies them as attributes
-# just as renderToString does. Reach for @caja/dom's same-named functions
-# only when a handler must run actual Caja code, which needs the Caja
-# runtime a wasm build ships.
+# The script cannot see anything from the Caja program that generated it:
+# it is text sent to a browser. What it CAN do is be built from Caja values
+# at build time, which is what @caja/js is for.
 # ---------------------------------------------------------------------
 
 
@@ -1349,8 +1306,8 @@ const stylesheet = fn(frames: [Keyframes], rules: [Rule], classes: [Class], quer
 # parameter, so it isn't subject to the parameter-immutability rule
 # attr()/style()/addChild() work around with the rebind pattern).
 #
-# None of these know or care which terminal (renderToString above, mount()
-# in @caja/dom) will eventually walk the tree.
+# None of these know or care that renderToString is what will eventually
+# walk the tree.
 # ---------------------------------------------------------------------
 
 const text = fn(content: String) -> View {
@@ -1782,7 +1739,7 @@ const scrollArea = fn(maxHeightPx: String, child: View) -> View {
 # repeated on every page. The <style> wrapper exists for the quick case
 # (drop it anywhere in the page tree; calling it more than once is harmless
 # duplication, not an error — there's no singleton registry here, just an
-# ordinary View) and for a mount()-only app that has no stylesheet at all.
+# ordinary View).
 #
 # None of this is per-instance: an @keyframes block and a tooltip rule are
 # static, identical for every call site. Each instance itself
@@ -1960,11 +1917,9 @@ const combobox = fn(inputPlaceholder: String, datalistId: String, options: [View
 # string interpolation via the same caja_format_value helper log.info's
 # own arg formatting uses, so no caller-supplied array of id strings is
 # needed here). Deliberately does NOT implement auto-advance-focus between
-# boxes: that needs a live onInput handler calling browser.focus on the
-# next box, which only exists once @caja/dom's mount() has attached it —
-# exactly the "handlers re-fetch state fresh, wired at mount() time"
-# pattern section 5 establishes, not a shortcut taken here alone. Wire it
-# up in your own onInput handler; this function only builds the boxes.
+# boxes: that needs an onInput handler that moves focus, which is a few
+# lines of JavaScript rather than anything this function can bake in. Wire
+# it up with onInput yourself; this function only builds the boxes.
 private const inputOtpBoxes = fn(groupId: String, index: Number, length: Number) -> [View] {
 	if (index >= length) {
 		let noBoxes: [View] = []
@@ -2173,7 +2128,63 @@ const navLinks = fn(pages: [Page], currentPath: String) -> View {
 #     htmlDocument("Title", "style.css") { header content footer }
 # The <meta>/<link> elements are built with view() and void = true (the
 # textField/image pattern); this library's link() is an <a>, not this.
-const htmlDocument = fn(title: String, stylesheetHref: String, body: [View]) -> String {
+# ---------------------------------------------------------------------
+# Progressive web apps
+#
+# The four things that turn a generated page into an installable, offline
+# app: a manifest link, a theme colour, an iOS touch icon (Safari ignores
+# the manifest's icons for the home screen), and a script that registers a
+# service worker. None of them are magic — each is an ordinary head View or
+# a @caja/js program — but getting the set right is fiddly enough to be
+# worth naming once here.
+#
+# Pass the head Views to htmlDocument's `head` slot, and the registration
+# program to scriptBlock somewhere in the body.
+# ---------------------------------------------------------------------
+
+const manifestLink = fn(href: String) -> View {
+	let v = view(HTMLElement.Link) |> attr("rel", "manifest") |> attr("href", href)
+	v.void = true
+	return v
+}
+
+# themeColor tints the browser UI around the page — the address bar on
+# Android, the title bar of an installed window. Without it an installed app
+# looks visibly unfinished.
+const themeColor = fn(color: String) -> View {
+	let v = view(HTMLElement.Meta) |> attr("name", "theme-color") |> attr("content", color)
+	v.void = true
+	return v
+}
+
+# appleTouchIcon is not redundant with the manifest's icons: iOS does not
+# read them for the home-screen icon and falls back to a screenshot without
+# this link.
+const appleTouchIcon = fn(href: String) -> View {
+	let v = view(HTMLElement.Link) |> attr("rel", "apple-touch-icon") |> attr("href", href)
+	v.void = true
+	return v
+}
+
+# serviceWorkerRegistration is the program that installs the worker. The
+# feature test matters: without it, any browser lacking service workers
+# throws on the property access and takes the rest of the script with it.
+#
+# `in` is not one of @caja/js's operators, so the test goes through js.raw —
+# which parses it at compile time, so the escape hatch is still checked.
+const serviceWorkerRegistration = fn(scriptPath: String) -> [JsStmt] {
+	let register: [JsStmt] = [
+		jsExprStmt(jsCall(jsMember(jsMember(jsIdent("navigator"), "serviceWorker"), "register"), [jsStr(scriptPath)]))
+	]
+	let program: [JsStmt] = [jsIf(jsRaw(js.raw("\"serviceWorker\" in navigator")), register)]
+	return program
+}
+
+# htmlDocument wraps a body in a complete HTML document. `head` is an extra
+# slot for anything a document needs beyond the charset/viewport/title/
+# stylesheet basics — the PWA links above, an analytics tag, a preload.
+# body stays last so the trailing-block sugar still works.
+const htmlDocument = fn(title: String, stylesheetHref: String, head: [View], body: [View]) -> String {
 	let charset = view(HTMLElement.Meta) |> attr("charset", "utf-8")
 	charset.void = true
 	let viewport = view(HTMLElement.Meta) |> attr("name", "viewport") |> attr("content", "width=device-width, initial-scale=1")
@@ -2183,7 +2194,7 @@ const htmlDocument = fn(title: String, stylesheetHref: String, body: [View]) -> 
 	let titleEl = view(HTMLElement.Title)
 	titleEl.text = title
 	let headChildren: [View] = [charset, viewport, titleEl, stylesheetEl]
-	let headEl = view(HTMLElement.Head) |> addChildren(headChildren)
+	let headEl = view(HTMLElement.Head) |> addChildren(headChildren) |> addChildren(head)
 	let bodyEl = view(HTMLElement.Body) |> addChildren(body)
 	let pair: [View] = [headEl, bodyEl]
 	let html = view(HTMLElement.Html) |> attr("lang", "en") |> addChildren(pair)

@@ -322,14 +322,40 @@ private const siteFooter = fn(note: String) -> View {
 # It returns a String, never touching the filesystem — writing stays in
 # the consuming project's main.caja, which is what keeps a program that
 # imports this library runnable with `caja run`.
+# pwaHead is the head content that makes a generated site installable: the
+# manifest link, this theme's colour in the browser UI, and the iOS touch
+# icon Safari needs because it ignores the manifest's own icons.
+#
+# Separate from renderPage so a consumer can drop it (a plain site that is
+# not meant to be installable) or extend it, rather than having the theme
+# decide on their behalf.
+const pwaHead = fn() -> [View] {
+	let items: [View] = [
+		manifestLink("manifest.webmanifest"),
+		themeColor(siriguelaSkin),
+		appleTouchIcon("assets/icon-192.png")
+	]
+	return items
+}
+
+# renderPage turns a Page into the file you write: this theme's chrome
+# (navigation, footer), the PWA head, and the service-worker registration,
+# wrapped in a complete HTML document.
+#
+# The registration script goes last in the body so it runs after the page
+# content exists, and it is JavaScript rather than anything of Caja's —
+# there is no Caja runtime in a generated page.
 const renderPage = fn(current: Page, all: [Page], footerNote: String, stylesheetHref: String) -> String {
 	let shell: [View] = [
 		header([siteNav(all, current.path)]),
 		current.content,
 		siteFooter(footerNote)
 	]
-	let body: [View] = [mainEl(shell) |> className("page")]
-	return htmlDocument(current.title, stylesheetHref, body)
+	let body: [View] = [
+		mainEl(shell) |> className("page"),
+		scriptBlock(serviceWorkerRegistration("sw.js"))
+	]
+	return htmlDocument(current.title, stylesheetHref, pwaHead(), body)
 }
 
 # ---------------------------------------------------------------------

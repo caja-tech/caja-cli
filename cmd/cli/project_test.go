@@ -21,7 +21,7 @@ func chdir(t *testing.T, dir string) {
 
 func TestResolveProjectContext_ExplicitFileWinsOverManifest(t *testing.T) {
 	dir := t.TempDir()
-	manifest := &project.Manifest{Name: "demo", Type: project.TypeStaticPage, CajaVersion: "dev"}
+	manifest := &project.Manifest{Name: "demo", Type: project.TypeWebApp, CajaVersion: "dev"}
 	if err := project.Save(dir, manifest); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)
 	}

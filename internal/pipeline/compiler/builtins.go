@@ -18,17 +18,8 @@ var builtinModules = map[string]bool{
 	"map":     true,
 	"cast":    true,
 	"http":    true,
-	"browser": true,
 	"doc":     true,
 	"js":      true,
-}
-
-// UsesBrowserModule reports whether transpiled Go source came from a Caja
-// program that imports the browser module. The browser module compiles to
-// syscall/js calls, which only build under GOOS=js/GOARCH=wasm — callers use
-// this to auto-select that target instead of surfacing a raw Go build error.
-func UsesBrowserModule(goSource string) bool {
-	return strings.Contains(goSource, "\"syscall/js\"")
 }
 
 // UsesDocModule reports whether transpiled Go source came from a Caja
@@ -36,7 +27,7 @@ func UsesBrowserModule(goSource string) bool {
 // throwaway temp directory (see compiler.Run) that's removed the moment the
 // process exits — any files doc.write wrote would vanish along with it —
 // so callers use this to steer such scripts toward `caja build` instead,
-// the same way UsesBrowserModule steers wasm-only scripts away from 'run'.
+// so 'run' can point the user at 'caja build' instead.
 func UsesDocModule(goSource string) bool {
 	return strings.Contains(goSource, "caja_doc_write(")
 }
@@ -362,7 +353,7 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 
 			// inputExpr is the Go expression cast.to's logic below treats as
 			// "the plain input value" — normally just the argument itself,
-			// but a Nullable input (e.g. String? from browser.getAttribute)
+			// but a Nullable input (e.g. String? from map.get)
 			// is actually a *T pointer in Go (see mapSymbolToGoType's
 			// NullableSymbol case), which none of that logic understands: it
 			// would either get forwarded raw into fmt.Sprintf("%v", ...)
@@ -447,11 +438,9 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 			// the analyzer checked (analyzeJsRawFunction rejects anything that
 			// is not a literal), so a Script is just that string at runtime —
 			// no helper, no conversion, and deliberately NO ctx.usedModules
-			// entry. That last part is load-bearing: UsesBrowserModule picks
+			// entry, and nothing downstream needs one.
 			// the compile target by grepping the generated source for
-			// "syscall/js", so an import here would silently flip a
-			// static-page project to a wasm build that then fails when the
-			// generator step tries to run the binary natively.
+			// nothing downstream needs one.
 			return argStrs[0], nil
 		}
 
@@ -460,134 +449,6 @@ func transpileBuiltinCall(module string, fn string, args []ast.Expression, ctx *
 		case "write":
 			ctx.usedModules["doc_write"] = true
 			return fmt.Sprintf("caja_doc_write(%s, %s)", argStrs[0], argStrs[1]), nil
-		}
-
-	case "browser":
-		ctx.usedModules["syscall/js"] = true
-		switch fn {
-		case "log":
-			return fmt.Sprintf("js.Global().Get(\"console\").Call(\"log\", %s)", argStrs[0]), nil
-		case "alert":
-			return fmt.Sprintf("js.Global().Call(\"alert\", %s)", argStrs[0]), nil
-		case "getElementById":
-			return fmt.Sprintf("js.Global().Get(\"document\").Call(\"getElementById\", %s)", argStrs[0]), nil
-		case "createElement":
-			return fmt.Sprintf("js.Global().Get(\"document\").Call(\"createElement\", %s)", argStrs[0]), nil
-		case "appendChild":
-			return fmt.Sprintf("%s.Call(\"appendChild\", %s)", argStrs[0], argStrs[1]), nil
-		case "insertBefore":
-			return fmt.Sprintf("%s.Call(\"insertBefore\", %s, %s)", argStrs[0], argStrs[1], argStrs[2]), nil
-		case "removeElement":
-			return fmt.Sprintf("%s.Call(\"remove\")", argStrs[0]), nil
-		case "focus":
-			return fmt.Sprintf("%s.Call(\"focus\")", argStrs[0]), nil
-		case "blur":
-			return fmt.Sprintf("%s.Call(\"blur\")", argStrs[0]), nil
-		case "setStyle":
-			return fmt.Sprintf("%s.Get(\"style\").Call(\"setProperty\", %s, %s)", argStrs[0], argStrs[1], argStrs[2]), nil
-		case "setText":
-			return fmt.Sprintf("%s.Set(\"textContent\", %s)", argStrs[0], argStrs[1]), nil
-		case "setHTML":
-			return fmt.Sprintf("%s.Set(\"innerHTML\", %s)", argStrs[0], argStrs[1]), nil
-		case "getValue":
-			return fmt.Sprintf("%s.Get(\"value\").String()", argStrs[0]), nil
-		case "setValue":
-			return fmt.Sprintf("%s.Set(\"value\", %s)", argStrs[0], argStrs[1]), nil
-		case "getChecked":
-			return fmt.Sprintf("%s.Get(\"checked\").Bool()", argStrs[0]), nil
-		case "setChecked":
-			return fmt.Sprintf("%s.Set(\"checked\", %s)", argStrs[0], argStrs[1]), nil
-		case "querySelector":
-			// caja_browser_query_selector returns *js.Value (nil for "no
-			// match"), matching Element?'s Go type — see mapSymbolToGoType's
-			// NullableSymbol case.
-			ctx.usedModules["browser_query_selector"] = true
-			return fmt.Sprintf("caja_browser_query_selector(%s)", argStrs[0]), nil
-		case "querySelectorAll":
-			// caja_browser_query_selector_all returns *cajaArray[js.Value],
-			// matching Array<Element>'s Go type.
-			ctx.usedModules["browser_query_selector_all"] = true
-			ctx.usedModules["cow_array"] = true
-			return fmt.Sprintf("caja_browser_query_selector_all(%s)", argStrs[0]), nil
-		case "setAttribute":
-			return fmt.Sprintf("%s.Call(\"setAttribute\", %s, %s)", argStrs[0], argStrs[1], argStrs[2]), nil
-		case "getAttribute":
-			// caja_browser_get_attribute returns *string (nil for "attribute
-			// absent"), matching String?'s Go type — see mapSymbolToGoType's
-			// NullableSymbol case, same representation querySelector uses.
-			ctx.usedModules["browser_get_attribute"] = true
-			return fmt.Sprintf("caja_browser_get_attribute(%s, %s)", argStrs[0], argStrs[1]), nil
-		case "removeAttribute":
-			return fmt.Sprintf("%s.Call(\"removeAttribute\", %s)", argStrs[0], argStrs[1]), nil
-		case "addClass":
-			return fmt.Sprintf("%s.Get(\"classList\").Call(\"add\", %s)", argStrs[0], argStrs[1]), nil
-		case "removeClass":
-			return fmt.Sprintf("%s.Get(\"classList\").Call(\"remove\", %s)", argStrs[0], argStrs[1]), nil
-		case "toggleClass":
-			return fmt.Sprintf("%s.Get(\"classList\").Call(\"toggle\", %s)", argStrs[0], argStrs[1]), nil
-		case "hasClass":
-			return fmt.Sprintf("%s.Get(\"classList\").Call(\"contains\", %s).Bool()", argStrs[0], argStrs[1]), nil
-		case "on":
-			// A listener registered via js.FuncOf only keeps firing as long
-			// as the wasm instance's Go runtime is still scheduling, which
-			// requires main() to never return — see the time.Sleep keep-alive
-			// loop emitted at the end of main() below, gated on
-			// ctx.usedModules["syscall/js"] (i.e. on any browser-module usage
-			// at all, not specifically on "on" — see that comment for why,
-			// including why it's a sleep loop and not a bare select {}). The
-			// event name is passed straight through to addEventListener, so
-			// this one case covers "click"/"input"/"submit"/etc. with no
-			// Caja-side enumeration.
-			//
-			// The handler call is wrapped in caja_wrap_callback because this
-			// goroutine is dispatched via syscall/js.handleEvent, invisible to
-			// main()'s own deferred recover — an unrecovered panic in the
-			// handler would otherwise crash with a raw Go stack trace instead
-			// of our normal caja_panic_location()-formatted message.
-			ctx.usedModules["browser_wrap_callback"] = true
-			return fmt.Sprintf("%s.Call(\"addEventListener\", %s, js.FuncOf(func(this js.Value, args []js.Value) any {\ncaja_wrap_callback(func() { %s() })\nreturn nil\n}))", argStrs[1], argStrs[0], argStrs[2]), nil
-		case "fetch":
-			// caja_browser_fetch (injectBuiltinDependencies) is an ordinary
-			// blocking Go function from the caller's point of view — it
-			// bridges the JS fetch Promise onto a channel internally, so a
-			// plain call here already works synchronously; wrapping the call
-			// in `async` (unmodified Caja syntax, see AsyncExpression) is
-			// what makes it run concurrently, for free. DO NOT call this from
-			// inside a browser.on handler — see GetStandardModule's
-			// "fetch" comment for why that permanently freezes the page; use
-			// fetchThen there instead.
-			ctx.usedModules["browser_fetch"] = true
-			return fmt.Sprintf("caja_browser_fetch(%s)", argStrs[0]), nil
-		case "fetchThen":
-			// caja_browser_fetch_then is purely callback-driven (no blocking
-			// anywhere), which is what makes it safe to call from inside a
-			// browser.on handler where plain fetch is not — see
-			// GetStandardModule's "fetchThen" comment.
-			ctx.usedModules["browser_fetch_then"] = true
-			ctx.usedModules["browser_wrap_callback"] = true
-			return fmt.Sprintf("caja_browser_fetch_then(%s, func(body string) { %s(body) })", argStrs[0], argStrs[1]), nil
-		case "localStorageGet":
-			// caja_browser_local_storage_get returns *string (nil for "key
-			// never set"), matching String?'s Go type — same representation
-			// getAttribute uses.
-			ctx.usedModules["browser_local_storage_get"] = true
-			return fmt.Sprintf("caja_browser_local_storage_get(%s)", argStrs[0]), nil
-		case "localStorageSet":
-			return fmt.Sprintf("js.Global().Get(\"localStorage\").Call(\"setItem\", %s, %s)", argStrs[0], argStrs[1]), nil
-		case "localStorageRemove":
-			return fmt.Sprintf("js.Global().Get(\"localStorage\").Call(\"removeItem\", %s)", argStrs[0]), nil
-		case "setTimeout":
-			// The handler is wrapped in caja_wrap_callback for the same
-			// reason on's listener is — dispatched via syscall/js.handleEvent,
-			// invisible to main()'s own deferred recover. JS's own argument
-			// order is (callback, delay), so argStrs[1] (handler) and
-			// argStrs[0] (delayMs) are swapped going into Call. The returned
-			// timer id comes back as a JS number, read out via .Float() to
-			// match Number's Go type (float64).
-			ctx.usedModules["browser_wrap_callback"] = true
-			return fmt.Sprintf("js.Global().Call(\"setTimeout\", js.FuncOf(func(this js.Value, args []js.Value) any {\ncaja_wrap_callback(func() { %s() })\nreturn nil\n}), %s).Float()", argStrs[1], argStrs[0]), nil
-		case "clearTimeout":
-			return fmt.Sprintf("js.Global().Call(\"clearTimeout\", %s)", argStrs[0]), nil
 		}
 
 	case "http":
@@ -2285,7 +2146,7 @@ func caja_date_today() time.Time {
 		buf.WriteString(`
 // caja_time_parse wraps time.Parse, returning nil (Instant?'s Go type is
 // *time.Time) for a value that doesn't match layout, mirroring
-// caja_browser_query_selector's "nil on failure" Nullable convention rather
+// the "nil on failure" Nullable convention rather
 // than surfacing Go's error value (Caja has no error type here).
 func caja_time_parse(layout string, value string) *time.Time {
 	t, err := time.Parse(layout, value)
@@ -2484,202 +2345,12 @@ func caja_memo_hash(v any) uint64 {
 `)
 	}
 
-	if ctx.usedModules["browser_wrap_callback"] {
-		buf.WriteString(`
-// caja_wrap_callback runs fn with the same panic recovery and clean error
-// formatting main()'s own top-level recover uses. A goroutine dispatched to
-// service a JS callback (an addEventListener listener, or one of the fetch
-// Promise callbacks in caja_browser_fetch_then below) is invisible to
-// main()'s defer — an unrecovered panic there would otherwise crash with a
-// raw Go stack trace instead of a caja_panic_location()-formatted message.
-func caja_wrap_callback(fn func()) {
-	defer func() {
-		if r := recover(); r != nil {
-			if loc := caja_panic_location(); loc != "" {
-				fmt.Fprintf(os.Stderr, "error: %v\n    at %s\n", r, loc)
-			} else {
-				fmt.Fprintln(os.Stderr, "error:", r)
-			}
-			os.Exit(1)
-		}
-	}()
-	fn()
-}
-`)
-	}
 
-	if ctx.usedModules["browser_fetch"] {
-		buf.WriteString(`
-// caja_browser_fetch bridges JS's Promise-based fetch onto a plain blocking
-// Go call: two chained Promises (fetch's own, then the Response's .text())
-// both funnel into the same buffered channel, so exactly one value is ever
-// sent regardless of which stage settles first.
-//
-// Blocking on a channel like this is safe ONLY when called from a goroutine
-// that isn't itself nested inside a syscall/js.handleEvent dispatch (i.e.
-// Caja's top level, or an "async <expr>"-spawned goroutine that started
-// there) — confirmed via a minimal isolated repro that calling this (even
-// wrapped in async+unwrap) from inside a browser.on handler permanently
-// freezes the whole page: handleEvent, unlike wasm_exec.js's top-level
-// run(), is not async-aware, so a goroutine blocking while nested under it
-// can never be resumed. See browser.fetchThen (below) for the callback-driven
-// alternative that's safe from inside a handler, since it never blocks.
-func caja_browser_fetch(url string) string {
-	type fetchResult struct {
-		text string
-		err  string
-	}
-	resultCh := make(chan fetchResult, 1)
 
-	var thenResponse, thenText, catchErr js.Func
-	catchErr = js.FuncOf(func(this js.Value, args []js.Value) any {
-		msg := args[0].String()
-		if args[0].Type() == js.TypeObject {
-			if m := args[0].Get("message"); m.Type() == js.TypeString {
-				msg = m.String()
-			}
-		}
-		resultCh <- fetchResult{err: msg}
-		return nil
-	})
-	defer catchErr.Release()
 
-	thenText = js.FuncOf(func(this js.Value, args []js.Value) any {
-		resultCh <- fetchResult{text: args[0].String()}
-		return nil
-	})
-	defer thenText.Release()
 
-	thenResponse = js.FuncOf(func(this js.Value, args []js.Value) any {
-		args[0].Call("text").Call("then", thenText).Call("catch", catchErr)
-		return nil
-	})
-	defer thenResponse.Release()
 
-	js.Global().Call("fetch", url).Call("then", thenResponse).Call("catch", catchErr)
 
-	result := <-resultCh
-	if result.err != "" {
-		panic(fmt.Sprintf("fetch %q failed: %s", url, result.err))
-	}
-	return result.text
-}
-`)
-	}
-
-	if ctx.usedModules["browser_fetch_then"] {
-		buf.WriteString(`
-// caja_browser_fetch_then performs an HTTP GET the same way caja_browser_fetch
-// does, but purely through callbacks — nothing here ever blocks a goroutine,
-// which is what makes it safe to call from inside a browser.on handler
-// (unlike caja_browser_fetch, even wrapped in async+unwrap — see its comment
-// above). onSuccess runs through caja_wrap_callback so a panic inside the
-// Caja handler gets our normal clean error formatting; a network failure
-// panics the same way caja_browser_fetch does, also through
-// caja_wrap_callback since this runs on a handleEvent-dispatched goroutine
-// main()'s own recover never sees. Each js.Func is released as soon as it's
-// known which one fired (exactly one of thenText/catchErr ever does, since a
-// Promise settles once) rather than leaked, since fetchThen is meant to be
-// called repeatedly (e.g. once per click).
-func caja_browser_fetch_then(url string, onSuccess func(string)) {
-	var thenResponse, thenText, catchErr js.Func
-	catchErr = js.FuncOf(func(this js.Value, args []js.Value) any {
-		msg := args[0].String()
-		if args[0].Type() == js.TypeObject {
-			if m := args[0].Get("message"); m.Type() == js.TypeString {
-				msg = m.String()
-			}
-		}
-		thenResponse.Release()
-		thenText.Release()
-		catchErr.Release()
-		caja_wrap_callback(func() { panic(fmt.Sprintf("fetch %q failed: %s", url, msg)) })
-		return nil
-	})
-	thenText = js.FuncOf(func(this js.Value, args []js.Value) any {
-		thenResponse.Release()
-		thenText.Release()
-		catchErr.Release()
-		caja_wrap_callback(func() { onSuccess(args[0].String()) })
-		return nil
-	})
-	thenResponse = js.FuncOf(func(this js.Value, args []js.Value) any {
-		args[0].Call("text").Call("then", thenText).Call("catch", catchErr)
-		return nil
-	})
-
-	js.Global().Call("fetch", url).Call("then", thenResponse).Call("catch", catchErr)
-}
-`)
-	}
-
-	if ctx.usedModules["browser_query_selector"] {
-		buf.WriteString(`
-// caja_browser_query_selector wraps document.querySelector, returning nil
-// for "no match" (Element?'s Go type is *js.Value — see mapSymbolToGoType's
-// NullableSymbol case) rather than a zero/undefined js.Value, so a Caja
-// caller can null-check it directly instead of hitting a confusing panic
-// from calling a method on an undefined JS value.
-func caja_browser_query_selector(selector string) *js.Value {
-	el := js.Global().Get("document").Call("querySelector", selector)
-	if el.IsNull() {
-		return nil
-	}
-	return &el
-}
-`)
-	}
-
-	if ctx.usedModules["browser_query_selector_all"] {
-		buf.WriteString(`
-// caja_browser_query_selector_all wraps document.querySelectorAll, copying
-// the JS NodeList into a *cajaArray[js.Value] (Array<Element>'s Go type) —
-// unlike caja_browser_query_selector this is never nil: no match yields an
-// empty NodeList/array, matching JS's own querySelectorAll.
-func caja_browser_query_selector_all(selector string) *cajaArray[js.Value] {
-	nodeList := js.Global().Get("document").Call("querySelectorAll", selector)
-	n := nodeList.Get("length").Int()
-	els := make([]js.Value, n)
-	for i := 0; i < n; i++ {
-		els[i] = nodeList.Index(i)
-	}
-	return &cajaArray[js.Value]{Data: els}
-}
-`)
-	}
-
-	if ctx.usedModules["browser_get_attribute"] {
-		buf.WriteString(`
-// caja_browser_get_attribute wraps Element.getAttribute, returning nil for
-// "attribute absent" (String?'s Go type is *string — see mapSymbolToGoType's
-// NullableSymbol case) rather than an empty string, distinguishing that from
-// an attribute that's present but genuinely empty (e.g. alt="").
-func caja_browser_get_attribute(el js.Value, name string) *string {
-	if !el.Call("hasAttribute", name).Bool() {
-		return nil
-	}
-	v := el.Call("getAttribute", name).String()
-	return &v
-}
-`)
-	}
-
-	if ctx.usedModules["browser_local_storage_get"] {
-		buf.WriteString(`
-// caja_browser_local_storage_get wraps localStorage.getItem, returning nil
-// for "key never set" (String?'s Go type is *string — see
-// mapSymbolToGoType's NullableSymbol case) rather than an empty string,
-// distinguishing that from a key that's set to a genuinely empty string.
-func caja_browser_local_storage_get(key string) *string {
-	v := js.Global().Get("localStorage").Call("getItem", key)
-	if v.IsNull() {
-		return nil
-	}
-	s := v.String()
-	return &s
-}
-`)
-	}
 
 	if ctx.usedModules["doc_write"] {
 		buf.WriteString(`

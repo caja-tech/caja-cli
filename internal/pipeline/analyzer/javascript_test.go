@@ -302,9 +302,9 @@ func TestAcceptsStringArg(t *testing.T) {
 		{environment.MAP_OBJ, false},
 		{environment.NULL_OBJ, false},
 		{environment.DATE_OBJ, false},
-		// Element also erases to a non-string Go type and must not slip
+		// Instant also erases to a non-string Go type and must not slip
 		// through just because it is another opaque builtin type.
-		{environment.ELEMENT_OBJ, false},
+		{environment.INSTANT_OBJ, false},
 	}
 
 	for _, tt := range tests {

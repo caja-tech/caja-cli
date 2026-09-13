@@ -1,49 +1,138 @@
 import * from "@caja/siriguela"
 import * from "@caja/ui"
 import * from "@caja/js"
-import "@caja/dom" as dom
-import browser
+import doc
+import array
+import "pages/index" as home
+import "pages/about" as about
 
-# This scaffold builds the page as a View tree instead of a raw HTML
-# string — mount() walks it into live DOM nodes under #app.
+# main.caja is the site builder — the one file in this project that writes
+# anything. Each page under pages/ is a module exporting `page` (a Page:
+# title, output path, content); this file lists them and writes them out.
 #
-# @caja/siriguela is the theme: it gives you the components below. It is
-# built on @caja/ui, the structural layer — import that too whenever you
-# need a structural element or an event the theme doesn't wrap. See
-# https://www.cajalang.com for more.
-
-browser.log("{{.Name}} booted")
-
-# Two kinds of event handler. They share a NAME — onClick is onClick — and
-# differ only in which package you reached into, because they need
-# different things to work.
+# `caja build` compiles this file to a native binary and runs it once from
+# the project folder — which is why every path below is relative
+# ("dist/...") — and then copies assets/ into dist/assets/. `caja serve`
+# does the same and serves dist/.
 #
-# dom.onClick takes a CAJA function. Attaching it needs a Caja runtime in
-# the browser, which is exactly what this wasm build ships — so it lives in
-# @caja/dom, next to the mount() that attaches it. Render a View carrying
-# one to a static page and it is dropped, with a warning.
+# To add a page: create pages/name.caja exporting `page`, import it here,
+# and append it to `site`. The navigation, the shared layout and the
+# writer all pick it up from that one list.
 #
-# onClick (from @caja/ui) takes JavaScript built with @caja/js and
-# emits it as an inline attribute. It needs no runtime of ours, so it works
-# here AND in a static page. Reach for it unless the handler genuinely
-# needs to run Caja code.
-let cta = primaryButton("Click me")
-	|> dom.onClick(fn() -> Nothing {
-		browser.alert("Hello from {{.Name}}!")
-	})
+# Two libraries, both wildcard-imported so every name reads bare.
+# @caja/ui is the structural layer: the View tree, and the site model this
+# file is built on (Page, definePage, navLinks). @caja/siriguela is the
+# theme on top of it: renderPage wraps a page in the shared chrome
+# (navigation, footer) and a full HTML document, and siteStylesheet is the
+# theme's whole CSS. There is no hand-written HTML or CSS in this project.
+#
+# Spell each import identically in every file (here and in each page). The
+# specifier is the module cache key; two spellings would compile the same
+# library twice, with two incompatible Page types.
 
-# The same button, the other way — JavaScript instead of Caja. Note the
-# bare onClick here versus dom.onClick above: same name, different package.
-# (Wildcard-importing both packages and writing a bare onClick would be an
-# "ambiguous reference" error naming both, which is why @caja/dom is
-# imported qualified.) This one also works unchanged in a static page.
-let altCta = secondaryButton("Or click me")
-	|> onClick([jsAlert(jsStr("Hello from {{.Name}}, in JavaScript!"))])
+let site: [Page] = [home.page, about.page]
 
-let root = stack() {
-	pageHeading("{{.Name}}")
-	paragraph("Edit main.caja, then run 'caja build' to compile to wasm or 'caja serve' to run it locally.")
-	inlineRow([cta, altCta])
+# A const, not a let: writeSite is a const fn, and a module-level function
+# may read a module-level const but never a module-level let.
+const footerNote = "Built with siriguela. Every page under pages/ in {{.Name}} is written by the same loop in main.caja."
+
+# One doc.write per Page. Recursion is how Caja loops; this tail call
+# compiles to a plain loop.
+const writeSite = fn(remaining: [Page], all: [Page]) -> Nothing {
+	if (array.len(remaining) == 0) {
+		return
+	}
+	let current = array.head(remaining)
+	doc.write("dist/${current.path}", renderPage(current, all, footerNote, "style.css"))
+	return writeSite(array.tail(remaining), all)
 }
 
-dom.mount(root, browser.getElementById("app"))
+writeSite(site, site)
+doc.write("dist/style.css", siteStylesheet())
+
+# ---------------------------------------------------------------------
+# The progressive web app layer
+#
+# Three files turn the generated pages into an installable, offline app:
+# the manifest (what the browser shows when installing), the icons (copied
+# from assets/), and the service worker (what serves the app with no
+# network). All three are written here, next to the pages, because they all
+# depend on the same page list.
+# ---------------------------------------------------------------------
+
+# precacheList is every file the service worker should have available
+# offline: the pages, the stylesheet, the manifest and the icons. Built from
+# `site` rather than hardcoded, so adding a page keeps the app installable
+# without anyone remembering to update a second list.
+const precacheList = fn(pages: [Page]) -> [String] {
+	if (array.len(pages) == 0) {
+		# "." is the scope root. Without it, someone who installs the app and
+		# opens it offline at the bare origin requests "/", which no page
+		# path covers, and gets nothing — the pages alone are not enough.
+		let tail: [String] = [".", "style.css", "manifest.webmanifest", "assets/icon-192.png", "assets/icon-512.png"]
+		return tail
+	}
+	let head: [String] = [array.head(pages).path]
+	return array.join(head, precacheList(array.tail(pages)))
+}
+
+private const toJsStrings = fn(paths: [String]) -> [JsExpr] {
+	if (array.len(paths) == 0) {
+		let none: [JsExpr] = []
+		return none
+	}
+	let one: [JsExpr] = [jsStr(array.head(paths))]
+	return array.join(one, toJsStrings(array.tail(paths)))
+}
+
+# The service worker, built as a @caja/js tree rather than written as text.
+# Worth the ceremony for one reason: FILES below comes from the page list
+# above, so it can never drift from what the build actually produced.
+#
+# Strategy is precache-then-cache-first: install stores every file, activate
+# deletes caches from older builds, and fetch answers from the cache when it
+# can. Bump CACHE on a rebuild and the old one is dropped on next activate.
+const serviceWorker = fn(pages: [Page]) -> String {
+	let caches = jsIdent("caches")
+	let event = jsIdent("event")
+	let program: [JsStmt] = [
+		jsConst("CACHE", jsStr("{{.Name}}-v1")),
+		jsConst("FILES", jsArray(toJsStrings(precacheList(pages)))),
+		jsFunction("onInstall", ["event"], [
+			jsExprStmt(jsCall(jsMember(event, "waitUntil"), [
+				jsCall(jsMember(jsCall(jsMember(caches, "open"), [jsIdent("CACHE")]), "then"),
+					[jsArrow(["c"], jsCall(jsMember(jsIdent("c"), "addAll"), [jsIdent("FILES")]))])
+			]))
+		]),
+		jsFunction("dropIfStale", ["key"], [
+			jsReturn(jsTernary(jsEq(jsIdent("key"), jsIdent("CACHE")), jsNull(),
+				jsCall(jsMember(caches, "delete"), [jsIdent("key")])))
+		]),
+		jsFunction("onActivate", ["event"], [
+			jsExprStmt(jsCall(jsMember(event, "waitUntil"), [
+				jsCall(jsMember(jsCall(jsMember(caches, "keys"), []), "then"),
+					[jsArrow(["keys"], jsCall(jsMember(jsIdent("Promise"), "all"),
+						[jsCall(jsMember(jsIdent("keys"), "map"), [jsIdent("dropIfStale")])]))])
+			]))
+		]),
+		jsFunction("respond", ["request"], [
+			jsReturn(jsCall(jsMember(jsCall(jsMember(caches, "match"), [jsIdent("request")]), "then"),
+				[jsArrow(["hit"], jsOr(jsIdent("hit"), jsCall(jsIdent("fetch"), [jsIdent("request")])))]))
+		]),
+		jsFunction("onFetch", ["event"], [
+			jsExprStmt(jsCall(jsMember(event, "respondWith"),
+				[jsCall(jsIdent("respond"), [jsMember(event, "request")])]))
+		]),
+		jsExprStmt(jsCall(jsMember(jsIdent("self"), "addEventListener"), [jsStr("install"), jsIdent("onInstall")])),
+		jsExprStmt(jsCall(jsMember(jsIdent("self"), "addEventListener"), [jsStr("activate"), jsIdent("onActivate")])),
+		jsExprStmt(jsCall(jsMember(jsIdent("self"), "addEventListener"), [jsStr("fetch"), jsIdent("onFetch")]))
+	]
+	return renderProgram(program)
+}
+
+# The web app manifest. Plain JSON: it is data the browser reads, not code,
+# so there is nothing for a builder to make safer.
+const manifest = "{\n  \"name\": \"{{.Name}}\",\n  \"short_name\": \"{{.Name}}\",\n  \"start_url\": \".\",\n  \"scope\": \".\",\n  \"display\": \"standalone\",\n  \"background_color\": \"#FBF3E6\",\n  \"theme_color\": \"#7A2048\",\n  \"icons\": [\n    { \"src\": \"assets/icon-192.png\", \"sizes\": \"192x192\", \"type\": \"image/png\" },\n    { \"src\": \"assets/icon-512.png\", \"sizes\": \"512x512\", \"type\": \"image/png\", \"purpose\": \"any maskable\" }\n  ]\n}\n"
+
+doc.write("dist/manifest.webmanifest", manifest)
+doc.write("dist/sw.js", serviceWorker(site))

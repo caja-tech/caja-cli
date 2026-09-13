@@ -47,9 +47,6 @@ func resolveOutputBin(filePath, targetOS, targetArch, hostOS, hostArch string) (
 	if resolvedOS == "windows" && !strings.HasSuffix(outBin, ".exe") {
 		outBin += ".exe"
 	}
-	if resolvedOS == "js" && !strings.HasSuffix(outBin, ".wasm") {
-		outBin += ".wasm"
-	}
 	return outBin, resolvedOS, resolvedArch, crossCompiling, nil
 }
 
@@ -121,41 +118,6 @@ func NewBuildCmd() (*cobra.Command, error) {
 			if err != nil {
 				return fmt.Errorf("failed to retrieve 'arch' flag: %w", err)
 			}
-			isWebApp := manifest != nil && manifest.Type == project.TypeWebApp
-			if targetOS == "" && targetArch == "" {
-				if manifest != nil {
-					// A declared project type alone determines the kind of
-					// output `caja build` produces once one exists — wasm +
-					// browser harness for web-app, a plain native binary for
-					// static-page/http-api — regardless of whether the
-					// transpiled code happens to reference browser.* anywhere.
-					// This matters because merely IMPORTING a module that
-					// contains browser-touching code (even a function nothing
-					// in the program ever calls) makes UsesBrowserModule below
-					// return true too: cross-module transpilation emits every
-					// top-level statement of an imported module unconditionally,
-					// not just the ones actually used. Without this branch, a
-					// static-page project that merely imports such a module
-					// would get compiled to wasm and then crash outright
-					// ("exec format error") when the static-page build path
-					// tries to run that wasm binary as a native generator —
-					// confirmed directly. The heuristic below is only a
-					// fallback for when there's no declared type to consult at
-					// all.
-					if isWebApp {
-						targetOS, targetArch = "js", "wasm"
-					}
-				} else if compiler.UsesBrowserModule(goCode) {
-					// No declared project type (a standalone script compiled
-					// via --file with no cajaproj.yml) — the browser module
-					// compiles to syscall/js, which only builds under
-					// GOOS=js/GOARCH=wasm, so fall back to sniffing the
-					// transpiled output for it rather than letting `go build`
-					// fail with a raw "build constraints exclude all Go files"
-					// error on the host platform.
-					targetOS, targetArch = "js", "wasm"
-				}
-			}
 			outBin, resolvedOS, resolvedArch, crossCompiling, err := resolveOutputBin(filePath, targetOS, targetArch, runtime.GOOS, runtime.GOARCH)
 			if err != nil {
 				return err
@@ -182,38 +144,11 @@ func NewBuildCmd() (*cobra.Command, error) {
 				return err
 			}
 
-			if resolvedOS == "js" {
-				htmlPath, err := compiler.WriteBrowserHarness(outBin)
-				if err != nil {
-					return fmt.Errorf("failed to write browser test harness: %w", err)
-				}
-				fmt.Printf("Wrote browser test harness at %s (serve %s over HTTP and open %s in a browser)\n", htmlPath, filepath.Dir(htmlPath), filepath.Base(htmlPath))
-
-				if isWebApp && filepath.Base(htmlPath) != "index.html" {
-					// A web-app project's build output should be servable at a
-					// bare domain root by any static host with zero extra
-					// configuration — most static hosts default to serving
-					// index.html for "/". WriteBrowserHarness always names the
-					// harness after the binary (e.g. main.html), so mirror it
-					// under index.html too rather than renaming/duplicating the
-					// general-purpose harness helper's naming convention.
-					indexPath := filepath.Join(filepath.Dir(htmlPath), "index.html")
-					htmlBytes, readErr := os.ReadFile(htmlPath)
-					if readErr != nil {
-						return fmt.Errorf("failed to read browser test harness for index.html: %w", readErr)
-					}
-					if err := os.WriteFile(indexPath, htmlBytes, 0644); err != nil {
-						return fmt.Errorf("failed to write index.html: %w", err)
-					}
-					fmt.Printf("Wrote %s (point any static host at %s to serve this in production)\n", indexPath, filepath.Dir(indexPath))
-				}
-			}
-
-			if manifest != nil && manifest.Type == project.TypeStaticPage {
-				if err := generateStaticPage(outBin, filepath.Dir(filePath)); err != nil {
+			if manifest != nil && manifest.Type == project.TypeWebApp {
+				if err := generateWebApp(outBin, filepath.Dir(filePath)); err != nil {
 					return err
 				}
-				fmt.Printf("Wrote static output to %s\n", filepath.Join(filepath.Dir(filePath), project.StaticPageOutputDir))
+				fmt.Printf("Wrote static output to %s\n", filepath.Join(filepath.Dir(filePath), project.OutputDir))
 			}
 
 			fmt.Printf("Successfully built %s\n", outBin)

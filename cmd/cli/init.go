@@ -179,7 +179,7 @@ func NewInitCmd() (*cobra.Command, error) {
 			}
 			projectType := project.Type(typeFlag)
 			if !projectType.Valid() {
-				return fmt.Errorf("invalid --type %q: must be one of %q, %q, %q", typeFlag, project.TypeStaticPage, project.TypeHTTPAPI, project.TypeWebApp)
+				return fmt.Errorf("invalid --type %q: must be one of %q or %q", typeFlag, project.TypeWebApp, project.TypeHTTPAPI)
 			}
 
 			targetDir, err := cmd.Flags().GetString("dir")

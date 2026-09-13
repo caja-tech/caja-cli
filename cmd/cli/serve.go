@@ -4,6 +4,7 @@ import (
 	"caja-cli/internal/pipeline/compiler"
 	"caja-cli/internal/project"
 	"fmt"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"runtime"
@@ -11,57 +12,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// buildBrowserPageServer builds filePath for the browser (GOOS=js/GOARCH=wasm
-// — the only target its generated syscall/js calls can build under, same
-// auto-detection cmd/cli/build.go uses but required here rather than
-// optional, since there's nothing to serve for a non-browser script), writes
-// its test harness (wasm_exec.js + HTML loader) alongside the binary via
-// compiler.WriteBrowserHarness, and returns an *http.Server (constructed,
-// not yet listening) rooted at that directory plus the URL of the harness
-// page to open. Split out from NewServeCmd's RunE so tests can drive the
-// server's lifecycle directly (start it on a known port, hit it, shut it
-// down) instead of going through Cobra or blocking forever on
-// ListenAndServe.
-func buildBrowserPageServer(filePath string, port int) (server *http.Server, url string, err error) {
-	goCode, err := transpileCajaFile(filePath)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if !compiler.UsesBrowserModule(goCode) {
-		return nil, "", fmt.Errorf("'%s' doesn't use the browser module, so there's nothing to serve — use 'caja run' or 'caja build' instead", filePath)
-	}
-
-	outBin, _, _, _, err := resolveOutputBin(filePath, "js", "wasm", runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if err := compiler.Compile(goCode, outBin, compiler.CompileOptions{GOOS: "js", GOARCH: "wasm"}); err != nil {
-		return nil, "", err
-	}
-
-	htmlPath, err := compiler.WriteBrowserHarness(outBin)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to write browser test harness: %w", err)
-	}
-
-	dir := filepath.Dir(htmlPath)
-	server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: http.FileServer(http.Dir(dir)),
-	}
-	url = fmt.Sprintf("http://localhost:%d/%s", port, filepath.Base(htmlPath))
-	return server, url, nil
-}
-
-// buildStaticPageServer builds filePath as a static-page project: a native
+// buildWebAppServer builds filePath as a static-page project: a native
 // compile (no GOOS/GOARCH override, unlike buildBrowserPageServer), then
 // runs the resulting generator binary once so its doc.write calls populate
 // the project's dist/ directory, then returns a plain *http.Server rooted
-// there — bypassing the UsesBrowserModule gate entirely, since a static-page
+// there. A static-page
 // project's main.caja is never expected to import browser.
-func buildStaticPageServer(filePath string, port int) (server *http.Server, url string, err error) {
+func init() {
+	// Go's mime table has no entry for .webmanifest, so a manifest would go
+	// out as text/plain. Browsers mostly tolerate that, but Chrome logs a
+	// warning and Lighthouse counts it against installability — and the
+	// whole point of this project type is to produce something installable.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+}
+
+func buildWebAppServer(filePath string, port int) (server *http.Server, url string, err error) {
 	goCode, err := transpileCajaFile(filePath)
 	if err != nil {
 		return nil, "", err
@@ -77,11 +42,11 @@ func buildStaticPageServer(filePath string, port int) (server *http.Server, url 
 	}
 
 	projectDir := filepath.Dir(filePath)
-	if err := generateStaticPage(outBin, projectDir); err != nil {
+	if err := generateWebApp(outBin, projectDir); err != nil {
 		return nil, "", err
 	}
 
-	distDir := filepath.Join(projectDir, project.StaticPageOutputDir)
+	distDir := filepath.Join(projectDir, project.OutputDir)
 	server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: http.FileServer(http.Dir(distDir)),
@@ -90,16 +55,17 @@ func buildStaticPageServer(filePath string, port int) (server *http.Server, url 
 	return server, url, nil
 }
 
-// NewServeCmd creates and returns the 'serve' command: builds a .caja
-// browser script and serves the resulting page over HTTP on the given port,
-// replacing the manual "serve this directory yourself" step `caja build`
-// otherwise leaves the user with — opening the compiled page directly via
-// file:// doesn't work, since Chrome blocks the wasm binary's fetch() under
-// that scheme's CORS rules.
+// NewServeCmd creates and returns the 'serve' command: builds a project and
+// serves its generated output over HTTP on the given port, replacing the
+// manual "serve this directory yourself" step `caja build` otherwise leaves
+// the user with. Serving over HTTP rather than opening the files via file://
+// is not a convenience: a service worker will not register under file://,
+// and neither will a web app manifest resolve, so a PWA is simply not
+// testable that way.
 func NewServeCmd() (*cobra.Command, error) {
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Build a caja browser script and serve it over HTTP",
+		Short: "Build a caja project and serve its output over HTTP",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath, err := cmd.Flags().GetString("file")
 			if err != nil {
@@ -123,12 +89,13 @@ func NewServeCmd() (*cobra.Command, error) {
 			var server *http.Server
 			var url string
 			switch {
-			case manifest != nil && manifest.Type == project.TypeStaticPage:
-				server, url, err = buildStaticPageServer(filePath, port)
 			case manifest != nil && manifest.Type == project.TypeHTTPAPI:
 				err = fmt.Errorf("%q is an http-api project — 'caja serve' doesn't apply to it; use 'caja listen' instead", filePath)
 			default:
-				server, url, err = buildBrowserPageServer(filePath, port)
+				// Every other project builds a directory of static files, so
+				// there is one serving path. A standalone script with no
+				// manifest lands here too and is handled by the same builder.
+				server, url, err = buildWebAppServer(filePath, port)
 			}
 			if err != nil {
 				return err
@@ -139,7 +106,7 @@ func NewServeCmd() (*cobra.Command, error) {
 		},
 	}
 
-	cmd.Flags().StringP("file", "f", "", "File path of the browser script to build and serve")
+	cmd.Flags().StringP("file", "f", "", "File path of the script to build and serve")
 	cmd.Flags().IntP("port", "p", 8080, "Port to serve the built page on")
 
 	return cmd, nil

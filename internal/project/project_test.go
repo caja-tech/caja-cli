@@ -23,7 +23,7 @@ func TestLoad_MissingFile(t *testing.T) {
 
 func TestLoad_ValidManifest(t *testing.T) {
 	dir := t.TempDir()
-	want := &Manifest{Name: "demo", Type: TypeStaticPage, CajaVersion: "0.1.0"}
+	want := &Manifest{Name: "demo", Type: TypeWebApp, CajaVersion: "0.1.0"}
 	if err := Save(dir, want); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -79,7 +79,7 @@ func TestManifest_EntryOrDefault(t *testing.T) {
 }
 
 func TestType_Valid(t *testing.T) {
-	valid := []Type{TypeStaticPage, TypeHTTPAPI, TypeWebApp}
+	valid := []Type{TypeWebApp, TypeHTTPAPI, TypeWebApp}
 	for _, ty := range valid {
 		if !ty.Valid() {
 			t.Errorf("Type(%q).Valid() = false, want true", ty)

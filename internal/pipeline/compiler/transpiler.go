@@ -843,14 +843,10 @@ func (ctx *transpileContext) mapSymbolToGoType(sym symbol.Symbol) string {
 		return "time.Time"
 	case environment.DURATION_OBJ:
 		return "time.Duration"
-	case environment.ELEMENT_OBJ:
-		ctx.usedModules["syscall/js"] = true
-		return "js.Value"
 	case environment.SCRIPT_OBJ:
 		// A Script is opaque to Caja but erases to a plain string here: it
 		// only ever holds JavaScript source the analyzer already parsed.
-		// Note it registers no usedModules entry, unlike ELEMENT_OBJ above —
-		// a Script must never drag a program onto the wasm build path.
+		// It registers no usedModules entry: a Script is just text.
 		return "string"
 	default:
 		return ""
@@ -1039,9 +1035,6 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 	if ctx.usedModules["fnv"] {
 		finalBuf.WriteString("import \"hash/fnv\"\n")
 	}
-	if ctx.usedModules["syscall/js"] {
-		finalBuf.WriteString("import \"syscall/js\"\n")
-	}
 	if ctx.usedModules["doc_write"] {
 		finalBuf.WriteString("import \"path/filepath\"\n")
 	}
@@ -1053,7 +1046,7 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 			break
 		}
 	}
-	if needsTime || strings.Contains(bodyCode, "time.") || ctx.usedModules["time"] || ctx.usedModules["http"] || ctx.usedModules["syscall/js"] {
+	if needsTime || strings.Contains(bodyCode, "time.") || ctx.usedModules["time"] || ctx.usedModules["http"] {
 		finalBuf.WriteString("import \"time\"\n")
 	}
 
@@ -1076,43 +1069,6 @@ func Transpile(program *ast.Program, a *analyzer.Analyzer, opts TranspileOptions
 		// goroutine would be), but catches the common case where it finishes
 		// before the rest of the script does.
 		finalBuf.WriteString("\tcaja_check_async_panic()\n")
-	}
-	if ctx.usedModules["syscall/js"] {
-		// Every browser-module program blocks forever here, not just ones
-		// that happen to call browser.on today — see below for why —
-		// but NOT via a bare `select {}`. Confirmed by hitting this for
-		// real: `select {}` alone is fine (main is the only ever-blocked
-		// goroutine, and Go's deadlock detector doesn't flag a lone
-		// goroutine parked in an empty select), but the moment ANY other
-		// goroutine also blocks on an ordinary channel — e.g.
-		// browser.fetch's caja_browser_fetch, which bridges a JS Promise
-		// onto a channel receive, called from inside a browser.on
-		// handler — Go's checkdead() sees two blocked goroutines with no
-		// Go-visible way to wake either one (a pending JS Promise callback
-		// isn't tracked by the scheduler at all) and kills the whole wasm
-		// instance with "fatal error: all goroutines are asleep - deadlock!",
-		// tearing down every registered listener with it. A time.Sleep loop
-		// avoids this because it registers a real, scheduler-tracked timer
-		// (backed by JS's own setTimeout under GOOS=js) — checkdead()
-		// explicitly treats a pending timer as proof the program isn't
-		// stuck, regardless of how many other goroutines are separately
-		// blocked waiting on a JS callback. The sleep interval only needs to
-		// be short enough to be a negligible wakeup cost; it doesn't gate
-		// anything.
-		//
-		// Every browser-module program stays alive for the page's whole
-		// lifetime rather than exiting after its first pass, mirroring how a
-		// real page's own script never "returns" either — its JS environment
-		// just sits there waiting for whatever happens next. Gating this on
-		// "used browser at all" instead of "used on/fetch specifically"
-		// also matters on its own: tying it to one builtin is fragile, since
-		// every future event/async-registering builtin would have to
-		// remember to opt back in, and a forgotten one fails silently (it
-		// registers fine, then never fires once main exits). Blocking here
-		// does not freeze the browser tab: Go's wasm scheduler cooperatively
-		// yields back to the browser's own event loop between ticks rather
-		// than spinning natively.
-		finalBuf.WriteString("\tfor {\n\t\ttime.Sleep(time.Second)\n\t}\n")
 	}
 	finalBuf.WriteString("}\n")
 

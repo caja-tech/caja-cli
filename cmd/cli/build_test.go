@@ -77,87 +77,17 @@ func TestResolveOutputBin_WindowsGetsExeSuffix(t *testing.T) {
 	}
 }
 
-// TestResolveOutputBin_JsGetsWasmSuffix confirms a js target (used for the
-// browser module, which only builds under GOOS=js/GOARCH=wasm) always ends
-// in .wasm, mirroring the windows/.exe case above.
-func TestResolveOutputBin_JsGetsWasmSuffix(t *testing.T) {
-	outBin, _, _, _, err := resolveOutputBin("/scripts/myprog.caja", "js", "wasm", "darwin", "arm64")
-	if err != nil {
-		t.Fatalf("resolveOutputBin failed: %v", err)
-	}
-	if !strings.HasSuffix(outBin, ".wasm") {
-		t.Errorf("expected a js target to end in .wasm, got %s", outBin)
-	}
-}
-
-// TestBuildCmd_BrowserModuleDefaultsToWasm is an end-to-end check of the
-// `caja build` auto-defaulting logic: a script that imports the browser
-// module, built with neither --os nor --arch given, must still succeed by
-// silently targeting GOOS=js/GOARCH=wasm (the only target the module's
-// generated syscall/js calls can build under) instead of failing with a
-// raw "build constraints exclude all Go files" error on the host platform,
-// and the resulting binary must be named with the .wasm suffix and contain
-// real WebAssembly output.
-func TestBuildCmd_BrowserModuleDefaultsToWasm(t *testing.T) {
-	dir := t.TempDir()
-	filePath := filepath.Join(dir, "browser.caja")
-	source := "import browser\nbrowser.log(\"hello\")\n"
-	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
-		t.Fatalf("failed to write test script: %v", err)
-	}
-
-	cmd, _ := NewBuildCmd()
-	bufOut := new(bytes.Buffer)
-	cmd.SetOut(bufOut)
-	cmd.SetArgs([]string{"--file", filePath})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("expected browser-module build to succeed by auto-defaulting to js/wasm, got error: %v\noutput:\n%s", err, bufOut.String())
-	}
-
-	// crossCompiling becomes true once targetOS/targetArch are auto-filled
-	// to "js"/"wasm", so resolveOutputBin also appends the "-js-wasm" name
-	// suffix on top of the .wasm extension (see resolveOutputBin).
-	wantBin := filepath.Join(dir, "browser-js-wasm.wasm")
-	data, err := os.ReadFile(wantBin)
-	if err != nil {
-		t.Fatalf("expected wasm binary at %s, got error reading it: %v (build output:\n%s)", wantBin, err, bufOut.String())
-	}
-	t.Cleanup(func() { os.Remove(wantBin) })
-
-	wantMagic := []byte{0x00, 'a', 's', 'm'} // WebAssembly binary magic number
-	if len(data) < 4 || !bytes.Equal(data[:4], wantMagic) {
-		got := data
-		if len(got) > 4 {
-			got = got[:4]
-		}
-		t.Errorf("expected %s to start with wasm magic bytes %x, got %x", wantBin, wantMagic, got)
-	}
-
-	// The auto-defaulted js/wasm build must also emit the browser test
-	// harness (wasm_exec.js + HTML loader) a wasm binary needs to actually
-	// run anywhere, since there's no other reason to produce a GOOS=js
-	// binary from this CLI today (see compiler.WriteBrowserHarness).
-	if _, err := os.Stat(filepath.Join(dir, "wasm_exec.js")); err != nil {
-		t.Errorf("expected wasm_exec.js to be written alongside the binary: %v", err)
-	}
-	wantHTML := filepath.Join(dir, "browser-js-wasm.html")
-	if _, err := os.Stat(wantHTML); err != nil {
-		t.Errorf("expected harness html at %s: %v", wantHTML, err)
-	}
-}
-
-// TestBuildCmd_StaticPageAutoDiscovery checks the no-"--file" project-aware
-// path: with a cajaproj.yml declaring type: static-page sitting in the cwd,
+// TestBuildCmd_WebAppAutoDiscovery checks the no-"--file" project-aware
+// path: with a cajaproj.yml declaring type: web-app sitting in the cwd,
 // `caja build` should find main.caja on its own, compile it natively, run
 // the resulting binary once, and leave the generated dist/ output behind.
-func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
+func TestBuildCmd_WebAppAutoDiscovery(t *testing.T) {
 	dir := t.TempDir()
-	source := "import doc\ndoc.write(\"dist/index.html\", \"hello from static-page\")\n"
+	source := "import doc\ndoc.write(\"dist/index.html\", \"hello from web-app\")\n"
 	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
 		t.Fatalf("failed to write main.caja: %v", err)
 	}
-	manifest := &project.Manifest{Name: "demo", Type: project.TypeStaticPage, CajaVersion: "dev"}
+	manifest := &project.Manifest{Name: "demo", Type: project.TypeWebApp, CajaVersion: "dev"}
 	if err := project.Save(dir, manifest); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
@@ -182,8 +112,8 @@ func TestBuildCmd_StaticPageAutoDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected dist/index.html to be written: %v", err)
 	}
-	if string(got) != "hello from static-page" {
-		t.Errorf("dist/index.html = %q, want %q", got, "hello from static-page")
+	if string(got) != "hello from web-app" {
+		t.Errorf("dist/index.html = %q, want %q", got, "hello from web-app")
 	}
 
 	assertStaticPageAssets(t, dir)
@@ -202,8 +132,8 @@ func writeProjectFile(t *testing.T, dir, rel, content string) {
 }
 
 // assertStaticPageAssets checks the assets/ → dist/assets/ mirror that
-// generateStaticPage performs, for a project prepared with writeProjectFile
-// the way TestBuildCmd_StaticPageAutoDiscovery does. Shared with the serve
+// generateWebApp performs, for a project prepared with writeProjectFile
+// the way TestBuildCmd_WebAppAutoDiscovery does. Shared with the serve
 // test so both commands are held to the same contract.
 func assertStaticPageAssets(t *testing.T, dir string) {
 	t.Helper()
@@ -225,113 +155,9 @@ func assertStaticPageAssets(t *testing.T, dir string) {
 	}
 }
 
-// TestBuildCmd_StaticPageIgnoresBrowserModuleHeuristic confirms that once a
-// project declares its type via cajaproj.yml, that declared type ALONE
-// decides the build target — not compiler.UsesBrowserModule sniffing the
-// transpiled Go source for a "syscall/js" import. Before this test's fix,
-// a static-page project whose code merely referenced browser.* anywhere
-// (even inside an imported library function nothing actually called) got
-// compiled to wasm and then crashed with "exec format error" when the
-// static-page build path tried to run that wasm binary as a native
-// generator, since manifest.Type == TypeStaticPage was only ORed against
-// UsesBrowserModule rather than short-circuiting it.
-//
-// This script directly calls browser.log — the simplest thing that makes
-// UsesBrowserModule true — deliberately chosen so the assertion isn't "this
-// script builds successfully" (syscall/js genuinely cannot compile for a
-// native GOOS at the Go-toolchain level, regardless of project type) but
-// that the failure is an honest Go compile error naming syscall/js (proving
-// a NATIVE build was correctly attempted, as static-page requires), never
-// the "exec format error" crash a wasm-then-run-natively mismatch produces,
-// and never a silently-produced wasm binary in the first place.
-func TestBuildCmd_StaticPageIgnoresBrowserModuleHeuristic(t *testing.T) {
-	dir := t.TempDir()
-	source := "import browser\nbrowser.log(\"hello\")\n"
-	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
-		t.Fatalf("failed to write main.caja: %v", err)
-	}
-	manifest := &project.Manifest{Name: "demo", Type: project.TypeStaticPage, CajaVersion: "dev"}
-	if err := project.Save(dir, manifest); err != nil {
-		t.Fatalf("failed to write manifest: %v", err)
-	}
-	chdir(t, dir)
-
-	cmd, _ := NewBuildCmd()
-	bufOut := new(bytes.Buffer)
-	cmd.SetOut(bufOut)
-	cmd.SetArgs([]string{})
-
-	// compiler.Compile wires the `go build` subprocess's own stderr directly
-	// to os.Stderr (visible in test output above, mentioning "syscall/js:
-	// build constraints exclude all Go files") rather than folding it into
-	// the returned error, so this can only assert on what the returned
-	// error/binary presence actually reveal: that the failure is a plain
-	// `go build failed: exit status 1` from an honestly-attempted NATIVE
-	// build, not the "exec format error" crash a wasm-then-run-natively
-	// mismatch produces, and that no wasm binary was produced in the first
-	// place.
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("expected build to fail (syscall/js cannot compile for a native GOOS), but it succeeded")
-	}
-	if strings.Contains(err.Error(), "exec format error") {
-		t.Fatalf("build failed with 'exec format error' — this means a wasm binary was produced and then run as native, i.e. the declared static-page project type was NOT respected: %v", err)
-	}
-
-	if _, statErr := os.Stat(filepath.Join(dir, "main-js-wasm.wasm")); statErr == nil {
-		t.Errorf("expected no wasm binary to be produced for a static-page project")
-	}
-}
-
-// TestBuildCmd_WebAppAutoDiscoveryWritesIndexHTML checks that a manifest-
-// declared web-app project's build also writes index.html alongside the
-// usual <name>.html harness, so the output directory is servable at a bare
-// domain root by any static host with zero extra configuration.
-func TestBuildCmd_WebAppAutoDiscoveryWritesIndexHTML(t *testing.T) {
-	dir := t.TempDir()
-	source := "import browser\nbrowser.log(\"hello\")\n"
-	if err := os.WriteFile(filepath.Join(dir, "main.caja"), []byte(source), 0644); err != nil {
-		t.Fatalf("failed to write main.caja: %v", err)
-	}
-	manifest := &project.Manifest{Name: "demo", Type: project.TypeWebApp, CajaVersion: "dev"}
-	if err := project.Save(dir, manifest); err != nil {
-		t.Fatalf("failed to write manifest: %v", err)
-	}
-	chdir(t, dir)
-
-	cmd, _ := NewBuildCmd()
-	bufOut := new(bytes.Buffer)
-	cmd.SetOut(bufOut)
-	cmd.SetArgs([]string{})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("expected build to succeed via manifest auto-discovery, got: %v\noutput:\n%s", err, bufOut.String())
-	}
-
-	// crossCompiling becomes true once targetOS/targetArch are auto-filled
-	// to "js"/"wasm" for the declared web-app type (see resolveOutputBin),
-	// so the harness is named main-js-wasm.html, not main.html.
-	wantHTML := filepath.Join(dir, "main-js-wasm.html")
-	if _, err := os.Stat(wantHTML); err != nil {
-		t.Errorf("expected harness html at %s: %v", wantHTML, err)
-	}
-	wantIndex := filepath.Join(dir, "index.html")
-	indexData, err := os.ReadFile(wantIndex)
-	if err != nil {
-		t.Fatalf("expected index.html to be written alongside the harness: %v", err)
-	}
-	harnessData, err := os.ReadFile(wantHTML)
-	if err != nil {
-		t.Fatalf("failed to read harness html: %v", err)
-	}
-	if string(indexData) != string(harnessData) {
-		t.Errorf("expected index.html to mirror the harness html content")
-	}
-}
-
 // TestBuildCmd_HTTPAPIBuildsRunnableBinary is the end-to-end check for a
 // manifest-declared http-api project: build.go deliberately has no
-// http-api-specific branch (unlike static-page and web-app), relying on the
+// http-api-specific branch (unlike web-app and web-app), relying on the
 // http builtin module compiling like any other native program — so this
 // confirms that's actually true by starting the built binary directly (not
 // via `go run`, unlike the compiler package's own http-module tests) and
